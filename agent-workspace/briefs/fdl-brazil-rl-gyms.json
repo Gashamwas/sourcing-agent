@@ -1,0 +1,124 @@
+{
+  "name": "fdl-brazil-rl-gyms",
+  "description": "Frontier Data Lead sourcing in Brazil \u2014 RL Gyms kit. Targeting engineers who build post-training, RL, eval, and coding agent infrastructure for frontier AI labs.",
+  "kit_url": "https://search-kit-library.vercel.app/kit/cca3657b-b65b-4ed0-9e52-d60aa95a7b7c",
+  "project_name": "FDL Brazil",
+  "permanent_filters": {
+    "Location": "Brazil"
+  },
+  "filter_notes": "Field of Study = Computer Science is optional \u2014 add only if a string produces excessive noise from non-technical profiles. No seniority filters. No other filters ever.",
+  "archetypes": [
+    {
+      "name": "Lab Post-Training Engineer",
+      "description": "Engineers at frontier labs or AI companies working on RLHF, DPO, PPO, constitutional AI, or other post-training alignment methods. They build the systems that improve model behavior after pre-training.",
+      "strong_signals": [
+        "Built or maintained RLHF pipelines",
+        "Published research on alignment or post-training methods",
+        "Worked on post-training at a frontier lab (OpenAI, Anthropic, DeepMind, Meta AI)",
+        "Experience with reward model training"
+      ],
+      "moderate_signals": [
+        "Fine-tuning LLMs at scale",
+        "ML infrastructure at an AI-focused company",
+        "Experience with preference optimization or human feedback systems",
+        "Work on model safety or alignment tooling"
+      ]
+    },
+    {
+      "name": "Agent Builder",
+      "description": "Engineers building autonomous coding agents, tool-use systems, or agentic frameworks. They create systems where LLMs take actions, not just generate text.",
+      "strong_signals": [
+        "Mentions SWE-Bench or coding agent benchmarks",
+        "Built autonomous coding agents or copilot systems",
+        "Designed tool-use or function-calling infrastructure",
+        "Worked on agent scaffolding at an AI lab"
+      ],
+      "moderate_signals": [
+        "LLM application development with agent patterns",
+        "Prompt engineering infrastructure (not just prompt writing)",
+        "Experience with agent orchestration frameworks (LangChain, AutoGPT, CrewAI at an infrastructure level)",
+        "Built systems where LLMs interact with external tools or APIs"
+      ]
+    },
+    {
+      "name": "RL Infrastructure Engineer",
+      "description": "Engineers building the training infrastructure and environments for reinforcement learning. They create the gyms, simulators, and distributed training systems that RL research depends on.",
+      "strong_signals": [
+        "Built or maintained RL training infrastructure",
+        "Developed custom gym environments or simulators",
+        "Distributed RL training systems",
+        "Experience with PPO/GRPO/REINFORCE at an infrastructure level"
+      ],
+      "moderate_signals": [
+        "Distributed ML training infrastructure (not RL-specific but transferable)",
+        "Simulation or environment development for any ML application",
+        "MLOps for reinforcement learning workloads",
+        "GPU cluster management for training runs"
+      ]
+    },
+    {
+      "name": "Eval & Benchmark Specialist",
+      "description": "Engineers building evaluation infrastructure, benchmarks, and quality measurement systems for LLMs or coding systems. They define and measure what 'good' looks like.",
+      "strong_signals": [
+        "Built LLM evaluation frameworks or harnesses",
+        "Developed benchmarks (coding, reasoning, safety, etc.)",
+        "Evaluation infrastructure at a frontier lab or AI company",
+        "Experience with red-teaming or adversarial evaluation"
+      ],
+      "moderate_signals": [
+        "Testing infrastructure for ML systems",
+        "Metrics and measurement systems for AI quality",
+        "Data quality pipelines that feed into model evaluation",
+        "CI/CD for model performance monitoring"
+      ]
+    }
+  ],
+  "noise_population": {
+    "name": "Data Annotators / RLHF Labelers",
+    "description": "People who perform RLHF labeling, data annotation, or quality review work but do NOT build the systems. The target role is for engineers who BUILD the infrastructure that annotators use. This is the single most common source of false positives in Brazil searches for frontier AI roles.",
+    "signals": [
+      "Titles: AI Trainer, Quality Reviewer, Data Analyst, Content Evaluator, Prompt Writer, AI Rater",
+      "Employment at pure annotation shops: Scale AI (labeling division), Outlier AI, Invisible Technologies, Appen, Remotasks, Surge AI, Labelbox (labeling side)",
+      "Work described as rating, labeling, reviewing, or evaluating model outputs without engineering context",
+      "No evidence of building systems, writing production code, or designing infrastructure"
+    ]
+  },
+  "known_noise_patterns": [
+    {
+      "term": "CAI",
+      "collision": "Centro de Aprendizagem Industrial \u2014 Brazilian vocational/industrial training centers",
+      "action": "Remove from string when it dominates results"
+    },
+    {
+      "term": "post training",
+      "collision": "Corporate L&D and training professionals when written as two unhyphenated words",
+      "action": "Only use hyphenated 'post-training' in strings. If the kit string has it unhyphenated, add quotes or hyphenate before pasting."
+    },
+    {
+      "term": "DPO",
+      "collision": "Data Protection Officer under Brazil's LGPD (Lei Geral de Prote\u00e7\u00e3o de Dados)",
+      "action": "CS filter mitigates but doesn't eliminate. Review DPO-matching profiles carefully for context."
+    },
+    {
+      "term": "IPO",
+      "collision": "Initial Public Offering \u2014 matches finance professionals",
+      "action": "Skip string entirely when IPO is the primary matching term"
+    },
+    {
+      "term": "ORM",
+      "collision": "Object-Relational Mapping \u2014 common web development term in Brazil's large web dev community",
+      "action": "Check context. If results are dominated by web devs, remove ORM from string."
+    }
+  ],
+  "save_instructions": {
+    "method": "Click 'Save to pipeline' button directly on the candidate's profile card or profile page",
+    "destination": "FDL Brazil > uncontacted",
+    "notes": "Do NOT use the dropdown arrow next to 'Save to pipeline' or try to select a stage. Just click the main button.",
+    "greenhouse_rule": "Save every qualifying candidate to this project regardless of Greenhouse status, prior projects, messages, or engagement history. Different projects serve different roles."
+  },
+  "hard_skips": [
+    "Annotation/labeling companies: Outlier, Appen, Scale AI labeling division, Telus International AI Data. Title patterns: AI Trainer, Quality Reviewer, Data Annotator.",
+    "RPA engineers and cloud architects whose AI is marketing language.",
+    "Current Turing employees \u2014 do not save, but note them in your report."
+  ]
+}

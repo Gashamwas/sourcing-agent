@@ -1,0 +1,26 @@
+{
+  "brief": "fdl-brazil-rl-gyms",
+  "project_name": "[REDACTED]",
+  "permanent_filters": {"Location": "Brazil", "Fields of study": "Computer Science"},
+  "status": "ALL 4 DOMAINS COMPLETE",
+  "pipeline_total": 22,
+  "pipeline": [
+    {"name": "[REDACTED]", "source": "post-training (Concepts)", "headline": "Head of AI/ML Research at [Company], PhD [University]"},
+    {"name": "[REDACTED]", "source": "post-training (Concepts)", "headline": "ML Engineer (Applied AI Research) at [Company], M.Sc. [University]"},
+    {"name": "[REDACTED]", "source": "reward model (Methods)", "headline": "AI Research Scientist @ [Lab]"},
+    {"name": "[REDACTED]", "source": "SFT (Methods)", "headline": "AI Engineer, LLM Orchestration, Agentic AI, CV/NLP, MLOps, PyTorch"},
+    {"name": "[REDACTED]", "source": "Axolotl (Tools)", "headline": "Senior AI Engineer @ [Company], AI Agents, LLMOps"},
+    {"name": "[REDACTED]", "source": "TRL (Tools)", "headline": "ML Engineer Sr, Applied AI & LLMs, MLOps & LLMOps, PhD Candidate CS"},
+    {"name": "[REDACTED]", "source": "RL Env (mega-string)", "headline": "Senior ML Engineer, MSc AI, Computer Vision, Deep Learning, R&D"},
+    {"name": "[REDACTED]", "source": "RL Env (mega-string)", "headline": "MSc CS, Researcher in Deep Reinforcement Learning"},
+    {"name": "[REDACTED]", "source": "Data Quality (mega-string)", "headline": "PhD, AI Specialist, AI Agent Dev, Computational Linguist"},
+    {"name": "[REDACTED]", "source": "Agent Dev (mega-string)", "headline": "Intelligent Agents & Applied AI"}
+  ],
+  "_note": "10 of 22 pipeline candidates shown. Names and identifying details redacted. Full logs contain per-candidate decisions with archetype match, signal list, confidence level, and reasoning.",
+  "domains_completed": {
+    "Post-Training & RLHF": {"strings_run": 15, "saved": 15, "notes": "Best performing domain. Axolotl had 100% hit rate."},
+    "RL Environment Design": {"strings_run": 2, "saved": 2, "notes": "Mega-string approach. Explicit RL researcher standout."},
+    "Agent Development": {"strings_run": 2, "saved": 3, "notes": "Narrow agent eval string worked well. Exact archetype fit found."},
+    "Data Quality & Annotation": {"strings_run": 1, "saved": 2, "notes": "Label Studio/Argilla mega-string. PhD + computational linguist is strong."}
+  }
+}

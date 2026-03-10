@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Building an Autonomous Sourcing Agent</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;0,8..60,700;1,8..60,400&family=JetBrains+Mono:wght@400;500&family=DM+Sans:opsz,wght@9..40,500;9..40,600;9..40,700&display=swap');
+
+:root {
+  --accent: #2b6b5e;
+  --accent-light: #e8f2ef;
+  --accent-border: #3d8b7a;
+  --body-font: 'Source Serif 4', 'Georgia', serif;
+  --heading-font: 'DM Sans', 'Helvetica Neue', sans-serif;
+  --mono-font: 'JetBrains Mono', 'Consolas', monospace;
+  --text: #1a1a1a;
+  --text-secondary: #555;
+  --border: #d4d4d4;
+  --bg-subtle: #f7f8fa;
+  --bg-quote: #f4f7f6;
+}
+
+@page {
+  size: Letter;
+  margin: 0.85in 1in 0.9in 1in;
+}
+
+@page :first {
+  margin-top: 2.4in;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: var(--body-font);
+  font-size: 10.5pt;
+  line-height: 1.58;
+  color: var(--text);
+  max-width: 100%;
+}
+
+/* — TITLE PAGE — */
+.title-block {
+  margin-bottom: 2em;
+  page-break-after: always;
+}
+.title-block h1 {
+  font-family: var(--heading-font);
+  font-size: 28pt;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  line-height: 1.15;
+  margin-bottom: 0.35em;
+}
+.title-block .subtitle {
+  font-family: var(--heading-font);
+  font-size: 11pt;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+}
+.title-block .meta {
+  margin-top: 1.8em;
+  font-family: var(--heading-font);
+  font-size: 9.5pt;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+/* — HEADINGS — */
+h2 {
+  font-family: var(--heading-font);
+  font-size: 17pt;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
+  margin-top: 0;
+  margin-bottom: 0.6em;
+  padding-bottom: 0.25em;
+  border-bottom: 2px solid var(--accent);
+  page-break-before: always;
+}
+h2:first-of-type { page-break-before: avoid; }
+
+h3 {
+  font-family: var(--heading-font);
+  font-size: 11.5pt;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-top: 1.6em;
+  margin-bottom: 0.5em;
+  page-break-after: avoid;
+}
+
+/* — PROSE — */
+p {
+  margin-bottom: 0.75em;
+  widows: 3;
+  orphans: 3;
+}
+
+strong { font-weight: 600; }
+em { font-style: italic; }
+
+/* — AGENT QUOTES — */
+blockquote {
+  background: var(--bg-quote);
+  border-left: 3px solid var(--accent-border);
+  margin: 1em 0 1.1em 0;
+  padding: 0.85em 1.1em 0.85em 1.1em;
+  border-radius: 0 4px 4px 0;
+  page-break-inside: avoid;
+  position: relative;
+}
+blockquote::before {
+  content: "AGENT";
+  position: absolute;
+  top: -0.55em;
+  left: 1.1em;
+  font-family: var(--heading-font);
+  font-size: 7pt;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  color: var(--accent);
+  background: var(--bg-quote);
+  padding: 0 0.4em;
+}
+blockquote p {
+  font-family: var(--mono-font);
+  font-size: 9pt;
+  line-height: 1.55;
+  color: #2a2a2a;
+  margin-bottom: 0.5em;
+}
+blockquote p:last-child { margin-bottom: 0; }
+
+/* Short inline quotes stay in serif */
+blockquote.inline-quote {
+  background: transparent;
+  border-left: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 0.4em 0 0.6em 1.5em;
+}
+blockquote.inline-quote::before { display: none; }
+blockquote.inline-quote p {
+  font-family: var(--body-font);
+  font-size: 10.5pt;
+  font-style: italic;
+  color: var(--text);
+}
+
+/* — TABLES — */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 9pt;
+  font-family: var(--heading-font);
+  margin: 1em 0 1.2em 0;
+  page-break-inside: avoid;
+}
+thead th {
+  background: var(--bg-subtle);
+  text-align: left;
+  padding: 0.55em 0.7em;
+  border-bottom: 2px solid #333;
+  font-weight: 600;
+  font-size: 8.5pt;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-secondary);
+}
+thead th.num { text-align: right; }
+tbody td {
+  padding: 0.45em 0.7em;
+  border-bottom: 1px solid #e8e8e8;
+  vertical-align: top;
+}
+tbody td.num { text-align: right; font-variant-numeric: tabular-nums; }
+tbody tr:last-child td { border-bottom: none; }
+tbody tr.total td {
+  border-top: 2px solid #333;
+  border-bottom: none;
+  font-weight: 700;
+}
+.table-note {
+  font-size: 8.5pt;
+  color: var(--text-secondary);
+  margin-top: -0.6em;
+  margin-bottom: 1em;
+  line-height: 1.45;
+}
+
+/* — CONSTRAINT / ASK BLOCKS (Section 5) — */
+.constraint-block {
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1em 1.15em;
+  margin-bottom: 1.2em;
+  page-break-inside: avoid;
+}
+.constraint-block h4 {
+  font-family: var(--heading-font);
+  font-size: 10.5pt;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.45em;
+}
+.constraint-block .ask {
+  margin-top: 0.7em;
+  padding-top: 0.65em;
+  border-top: 1px solid var(--border);
+}
+.constraint-block .ask p {
+  font-family: var(--heading-font);
+  font-weight: 600;
+  font-size: 10pt;
+  color: var(--accent);
+  margin-bottom: 0;
+}
+
+/* — SECTION DIVIDERS — */
+hr {
+  border: none;
+  border-top: 1px solid #ddd;
+  margin: 1.8em 0;
+}
+
+/* — FOLLOW-ON STRINGS (code blocks) — */
+.boolean-strings {
+  background: #f0f0f3;
+  border-radius: 4px;
+  padding: 0.75em 1em;
+  margin: 0.8em 0 1em 0;
+  page-break-inside: avoid;
+}
+.boolean-strings p {
+  font-family: var(--mono-font);
+  font-size: 8pt;
+  line-height: 1.5;
+  color: #333;
+  margin-bottom: 0.35em;
+}
+.boolean-strings p:last-child { margin-bottom: 0; }
+.boolean-strings .string-num {
+  font-weight: 500;
+  color: var(--accent);
+}
+
+/* — VISION SECTION — */
+.vision-intro {
+  font-family: var(--heading-font);
+  font-size: 11pt;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.7em;
+}
+
+/* — TABLE OF CONTENTS — */
+.toc {
+  page-break-after: always;
+}
+.toc-title {
+  font-family: var(--heading-font);
+  font-size: 11.5pt;
+  font-weight: 600;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 1.2em;
+}
+.toc-entry {
+  font-family: var(--heading-font);
+  font-size: 10.5pt;
+  font-weight: 500;
+  color: var(--text);
+  line-height: 2.4;
+  border-bottom: 1px solid #e8e8e8;
+}
+.toc-entry:last-child { border-bottom: none; }
+.toc-entry a {
+  color: var(--text);
+  text-decoration: none;
+}
+.toc-entry a:hover {
+  color: var(--accent);
+}
+.toc-num {
+  display: inline-block;
+  width: 1.8em;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* — PRINT UTILITIES — */
+.page-break { page-break-before: always; }
+.no-break { page-break-inside: avoid; }
+</style>
+</head>
+<body>
+
+<!-- TITLE PAGE -->
+<div class="title-block">
+  <h1>Building an Autonomous<br>Sourcing Agent</h1>
+  <div class="subtitle">What It Proved, What Broke, and What It Needs</div>
+  <div class="meta">
+    Sam Vangelos — Senior Recruiter, Applied AI & GTM<br>
+    Turing<br>
+    March 2026
+  </div>
+</div>
+
+<!-- TABLE OF CONTENTS -->
+<div class="toc">
+  <div class="toc-title">Contents</div>
+  <div class="toc-entry"><span class="toc-num">1</span><a href="#s1">What This Is and What It Produced</a></div>
+  <div class="toc-entry"><span class="toc-num">2</span><a href="#s2">How It Evaluates</a></div>
+  <div class="toc-entry"><span class="toc-num">3</span><a href="#s3">How It Gets Smarter</a></div>
+  <div class="toc-entry"><span class="toc-num">4</span><a href="#s4">The Disaster, the Recovery, and the Data</a></div>
+  <div class="toc-entry"><span class="toc-num">5</span><a href="#s5">What's Holding It Back and What I Need</a></div>
+  <div class="toc-entry"><span class="toc-num">6</span><a href="#s6">What These Enable</a></div>
+</div>
+
+<!-- SECTION 1 -->
+<h2 id="s1">What This Is and What It Produced</h2>
+
+<p>Over the past two weeks, I built a working prototype of an autonomous sourcing agent — a system that opens LinkedIn Recruiter, runs Boolean searches, reads candidate profiles, evaluates each person against a scoring document I write for the role, saves qualifying candidates, and reports its reasoning in real time via WhatsApp. It runs on Claude Opus through Anthropic's API, controlled by an open-source agent framework called OpenClaw on my laptop.</p>
+
+<p>The project took place over nine days, two countries, and two roles. The Brazil campaign targeted Junior Frontier Data Leads — the IC4 post-training, RL environment, and coding agent infrastructure profiles we're placing at frontier labs. After the last Brazil sourcing session ended, I pointed the agent at a completely different search: the NYC-based Head of AI Lab, BFSI reporting into Rahul. This pivot involved differences in seniority, industry, geography, and evaluation framework — but utilized the same underlying mechanics.</p>
+
+<p>The system produced 69 agent-sourced pipeline candidates from approximately 23 productive hours of sourcing. The table below shows the four sessions whose pipeline candidates are tracked in this analysis. Sessions 2 and 3 (a same-day Brazil re-run and the first Colombia attempt) produced candidates that overlapped with Session 1 or were consumed by infrastructure instability; Session 6 was a diagnostic session devoted to producing corrective documents, not candidates; Session 7B (the NYC bank search) demonstrated same-day role flexibility but targeted a different pipeline.</p>
+
+<table>
+  <thead>
+    <tr><th>Session</th><th>Date</th><th>Geography / Role</th><th class="num">Agent Saves</th><th class="num">Pipeline Candidates</th><th class="num">Save Accuracy</th><th class="num">Pipeline Cand./Hr</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>S1</td><td>Feb 24</td><td>Brazil / Jr. FDL</td><td class="num">55</td><td class="num">10</td><td class="num">18.2%</td><td class="num">1.2</td></tr>
+    <tr><td>S4</td><td>Mar 2–3</td><td>Brazil / Jr. FDL</td><td class="num">~66</td><td class="num">25</td><td class="num">~37.9%</td><td class="num">2.7</td></tr>
+    <tr><td>S5 (named)</td><td>Mar 4</td><td>Brazil / Jr. FDL</td><td class="num">12</td><td class="num">2</td><td class="num">16.7%</td><td class="num">— ¹</td></tr>
+    <tr><td>S5 (bulk)</td><td>Mar 4</td><td>Brazil / Jr. FDL</td><td class="num">398</td><td class="num">8</td><td class="num">2.0%</td><td class="num">— ¹</td></tr>
+    <tr><td>S7A Kit</td><td>Mar 5</td><td>Brazil / Jr. FDL</td><td class="num">15</td><td class="num">15</td><td class="num">100%</td><td class="num">5.9</td></tr>
+    <tr><td>S7A Freestyle</td><td>Mar 5</td><td>Brazil / Jr. FDL</td><td class="num">11</td><td class="num">9</td><td class="num">81.8%</td><td class="num">6.3</td></tr>
+    <tr class="total"><td></td><td></td><td></td><td class="num">~557</td><td class="num">69</td><td></td><td></td></tr>
+  </tbody>
+</table>
+<p class="table-note">¹ Session 5's pipeline candidates/hr rate is excluded because the 8 bulk-save survivors were not evaluated finds — they were qualified people who happened to exist in a pool of 398 annotation workers saved without evaluation. A 2% hit rate on a bulk save is not sourcing.</p>
+
+<p>Save accuracy is the percentage of agent saves that survived my quality review and made it into the final pipeline. In its first session, the agent needed to save 5.5 candidates to produce one I kept. In its last, it needed to save one.</p>
+
+<!-- SECTION 2 -->
+<h2 id="s2">How It Evaluates</h2>
+
+<p>The agent's value is not reducible to speed. The agent makes evaluation calls that require deep technical domain knowledge — and it makes them consistently, at the level of detail a hiring manager would recognize.</p>
+
+<h3>What it rejects</h3>
+
+<p>Barbara Neves had a company literally named "Multimodal" on her profile, a senior title, and 20+ researchers reporting to her — all facially relevant signal for a Frontier Data Lead search. The agent identified that her work stopped at the application layer: agentic AI systems, RAG pipelines, LLM automation for enterprise clients. "Model evaluation" in her context meant choosing models for deployment, not evaluating model training quality. That distinction — between building models and selecting them — is murky to anyone who doesn't know what both sides of the line look like.</p>
+
+<p>A more compressed version of the same judgment: Georgia Penido Safe, a PhD at Google with 30+ years of experience whose profile mentioned "rejection sampling." The agent recognized that rejection sampling in a chip design context is a Monte Carlo technique for circuit simulation, not the RLHF training method.</p>
+
+<p>These are rejection calls — the agent saying no to profiles that would pass most keyword filters.</p>
+
+<h3>What it saves</h3>
+
+<p>The save calls are equally specific. The agent flagged Carlos Costa as the strongest find of the entire campaign after identifying that Microsoft's internal "Turing" team does post-training and evaluation for Copilot. It mapped his work — simulated data, evaluation metrics, multi-agent simulations — point by point against the job description and concluded:</p>
+
+<blockquote>
+  <p>"This person is doing the EXACT FDL job at Microsoft."</p>
+</blockquote>
+
+<p>The internal team name could trip up any sourcer unfamiliar with Microsoft's org structure. The agent recognized it, disambiguated it from our employer Turing, and made the connection.</p>
+
+<p>The most revealing example is Caio Viturino, whose Isaac Sim work was classical robotics — soft robots, underwater inspection, control algorithms for quadruped and manipulator robots. On the surface, this is not a frontier AI profile. The agent's full evaluation tracked his simulation infrastructure experience across four separate roles spanning six years:</p>
+
+<blockquote>
+  <p>OmniSimulate (self-employed): "Designed advanced robotics simulations using NVIDIA Isaac Sim and Isaac Lab for validation, testing, and training of autonomous systems." RL + CV for complex challenges. FS Studio (US contract, 2yr 10mo): Isaac Sim, Unity, PyBullet, ZeroSim. Manipulators + quadruped robots. Imitation learning mentioned. Mapzer (4yr): End-to-end AI pipelines, automated dataset generation (reduced annotation 95%), LiDAR/point cloud, edge inference on NVIDIA Jetson Orin, PyTorch.</p>
+  <p>The borderline element: His work is robotics simulation for control validation, not frontier model training environments. Classical robotics focus rather than VLM/VLA training data. BUT: his Isaac Sim/Lab depth across 4+ roles + automated dataset generation + RL + PyTorch make him directly equipped for the JD's embodied AI capability area. The infrastructure he builds IS what frontier embodied AI training uses — he's just currently applying it to classical control.</p>
+</blockquote>
+
+<h3>How the evaluations deepen</h3>
+
+<p>The depth of these evaluations changed measurably across sessions. In Session 1, a typical evaluation was functional but surface-level:</p>
+
+<blockquote>
+  <p>"Natan Souza — IT Help Desk Lead at Shopee, ex-TikTok IT Site Lead. CS degree from CCT College Dublin. Skip — IT support/help desk, not ML/RL."</p>
+</blockquote>
+
+<p>It identifies what the candidate does and rejects. By Session 4, the evaluations had changed fundamentally. Here is the agent on Júnior Anderson Rodrigues da Silva:</p>
+
+<blockquote>
+  <p>Sr MLE at SiDi/Samsung (ASR for Bixby). But the real gem is his PhD at USP: Inverse Reinforcement Learning (IRL) + GNNs to learn and replicate human driving behavior — IRL is directly adjacent to reward modeling for RLHF. Built a custom RL simulator integrating real-world driving data with rule-based models (IDM, MOBIL) for evaluating planning and learning algorithms. Designed POMDPs for high-level decision-making under uncertainty. Won the CARLA Autonomous Driving Challenge — 3 of 4 categories in 2019, won again in 2023. Published IEEE T-ITS and ICRA — top robotics/RL venues.</p>
+  <p>At SiDi: multi-node distributed training with Kubeflow/MPI, NLP model training on embedded devices for Samsung. MSc at USP: ROS-based motion planning, clothoid trajectories for autonomous vehicles. Perfect "RL Infrastructure Engineer" archetype — IRL + simulator design + POMDP + CARLA champion + distributed training infra.</p>
+</blockquote>
+
+<p>The early evaluation sees. The later evaluation understands.</p>
+
+<!-- SECTION 3 -->
+<h2 id="s3">How It Gets Smarter</h2>
+
+<p>Two distinct capabilities compound in this system. The first is adaptive reasoning — the agent observing patterns in its own results, formulating principles from those patterns, and building new approaches that outperform the tools it was given. The second is market intelligence generated as a byproduct of the sourcing itself.</p>
+
+<h3>Adaptive reasoning</h3>
+
+<p>Session 7A's Coding Precision block ran 24 pre-built Boolean strings targeting coding agent infrastructure. The strings targeted terms like "unit test generation," "patch generation," "CI integration," "code refactoring" — terms that describe everyday software engineering, not the frontier coding agent work the role requires — and every one of them produced zero saves. The agent didn't just flag the failure. It diagnosed the structural problem and proposed a fix:</p>
+
+<blockquote>
+  <p>The core problem is that the Precision strings use terms that are everyday SWE vocabulary. "Code refactoring" matches every engineer, not the 0.01% building AI that does it autonomously. The fix is to always pair the coding activity with an AI/ML qualifier via AND, or use terms that only exist in the research literature. "SWE-bench" is the single most important string missing from this block — it's THE benchmark for evaluating coding agents on real GitHub issues. Anyone who mentions SWE-bench on their profile is almost certainly a genuine code agent researcher. Same tier: "HumanEval" and "MBPP" — the standard code generation benchmarks.</p>
+</blockquote>
+
+<p>The agent then built a supplementary string from its own analysis — "HumanEval" OR "MBPP" OR "neural program synthesis" OR "code LLM" — and ran it. Three results, all genuine targets. Its assessment: "This single supplementary string found more signal than all 24 original Precision strings combined."</p>
+
+<p>This was not an isolated event. When freestyle string FS-RL-1 returned 617 results for reinforcement learning tools, the agent quantified the noise: "Stable Baselines and OpenAI Gym are skill-tag magnets — approximately 600 of 617 results are generic profiles." From the accumulated evidence of these failures, the agent articulated a principle:</p>
+
+<blockquote>
+  <p>"The value of a keyword is proportional to how specifically it identifies the target population versus the general population."</p>
+</blockquote>
+
+<p>Descriptive keywords (terms practitioners list on their profiles) collide with adjacent populations. Discriminating keywords (terms only the target population uses) filter at the query level. This principle became the foundation for the freestyle compound methodology that followed.</p>
+
+<h3>Market intelligence</h3>
+
+<p>The adaptive reasoning produces a second output: structured market intelligence that no one asked for and that no search kit could have predicted.</p>
+
+<p>After running all 12 freestyle strings, the agent ranked them by performance, compared their result pools, and produced a session intelligence report. Seven of the 12 strings produced zero saves — and the agent treated that as data, not failure. FS-CROSS-1 dominated: 6 saves from 295 results, more than every other freestyle string combined. The agent identified why:</p>
+
+<blockquote>
+  <p>FS-CROSS-1 is the strongest freestyle string of the session. "Synthetic data generation" + "fine-tuning" + "deep learning" creates a precise cross-cutting filter. "Synthetic data generation" is the highest-precision term across all strings — it's rare enough to filter out generalists.</p>
+</blockquote>
+
+<p>From the candidate profiles surfaced by FS-CROSS-1 and the other productive strings, the agent cross-referenced backgrounds against unfamiliar organizations and identified clustering patterns across the result set. The output was five talent nodes not on any standard target list:</p>
+
+<table>
+  <thead>
+    <tr><th>Talent Node</th><th>What It Is</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Maritaca AI</td><td>Brazil's flagship Portuguese LLM lab</td></tr>
+    <tr><td>FS Studio</td><td>Frontier robotics AI contractor (sim-to-real, embodied AI infrastructure)</td></tr>
+    <tr><td>CEIA/UFG → ITA pipeline</td><td>Academic feeder from Goiânia to ITA (São José dos Campos)</td></tr>
+    <tr><td>SiDi / Samsung R&D</td><td>Corporate R&D lab producing LLM fine-tuning talent</td></tr>
+    <tr><td>IEAv (Aerospace Technical Center)</td><td>Military research institute with RL environment work</td></tr>
+  </tbody>
+</table>
+
+<p>The agent also flagged "GRPO" as an emerging signal term — a keyword appearing on profiles in the wake of DeepSeek's publications, specific enough that anyone listing it is almost certainly working on LLM post-training.</p>
+
+<p>From this analysis, the agent proposed three follow-on strings with exact Boolean syntax:</p>
+
+<div class="boolean-strings">
+  <p><span class="string-num">1.</span> ("Maritaca" OR "Sabiá" OR "Portuguese LLM" OR "multilingual LLM") AND ("training" OR "fine-tuning" OR "evaluation")</p>
+  <p><span class="string-num">2.</span> ("GRPO" OR "DPO" OR "PPO" OR "RLHF") AND ("language model" OR "LLM" OR "foundation model")</p>
+  <p><span class="string-num">3.</span> ("Scale AI" OR "Turing" OR "Outlier") AND ("model training" OR "fine-tuning" OR "data pipeline")</p>
+</div>
+
+<p>A sourcer builds this kind of market knowledge intuitively over weeks of working a geography. The agent built it explicitly, in one session, from candidate profiles found during an unrelated cross-cutting search, and produced a written record — ranked string performance, identified talent clusters, proposed follow-on queries — that any sourcer on the team can pick up and act on.</p>
+
+<!-- SECTION 4 -->
+<h2 id="s4">The Disaster, the Recovery, and the Data</h2>
+
+<p>Session 5 started cold — no supervised warm-up, no calibration window. Between sessions, I had modified the agent's prompt, bloating it from 250 words to 700 words and adding language that loosened the evaluation bar. I had also removed the Computer Science field-of-study filter that previous sessions used to keep non-technical profiles out of the results. The agent's own post-mortem analysis identified the difference:</p>
+
+<blockquote>
+  <p>"The previous prompt says 'follow those instructions' and gets out of the way. The disaster prompt says 'these govern everything' and then doesn't trust them to govern anything."</p>
+</blockquote>
+
+<p>When String 9 surfaced a population dominated by annotation workers, the agent recognized them — it described the pool as "incredibly strong — almost all candidates are AI trainers, data annotators, LLM specialists" — and reframed what should have been noise as signal. In fourteen minutes, it saved 398 candidates without evaluating a single one.</p>
+
+<p>Session 5's named saves tell the deeper story. Before the bulk event, the agent ran Strings 1–8 with proper per-candidate evaluation and saved 12 candidates. Two survived my review: a 16.7% survival rate, worse than Session 1's 18.2%. The evaluation quality was already degrading before the volume event. Of the 398 bulk saves, 8 made the pipeline — a 2% hit rate reflecting random chance in a pool of annotation workers, not evaluated sourcing.</p>
+
+<p>The recovery began with the agent's own diagnosis. Session 6 was devoted entirely to root cause analysis: the agent identified the pattern — threshold inversion under volume, getting less selective as result sets grew larger, when the opposite should have been true. I formalized the corrections into durable documents — written rules, not conversational context. Session 7A loaded those documents at startup. The result: 15 saves, 15 pipeline candidates, zero evaluation corrections from me during the entire run.</p>
+
+<table>
+  <thead>
+    <tr><th>Metric</th><th class="num">S1</th><th class="num">S7A Kit</th><th class="num">Improvement</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Save accuracy</td><td class="num">18.2%</td><td class="num">100%</td><td class="num">5.5×</td></tr>
+    <tr><td>Saves per pipeline candidate</td><td class="num">5.5</td><td class="num">1.0</td><td class="num">5.5×</td></tr>
+    <tr><td>Pipeline candidates/hr</td><td class="num">1.2</td><td class="num">5.9</td><td class="num">4.9×</td></tr>
+  </tbody>
+</table>
+
+<p>All three dimensions improved simultaneously. The agent did not trade quality for speed or efficiency for precision — it improved across every axis. The time investment per pipeline candidate dropped from 52 minutes in Session 1 to 9–10 minutes in Session 7A. The corrective feedback loop — failure, diagnosis, documented rules, application — produced a step-function improvement in every metric.</p>
+
+<!-- SECTION 5 -->
+<h2 id="s5">What's Holding It Back and What I Need</h2>
+
+<p>Three constraints limit this system, and all three are resource problems with known resolutions.</p>
+
+<div class="constraint-block">
+  <h4>Constraint 1: One expensive model does everything.</h4>
+  <p>The most expensive AI model available handles everything — including mechanical browser tasks like clicking tabs, reading DOM elements, and navigating pagination. These tasks require no judgment. A two-model architecture — a cheap model for browser operation, the expensive model for evaluation only — would cut AI costs an estimated 80–90%. The evaluation calls that justify the cost of Claude Opus represent a small fraction of total token usage; the rest is spent on work any model could do.</p>
+  <div class="ask">
+    <p>Ask: Dedicated time to implement the two-model cost split. The architecture is designed; it needs uninterrupted engineering time to build.</p>
+  </div>
+</div>
+
+<div class="constraint-block">
+  <h4>Constraint 2: The browser automation layer crashes regularly.</h4>
+  <table>
+    <thead>
+      <tr><th>Failure Type</th><th class="num">Total Count</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Browser connection failures</td><td class="num">~59</td></tr>
+      <tr><td>API rate limit / billing errors</td><td class="num">~36</td></tr>
+      <tr><td>Session timeouts / forced restarts</td><td class="num">~26</td></tr>
+    </tbody>
+  </table>
+  <p>These failures consumed an estimated 8–10 hours of the approximately 28 total hours the system was running — roughly a third of operating time lost to infrastructure, not evaluation quality. The two-model split and a company API account address the two largest categories directly: rate limit and billing errors disappear with proper funding, and the cheap browser model can be engineered for connection resilience in a way the current single-model loop cannot.</p>
+</div>
+
+<div class="constraint-block">
+  <h4>Constraint 3: I'm funding it personally.</h4>
+  <p>To date, almost all of the development and testing have been run through my personal Claude Max account and developer account for Anthropic's API — the only way to power the agent. API credit spend is its own distinct cost center, so I pay out of pocket for every run. Delivery's shared account has significantly lower usage caps than my personal account, and moving to a company account changes who pays, not what the system does.</p>
+  <div class="ask">
+    <p>Ask: A company developer account for Anthropic's API. The system is built and running; it needs a permanent funding source.</p>
+  </div>
+</div>
+
+<!-- SECTION 6 -->
+<h2 id="s6">What These Enable</h2>
+
+<h3>The two-model split</h3>
+
+<p>The prototype today runs a single loop: execute a search string, evaluate candidates, save or skip, move to the next string. Every decision — whether to narrow a noisy query, whether to skip a dead block, whether to build a replacement string — happens inside that same loop, at the same cost, with the same model. The two-model split changes this. A cheap model handles the browser. The expensive model receives only structured summaries — signal density, result counts, candidate snapshots — and makes strategic calls at a fraction of the token cost. This is not a hypothetical architecture: when the agent ran 24 Coding Precision strings in Session 7A, got zero saves, diagnosed the structural problem, and built Supplementary B to replace them, it was already performing the strategic function. It just did so inside a browser loop that burned 15,000 tokens per page to get there.</p>
+
+<h3>From cold starts to built-in expertise</h3>
+
+<p>Both models can then be trained on the accumulated knowledge from this campaign — the interface mechanics, the search engine behavior, the 30+ keyword collisions mapped across two markets — so that expertise becomes built-in rather than a set of documents the system reads on startup every session. The difference is the difference between a new hire reading the handbook every morning and someone who's been on the desk six months. Right now, every session starts cold: the agent parses the SKILL.md, the brief, the corrective documents, the progress file. The Colombia campaign proved this is fragile — the instruction set bloated from 286 to 405 lines, the agent couldn't hold it all in working memory, and evaluation quality drifted. Training the accumulated knowledge directly into the models eliminates this failure mode entirely. The context window carries only what's unique to this run: the brief, the kit, the progress file. The training manual disappears because the system has already graduated.</p>
+
+<h3>Autonomous search evolution</h3>
+
+<p>That unlocks the final capability the data is already pointing toward. In Session 7A, the agent ran 12 freestyle strings, compared their results, identified FS-CROSS-1 as the strongest performer and explained why ("synthetic data generation" is rare enough to filter out generalists), discovered talent nodes the kit had never targeted, and proposed three follow-on strings with exact Boolean syntax to close the gaps. The search kit was no longer a static input — the agent was rewriting it in response to what the sourcing actually surfaced. With the strategic layer separated from the browser loop and both models fluent at their respective jobs, this becomes a tight, deliberate cycle: Opus analyzes the accumulating pipeline for coverage gaps, generates a directive, and the browser model executes it immediately — no fumbling with the interface, no rediscovering filter mechanics. The kit becomes a living document that improves with every run.</p>
+
+<h3>Proactive pipeline building</h3>
+
+<p>Today, sourcing starts when a req opens: a sourcer receives a brief, builds a search kit, and begins evaluating candidates from scratch. The agent inverts that sequence. With trained models and a library of calibrated briefs, the system can source against anticipated openings — roles the team knows are coming based on client patterns, expansion plans, or recurring demand — before anyone submits a requisition. When the req does open, the team starts with a pipeline of evaluated candidates and a written record of the market landscape, not a blank project. The difference is the difference between a fire department that responds to calls and one that does inspections. Both fight fires; one of them has fewer fires to fight.</p>
+
+<h3>Diversity-focused sourcing at scale</h3>
+
+<p>The mechanical constraint in diversity sourcing is pagination: qualified diverse candidates exist in every result set, but they are distributed across hundreds of pages that no human sourcer will reach. A sourcer stops at page 3 or 4 — not from lack of commitment, but because manually reviewing 800 profiles to find 15 qualifying candidates is economically irrational at human labor rates. The two-model architecture changes the cost structure. The cheap browser model paginates through the full result set at negligible token cost; the expensive evaluation model sees only the profiles that survive hard filters. Exhaustive pagination becomes viable because the per-page cost drops from the price of Opus reading raw DOM to the price of a commodity model clicking "Next." The evaluation quality stays the same. The coverage goes from 3 pages to 30.</p>
+
+<h3>Niche technical sourcing</h3>
+
+<p>Some roles require domain expertise that takes weeks to develop through manual ramp-up — the terminology is unfamiliar, the talent pool is small, and the evaluation calls depend on distinctions that only someone fluent in the technical landscape can make. The Frontier Data Lead search is the proof point: the agent was already making those calls by Session 4. With accumulated campaign knowledge trained into the evaluation model, that fluency is available on day one of any new search, not rebuilt from scratch each time a niche role opens.</p>
+
+<h3>Compounding market intelligence</h3>
+
+<p>Every campaign produces structured byproducts: talent node maps, keyword collision data, string performance rankings, emerging signal terms. When this data accumulates across campaigns, geographies, and roles, each new search inherits the pattern library from every previous one. A Brazil campaign that maps Maritaca AI as a talent node feeds directly into the next Portuguese-speaking market search. A keyword collision identified in one role's evaluation becomes a disambiguation rule available to every subsequent campaign. The intelligence compounds because the system writes it down, and what it writes down is structured enough for the next run to act on without human interpretation.</p>
+
+<p>Taken together, these four capabilities represent a structural change in how a sourcing team operates — not a faster version of the current workflow, but a different workflow entirely.</p>
+
+<h3>The sequence</h3>
+
+<p>Each phase unlocks only when the previous one is reliable. The two-model split is the immediate priority — separating adaptive noise handling from the browser loop so the expensive model stops burning tokens on mechanics. Training both models on accumulated knowledge makes the execution loop fast enough for autonomous gap analysis and string generation to operate at a speed where the strategic layer can iterate in real time rather than waiting minutes for each directive to execute. The Session 5 disaster is the clearest evidence for why this sequencing matters: jumping from structured execution to autonomous freestyle without a proven foundation is how annotation workers end up in your pipeline.</p>
+
+<p>The prototype has proven the capability. The question is whether the organization wants to invest in making it reliable and scalable.</p>
+
+</body>
+</html>

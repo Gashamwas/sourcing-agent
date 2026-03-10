@@ -1,0 +1,12 @@
+node_modules/
+.env
+*.env
+__pycache__/
+*.pyc
+venv/
+.wwebjs_auth/
+output/
+progress--*.json
+!progress-sample-redacted.json
+run-log--*.md
+.DS_Store
