@@ -1,0 +1,176 @@
+{
+  "name": "fdl-colombia-rl-gyms",
+  "description": "Frontier Data Lead sourcing in Colombia \u2014 RL Gyms kit. Targeting engineers who build post-training, RL, eval, and coding agent infrastructure for frontier AI labs.",
+  "kit_url": "https://search-kit-library.vercel.app/kit/cca3657b-b65b-4ed0-9e52-d60aa95a7b7c",
+  "project_name": "Frontier Data Lead, RL Gyms - Columbia v2",
+  "permanent_filters": {
+    "Location": "Colombia"
+  },
+  "default_filters": {},
+  "freestyle_search": {
+    "enabled": false,
+    "methodology": "Use the search kit as starting vocabulary but construct new Boolean strings creatively. Build strings with expansive OR parentheticals and combine multiple OR groups with AND. Use semantic and lexical variants, Spanish-language terms, and cross-block combinations the structured run missed.",
+    "string_construction": "Construct Boolean strings with the pattern: (term1 OR term2 OR term3) AND (term4 OR term5 OR term6). Use creative OR groups that include English terms, Spanish equivalents, abbreviations, and semantic variants. Cast a wide net with OR groups, then let the AND logic and FoS batching handle precision.",
+    "gap_analysis": "Before starting, review what the structured run covered (115 strings from the kit). Identify keyword gaps: terms not in the kit, Spanish-language equivalents, cross-block combinations, and emerging terminology. Prioritize angles the structured run could not have covered."
+  },
+  "fos_batching": {
+    "mode": "persistent",
+    "instructions": "Set ALL Field of Study filters at the start of the run and leave them applied throughout. Do not clear or change between strings.",
+    "fields": [
+      "Computer Science",
+      "Mathematics",
+      "Applied Mathematics",
+      "Electrical and Electronics Engineering",
+      "Physics",
+      "Statistics",
+      "Engineering",
+      "Mechanical Engineering",
+      "Mathematics and Computer Science",
+      "Artificial Intelligence",
+      "Computational and Applied Mathematics",
+      "Computer Software Engineering"
+    ],
+    "setup": "Type the beginning of each field name and select from LinkedIn typeahead. If a field does not appear, skip it. Do this once at run start."
+  },
+  "save_instructions": {
+    "method": "Click 'Save to pipeline' button directly on the candidate's profile card or profile page",
+    "destination": "Frontier Data Lead, RL Gyms - Columbia v2 > uncontacted",
+    "notes": "Do NOT use the dropdown arrow next to 'Save to pipeline' or try to select a stage. Just click the main button. If a dropdown appears, select 'uncontacted'.",
+    "greenhouse_rule": "NEVER skip a candidate because they are already in Greenhouse, already in another project, or show prior activity. Every qualifying candidate gets saved to THIS project regardless. Different projects serve different roles and pipelines."
+  },
+  "block_notes": {
+    "priority_order": "RL Environment Design \u2192 Agent Development \u2192 Post-Training & RLHF \u2192 Data Quality & Annotation",
+    "rationale": "RL Environment Design had highest yield in Brazil (12 saves / 13 strings). Agent Development had best efficiency (9 saves / 2 strings). Post-Training Concepts cluster is noise-heavy \u2014 start with Methods and Tools. Data Quality is experimental \u2014 test whether narrowing terms salvage it.",
+    "skip_guidance": "For Post-Training & RLHF Concepts cluster: skip 'alignment' and 'human feedback' unless narrowing produces < 200 results. For Data Quality: attempt every string with narrowing. If first 5 strings yield 0 saves even with narrowing, skip the rest of the block."
+  },
+  "evaluation": {
+    "philosophy": "You are sourcing for a high-bar frontier AI role. The person you save will partner with researchers at OpenAI, Anthropic, and DeepMind. Ask: 'Would this person be credible in that room?' If you're not confident, skip.",
+    "two_paths_to_qualification": {
+      "path_1_pedigree": {
+        "name": "Strong trajectory, transferable to frontier work",
+        "description": "MSc/PhD from a strong research institution + substantial applied ML career (5+ years) + evidence of building real products or leading teams. May not have explicit RL/post-training keywords, but their trajectory says they can do the job.",
+        "example_career_arc": "PhD Physics from top-tier institution > 5yr postdoc (published, peer reviewer) > 5yr applied ML/data science building production NLP products > led team of 7 engineers > built product marketed by partner 30x their size. This person got hired as a Frontier Data Lead."
+      },
+      "path_2_direct_experience": {
+        "name": "Hands-on post-training / RL environment / coding agent work",
+        "description": "Clear signal of actual work in: RLHF pipelines, RL environment design, reward/verifier systems, LLM fine-tuning, coding agent infrastructure, or evaluation/benchmark systems. Even 4-5 years experience is enough IF the work is directly relevant and substantive.",
+        "what_counts": "Built RLHF pipelines. Designed custom gym environments. Fine-tuned coding models. Built SWE-Bench trajectories. Developed reward models. Created eval harnesses. Deployed vLLM/distributed training infra.",
+        "what_does_not_count": "Used LangChain to build a chatbot. Has RLHF in headline but works at annotation company. Fine-tuned a model once for a blog post. Agentic AI in headline but builds RPA workflows."
+      }
+    },
+    "linkedin_inference_rules": {
+      "note": "You see name, headline, current title, company, maybe 1-2 prior roles, and education. These rules help you make judgments from sparse data.",
+      "rules": [
+        {
+          "name": "Company + Title test",
+          "rule": "Senior ML/AI title at a company with a real ML org = save. Same title at an unknown small company = need additional signal (education, headline keywords, or JD-relevant terms).",
+          "strong_ml_companies_latam": [
+            "MercadoLibre",
+            "Rappi",
+            "Nubank",
+            "Globant",
+            "Factored",
+            "Bancolombia",
+            "Falabella",
+            "Claro",
+            "EPAM",
+            "Samsung",
+            "Microsoft",
+            "Google",
+            "Meta",
+            "Oracle",
+            "HP",
+            "NTT DATA"
+          ],
+          "weak_signal_companies": "Unknown 15-person consultancies, outsourcing shops, RPA firms, insurance companies. An ML title here needs strong additional evidence."
+        },
+        {
+          "name": "Education amplifier",
+          "rule": "MSc/PhD in CS, Math, Physics, EE from a known research university upgrades a borderline candidate to a save. BA in non-technical field at unknown school with ML title = skip.",
+          "strong_universities_colombia": [
+            "Universidad de los Andes (Uniandes)",
+            "Universidad Nacional (UNAL)",
+            "EAFIT",
+            "Pontificia Universidad Javeriana",
+            "Universidad del Valle"
+          ],
+          "strong_universities_brazil": [
+            "USP",
+            "UNICAMP",
+            "UFRGS",
+            "PUC-Rio",
+            "UFMG",
+            "ITA",
+            "IMPA"
+          ],
+          "international_boost": "Any PhD from a globally ranked research university (MIT, Stanford, CMU, Max Planck, TU Dresden, etc.) is a very strong signal regardless of other factors."
+        },
+        {
+          "name": "JD-relevance test",
+          "rule": "Is there ANY signal that this person has touched: fine-tuning, RL environments, post-training data, reward models, coding agents, evaluation/benchmarks, simulation environments, distributed training infrastructure? If yes + meets basic seniority bar, save. If no, they need to pass Company+Title at a very high bar."
+        }
+      ]
+    },
+    "calibration_examples": {
+      "strong_saves": [
+        {
+          "profile": "PhD Multiagent Systems from UFRGS, teaches RL with Gym/Stable-baselines3, RoboCup Rescue 3rd place",
+          "why": "Path 2 \u2014 direct RL environment experience, strong research institution, hands-on with the exact tools"
+        },
+        {
+          "profile": "Sr ML Engineer at MercadoLibre, 7+ years, MSc CS",
+          "why": "Path 1 \u2014 strong company with real ML org, senior title, graduate degree. MercadoLibre ML engineers work on production systems at scale."
+        },
+        {
+          "profile": "PhD Tufts, simulation environments + robot simulator + CUDA/distributed systems + LLMs",
+          "why": "Path 2 \u2014 simulation environment design maps directly to RL gym building. Distributed systems + LLMs = transferable infrastructure skills."
+        },
+        {
+          "profile": "CTO at Revelo, headline mentions LLM post-training for code generation",
+          "why": "Both paths \u2014 senior leader with explicit post-training and code generation signal. Exactly the work this role does."
+        }
+      ],
+      "clear_skips": [
+        {
+          "profile": "AI Trainer at Outlier, RLHF in headline, BA Communications",
+          "trap": "RLHF keyword match but this is annotation work, not engineering. Annotation company + non-technical degree = skip."
+        },
+        {
+          "profile": "Asistente Ejecutivo at Seguros Bolivar, EE degree, headline mentions ML keywords",
+          "trap": "Insurance claims assistant. EE degree triggered keyword match but current role has zero ML relevance."
+        },
+        {
+          "profile": "RPA Developer at Auxis",
+          "trap": "RPA is not AI/ML. These appear in searches for agentic and automation. Always skip."
+        },
+        {
+          "profile": "AI Cloud Architect at Stefanini LATAM, headline mentions AI and agentic",
+          "trap": "Cloud architect using AI as marketing language. No evidence of hands-on ML/RL work. Consulting firm."
+        },
+        {
+          "profile": "ML Engineer at unknown 15-person startup, no graduate degree, generic headline",
+          "trap": "ML title alone is not enough. Unknown company + no education signal + no JD-relevant keywords = skip."
+        }
+      ],
+      "borderline_calls": [
+        {
+          "profile": "Data Scientist at Banco de Bogota, headline mentions LLMs, NLP, vLLM",
+          "call": "SAVE \u2014 bank data scientist is normally noise, but explicit LLM infrastructure signals (vLLM!) override. Path 2 direct experience."
+        },
+        {
+          "profile": "AI Specialist at Subocol (car insurance), no graduate degree visible",
+          "call": "SKIP \u2014 company context says basic analytics, not frontier ML. No education or JD-relevant signal to override."
+        }
+      ]
+    },
+    "hard_skip_list": [
+      "Annotation companies: Scale AI (labeling), Outlier, Appen, Remotasks, Surge AI, Invisible Technologies, CrowdGen",
+      "Titles: AI Trainer, Quality Reviewer, Content Evaluator, AI Rater, Prompt Writer, Data Annotator",
+      "RPA developers/engineers \u2014 RPA is not AI/ML",
+      "Interns, practicantes, undergraduate teaching assistants",
+      "Insurance analysts, IT auditors, frontend developers, game developers (unless game AI/simulation)",
+      "Cloud architects whose AI is marketing language",
+      "Anyone with fewer than 3 years total professional experience unless they have exceptional research credentials"
+    ]
+  }
+}

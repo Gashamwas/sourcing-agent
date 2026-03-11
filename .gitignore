@@ -1,6 +1,14 @@
+node_modules/
 .env
+*.env
 __pycache__/
+*.pyc
 .pytest_cache/
+venv/
+.wwebjs_auth/
 output/
 1~
-*.pyc
+progress--*.json
+!progress-sample-redacted.json
+run-log--*.md
+.DS_Store
