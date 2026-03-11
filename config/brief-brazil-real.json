@@ -1,0 +1,246 @@
+{
+  "name": "fdl-brazil",
+  "description": "Frontier Data Lead sourcing in Brazil. Targeting engineers with 4-5+ years building deep learning systems where data quality, evaluation, and environment design drove model improvement. Role spans five capability areas: post-training, coding agents, multimodal, STEM reasoning, and embodied AI.",
+  "kit_url": "https://search-kit-library.vercel.app/kit/527ad0b5-6b37-481b-a75c-414c45ee503a",
+  "project_name": "FDL Brazil",
+
+  "minimum_bar": "The candidate must show evidence of BUILDING model training systems, not just USING models or model APIs. Application-layer work (LangChain apps, RAG pipelines, dashboards, prompt engineering, multi-agent orchestration, model API integrations) does not qualify unless combined with actual training infrastructure work. Requires 4-5+ years hands-on building or improving deep learning systems where data quality or model behavior was the primary output, plus genuine technical depth in at least one of the five capability areas below. Both axes required — strong signals in one do not compensate for missing the other.",
+
+  "hard_skips": [
+    "Currently enrolled undergrad students — graduation date in the future with no substantial work history",
+    "Annotation/labeling workers: Outlier, Appen, Scale AI labeling division, Telus International AI Data, Invisible Technologies, Remotasks, Surge AI. Title patterns: AI Trainer, Quality Reviewer, Data Annotator, Content Evaluator, Prompt Writer, AI Rater",
+    "RPA engineers and cloud architects whose AI mention is marketing language with no ML systems substance",
+    "Current Turing employees — do not save, but note them in your batch report"
+  ],
+
+  "clear_skips_from_review": [
+    "LangChain/LangGraph application developers with no training infrastructure experience",
+    "Backend/SWE engineers whose ML is ETL pipelines, dashboards, or API integrations",
+    "Robotics/control engineers whose 'RL' is classical control theory, not ML training",
+    "Fintech ML engineers (Nubank, Itaú, Stone, Creditas, BTG Pactual) whose work is credit scoring, fraud detection, churn prediction, or A/B testing on tabular data — not model training",
+    "Profiles with <4 years of ML work, or still in undergrad",
+    "AI Product Managers, AI Architects, or AI Systems Architects whose work is orchestration and product, not training",
+    "Data Scientists whose work is analytics, forecasting, credit risk, or recommendation — unless at a company with a real ML training org AND their title suggests infrastructure work",
+    "LLM orchestration / RAG engineers who exclusively consume foundation model APIs (LangChain, CrewAI, AutoGPT) with zero training, fine-tuning, or evaluation infrastructure work",
+    "Software engineers whose only AI work is recent API integration of OpenAI/Anthropic into existing products",
+    "Profiles where ALL relevant experience is academic coursework with no production, research deployment, or published implementation"
+  ],
+
+  "evaluation": {
+    "decision": "Binary: SAVE or SKIP. No maybes. Every decision requires a one-sentence explanation.",
+    "save_threshold": "High confidence that the candidate has BOTH (1) the required experience depth AND (2) genuine technical work in at least one capability area. You must be able to name the archetype and cite specific signals from their profile.",
+    "skip_threshold": "Insufficient signal on either axis — experience depth unclear, capability area work is superficial or absent, or profile is a clear noise archetype.",
+    "experience_floor": {
+      "required": "4-5+ years of hands-on experience building or improving deep learning systems where data quality or model behavior was the primary output — not just a side effect.",
+      "disqualifying": "Currently enrolled in undergraduate studies. Profiles where all relevant experience is academic with no production or research deployment.",
+      "note": "Degree is not required. A strong self-taught engineer or bootcamp grad with 5+ years of demonstrated ML systems work qualifies. Advanced degrees (MSc, PhD) are a positive signal, especially when paired with implementations — not just theory."
+    },
+    "capability_areas": "Candidate must show genuine depth in at least one of the five archetype areas. Breadth across areas is a strong plus but not required. Surface-level familiarity (e.g., used a library once, completed a course) does not count as depth."
+  },
+
+  "permanent_filters": {
+    "Location": "Brazil"
+  },
+  "filter_notes": "Field of Study = Computer Science is optional — add only if a string produces excessive noise from non-technical profiles. No seniority filters. No other permanent filters.",
+
+  "archetypes": [
+    {
+      "name": "Post-Training Data Engineer",
+      "capability_area": "Post-Training & RLHF",
+      "pattern": "Built or meaningfully contributed to pipelines that make models better after pre-training. The work is about data and feedback signals — collecting preference data, designing reward models, running fine-tuning loops, measuring model improvement. Understands the difference between data that drives lift and data that doesn't.",
+      "save_signals": [
+        "Built RLHF, DPO, PPO, or GRPO training pipelines — not just ran them",
+        "Designed or curated preference datasets with clear quality criteria",
+        "Trained or evaluated reward models / process reward models / verifiers",
+        "Ran instruction tuning or SFT at scale with measurable model improvement",
+        "Worked on post-training at a frontier AI lab or serious AI company",
+        "Published research on alignment, preference optimization, or post-training methods with implementation"
+      ],
+      "skip_signals": [
+        "Used RLHF as a buzzword with no evidence of pipeline work",
+        "Annotated or rated model outputs (labeler, not builder)",
+        "Fine-tuned a pre-trained model for a downstream application without post-training infrastructure work"
+      ]
+    },
+    {
+      "name": "Coding Agent Evaluator",
+      "capability_area": "Coding & SWE Agents",
+      "pattern": "Built infrastructure to measure and improve how well AI systems write, debug, or navigate code. Understands real software development workflows and has built harnesses, benchmarks, or task suites that capture genuine difficulty. Signal is in what they built to evaluate agents, not whether they used agents.",
+      "save_signals": [
+        "Built evaluation harnesses or benchmarks for code generation or SWE agents",
+        "Designed repository-level or long-horizon coding tasks (not just single-function completions)",
+        "Built unit test generation, patch generation, or bug localization systems",
+        "Worked with SWE-bench, HumanEval, LiveCodeBench, or equivalent at an infrastructure level",
+        "Designed CI-like constraints or automated validation for coding agent outputs",
+        "Built tool-use or function-calling evaluation infrastructure"
+      ],
+      "skip_signals": [
+        "Used Copilot or Cursor as a developer — consumer, not builder",
+        "Built LLM-powered apps that call code tools without evaluation infrastructure",
+        "Prompt-engineered coding assistants without building the systems that measure them"
+      ]
+    },
+    {
+      "name": "Multimodal Data Lead",
+      "capability_area": "Multimodal Data & Reasoning",
+      "pattern": "Worked on data and evaluation for models that reason across modalities — text, images, documents, charts, diagrams, UI. Designed tasks requiring genuine cross-modal understanding, not just pairing images with captions.",
+      "save_signals": [
+        "Designed datasets or evaluation tasks for vision-language models",
+        "Built document understanding, chart reasoning, OCR, or UI grounding pipelines",
+        "Worked with DocVQA, ChartQA, MMMU, MathVista, ScreenSpot, or equivalent at an infrastructure level",
+        "Created multimodal annotation pipelines with quality controls for cross-modal consistency",
+        "Published research on multimodal reasoning, grounding, or document AI with real implementations",
+        "Worked on diagram reasoning, table understanding, or layout analysis for ML systems"
+      ],
+      "skip_signals": [
+        "Applied pre-trained VLMs to a product feature without building evaluation or training data",
+        "Image classification or object detection work without multimodal reasoning components",
+        "Built RAG systems that retrieve images — consuming multimodal models, not building for them"
+      ]
+    },
+    {
+      "name": "STEM Reasoning Engineer",
+      "capability_area": "STEM Reasoning & Verification",
+      "pattern": "Made AI systems better at math, physics, chemistry, or engineering problems — and critically, verified answers are correct. Distinguishing work is verification infrastructure: reference solvers, symbolic checkers, step consistency validators.",
+      "save_signals": [
+        "Built solution verification systems for math or STEM — reference solvers, symbolic checkers, numerical validators",
+        "Designed datasets for mathematical reasoning with automated correctness checks",
+        "Worked with GSM8K, MATH, GPQA, TheoremQA, MiniF2F, or equivalent at a data/eval infrastructure level",
+        "Built formal proof verification systems (Lean, Isabelle, Coq)",
+        "Developed error analysis pipelines for reasoning failures — not just accuracy metrics",
+        "Research background in STEM with implementations that connect domain knowledge to verifiable ML tasks"
+      ],
+      "skip_signals": [
+        "Math tutor or STEM educator who adopted AI tools",
+        "Used chain-of-thought prompting without building the verification infrastructure around it",
+        "Academic STEM background with no ML systems work"
+      ]
+    },
+    {
+      "name": "RL Environment Builder",
+      "capability_area": "RL Environments & Embodied AI",
+      "pattern": "Built environments, simulators, and task suites that RL agents train and are evaluated in. Designed state spaces, action abstractions, reward functions, and verifiers that produce useful training signal. Distinguishing signal is environment design and verifier construction — not just running RL experiments inside someone else's gym.",
+      "save_signals": [
+        "Designed or built custom RL environments, task suites, or simulators",
+        "Built reward functions, shaped rewards, or outcome/process verifiers from scratch",
+        "Worked with MuJoCo, Isaac Sim, Habitat, AI2-THOR, RLBench, or equivalent at a design/build level",
+        "Built trajectory collection or rollout infrastructure for RL training",
+        "Designed action spaces, observation spaces, or state abstractions for agent environments",
+        "Built embodied AI datasets or evaluation suites for VLA models",
+        "Research in RL with custom environment implementations (not just applied RL on existing envs)"
+      ],
+      "skip_signals": [
+        "Ran RL experiments inside pre-built environments (OpenAI Gym user, not builder)",
+        "Applied RL to a product problem without environment design or verifier construction",
+        "Robotics hardware engineer without ML environment or training data components"
+      ]
+    }
+  ],
+
+  "noise_archetypes": [
+    {
+      "name": "Annotation Worker / RLHF Labeler",
+      "description": "Performs RLHF labeling, preference rating, or data annotation. Does not build systems — is the human in someone else's human-in-the-loop pipeline. Single most common false positive in Brazil.",
+      "signals": [
+        "Titles: AI Trainer, Quality Reviewer, Content Evaluator, Prompt Writer, AI Rater, Data Annotator",
+        "Employers: Outlier AI, Appen, Scale AI (labeling division), Invisible Technologies, Remotasks, Surge AI, Telus International AI Data",
+        "Work described as rating, labeling, reviewing, or evaluating model outputs — no engineering or infrastructure context"
+      ]
+    },
+    {
+      "name": "Fintech ML Engineer",
+      "description": "Strong ML engineer whose actual work is credit scoring, fraud detection, churn prediction, or A/B testing on tabular data. Often at Nubank, Itaú, Stone, Creditas, BTG Pactual. ML is real but domain has no overlap with frontier model training or evaluation.",
+      "signals": [
+        "ML at a bank, fintech, or payments company with no AI lab or research context",
+        "Work described as credit risk, fraud, propensity modeling, or customer analytics",
+        "No evidence of model training infrastructure, post-training, or evaluation system design"
+      ]
+    },
+    {
+      "name": "LLM Orchestration / RAG Engineer",
+      "description": "Builds products on top of LLM APIs using LangChain, LangGraph, CrewAI, or similar. Consumes foundation models — does not train, evaluate, or build data for them.",
+      "signals": [
+        "Work centered on prompt engineering, RAG pipelines, or LLM API integration",
+        "LangChain, LangGraph, CrewAI, or AutoGPT as primary tools",
+        "No training data, fine-tuning, evaluation harness, or environment design work"
+      ]
+    },
+    {
+      "name": "Applied DS / Consulting",
+      "description": "Deploys pre-trained models (YOLO, BERT, GPT) for client use cases. Broad skill set, limited depth. Builds dashboards, runs analyses, adapts existing models.",
+      "signals": [
+        "Consulting firm or agency employment with AI/ML project work",
+        "Work described as model deployment, integration, or operationalization",
+        "No evidence of original model training, data pipeline design, or evaluation system construction"
+      ]
+    },
+    {
+      "name": "SWE with LLM Wrapper",
+      "description": "Strong software engineer who recently added LLM-powered features to their product. Engineering is real; ML depth is not.",
+      "signals": [
+        "Strong SWE background (Java, Kotlin, C#, Go) with LLM features appearing only in recent roles",
+        "Work described as integrating OpenAI/Anthropic APIs into existing products",
+        "No training, fine-tuning, data curation, or evaluation infrastructure work anywhere in career"
+      ]
+    }
+  ],
+
+  "known_noise_patterns": [
+    {
+      "term": "CAI",
+      "collision": "Centro de Aprendizagem Industrial — Brazilian vocational/industrial training centers",
+      "action": "Remove from string when it dominates results"
+    },
+    {
+      "term": "post training",
+      "collision": "Corporate L&D and training professionals when written as two unhyphenated words",
+      "action": "Only use hyphenated 'post-training' in strings. If the kit string has it unhyphenated, add quotes or hyphenate before pasting."
+    },
+    {
+      "term": "DPO",
+      "collision": "Data Protection Officer under Brazil's LGPD (Lei Geral de Proteção de Dados)",
+      "action": "CS filter mitigates but does not eliminate. Review DPO-matching profiles carefully for context."
+    },
+    {
+      "term": "IPO",
+      "collision": "Initial Public Offering — matches finance professionals",
+      "action": "Skip string entirely when IPO is the primary matching term"
+    },
+    {
+      "term": "ORM",
+      "collision": "Object-Relational Mapping — common web development term in Brazil's large web dev community",
+      "action": "Check context. If results are dominated by web devs, remove ORM from string."
+    },
+    {
+      "term": "trajectory",
+      "collision": "Career trajectory — extremely common in Brazilian LinkedIn profiles describing career progression",
+      "action": "Only use in compound phrases: 'agent trajectory', 'rollout trajectory', 'trajectory data'. Never as a standalone term."
+    },
+    {
+      "term": "oracle",
+      "collision": "Oracle Database — Brazil has a large enterprise software community",
+      "action": "Only use in tightly compound phrases. Skip profiles where Oracle context is clearly database/enterprise."
+    }
+  ],
+
+  "positive_market_signals": {
+    "note": "These institutions and employers have produced strong FDL candidates in prior Brazil runs. Treat as a positive prior — not a requirement.",
+    "academic_clusters": [
+      "CEIA (Centro de Excelência em IA) at UFG — deep RL production lab, strongest RL talent cluster observed in Brazil",
+      "Samsung SiDi Campinas — distributed training, multi-agent RL, serious research output",
+      "Unicamp FEEC — representation learning, cognitive robotics, RL",
+      "PUC-Rio — RL reward function design, SFT/preference data research"
+    ],
+    "employer_signals": [
+      "Frontier AI labs: Liquid AI, MILA, IBM Research, Samsung AI R&D, Microsoft Research",
+      "Nubank AI Core team (not general Nubank ML — specifically the AI Core division doing model training)"
+    ]
+  },
+
+  "save_instructions": {
+    "method": "Click 'Save to pipeline' button directly on the candidate's profile card or profile page",
+    "destination": "FDL Brazil > uncontacted",
+    "notes": "Do NOT use the dropdown arrow next to 'Save to pipeline' or try to select a stage. Just click the main button.",
+    "greenhouse_rule": "Save every qualifying candidate to this project regardless of Greenhouse status, prior projects, messages, or engagement history. Different projects serve different roles."
+  }
+}

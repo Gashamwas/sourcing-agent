@@ -1,0 +1,238 @@
+{
+  "brief_id": "head-applied-ai-lab-nyc",
+  "brief_version": "1.0",
+  "role_title": "Head of Applied AI Lab",
+  "internal_title": "Head of AI Technology",
+  "company": "Turing",
+  "location": "New York City Metropolitan Area",
+  "location_non_negotiable": true,
+
+  "role_summary": "Mini-CTO of Turing's enterprise GenAI practice. Runs the technical side of an applied AI consulting/delivery operation serving Fortune 500 clients with a specific vertical focus on BFSI (Goldman Sachs, Apollo-tier). Equally comfortable whiteboarding architecture with engineers and briefing a CIO. Not a research role — applied GenAI delivery at enterprise scale.",
+
+  "minimum_bar": {
+    "years_experience": 15,
+    "experience_note": "Must hit the ground running. 15yr floor is hard — no exceptions.",
+    "title_floor": "Director, Senior Director, Head of, Principal Engineer/Architect, VP (context-dependent)",
+    "title_ceiling_note": "SVP at large org, MD, EVP, CDAO, CXO at large org, CTO at 100+ person engineering org, Partner at Big4 = likely too senior and too expensive. Exception: CTO/CEO at scrappy startup (<150 employees) — apply Jon Dorando principle.",
+    "technical_depth": "Must show direct, personal involvement in BUILDING AI systems. Not managing a team that builds, not selling it, not developing product strategy around it.",
+    "bfsi_domain": "At least one BFSI employer or BFSI-domain project: Goldman, Morgan Stanley, Citi, JPMorgan, BofA, BlackRock, Vanguard, Apollo, Tradeweb, Bloomberg, fintech at scale, insurance/actuarial AI, credit/risk/trading systems.",
+    "genai_fluency": "Post-2022 GenAI work required. Must show evidence of: LLM deployment, RAG system design, agentic architectures, evaluation frameworks, or fine-tuning. GenAI strategy without implementation evidence is insufficient.",
+    "location": "Current location must be NYC metro (NYC, NJ, CT commuter zone). Remote or other cities = skip."
+  },
+
+  "sweet_spot": {
+    "years": "15-20",
+    "titles": ["Director", "Senior Director", "Head of", "Principal Engineer", "Principal Architect", "VP"],
+    "archetypes": [
+      "Spent 10+ years building fixed income/credit trading systems at Tradeweb/Goldman/BofA, then pivoted to leading GenAI strategy at an enterprise AI company",
+      "VP ML/Data Science at Goldman building credit scoring and AI analytics, then led R&D at a startup, now leads AI Labs at a major hedge fund",
+      "Engineering Director & Head of GenAI at a Tier-1 bank for 10+ years, previously VP at another major bank",
+      "CTO at a scrappy fintech startup (<150 employees) personally building agentic AI for institutional finance clients"
+    ]
+  },
+
+  "preview_scan_criteria": {
+    "rule": "Before opening any profile, triage from preview using these four signals. If two or more are failing, skip without opening.",
+    "signals": [
+      "TITLE — Must be Director, Senior Director, Head of, Principal, VP, or startup CTO. SVP/MD/EVP/CXO/Partner = skip. IC titles (Senior Engineer, Staff Engineer) = skip unless at a frontier BFSI firm.",
+      "COMPANY — Must show BFSI employer (Goldman, JPMorgan, Citi, BofA, Morgan Stanley, BlackRock, Vanguard, Tradeweb, Bloomberg, Freddie Mac, Fannie Mae, TIAA, Prudential, fintech at scale) OR consulting firm serving BFSI (Deloitte, Accenture, McKinsey) OR BFSI-focused startup/fintech.",
+      "YEARS — Must show 15+ years visible. If LinkedIn shows <15yr total career, skip.",
+      "HEADER KEYWORDS — Look for GenAI/AI builder language in the headline: LLM, RAG, agentic, LangGraph, orchestration, GenAI, applied AI, ML engineering. Red flags that justify skip without opening: Solutions Architect, AI Products, AI Transformation, AI Strategy, Customer Success, Pre-Sales, Product Manager."
+    ]
+  },
+
+  "hard_skips": [
+    "Current location outside NYC metro",
+    "Fewer than 15 years visible experience",
+    "Zero BFSI employer or BFSI-domain project in entire career",
+    "Zero post-2022 GenAI work evidence",
+    "Pure researcher with no production deployment experience",
+    "Fresh grad or bootcamp profile",
+    "Annotation/data labeling worker (Scale AI, Outlier, Appen)",
+    "IT auditor, QA tester with no ML crossover"
+  ],
+
+  "clear_skips_from_review": [
+    {
+      "pattern": "Solutions Architect at cloud vendor (AWS, Azure, GCP)",
+      "reason": "Customer-facing pre-sales/demos, not production AI engineering. Richa Kaul pattern.",
+      "example": "Head of Customer Solutions / Sr. Leader Solutions Architecture @ AWS"
+    },
+    {
+      "pattern": "Head of AI Products / VP AI Products",
+      "reason": "Product management layer over engineering. Not the hands-on technical depth required. Amir Elkabir pattern.",
+      "example": "Executive Director & Head of AI Products @ JPMorgan"
+    },
+    {
+      "pattern": "AI Transformation Executive / AI Strategy Lead",
+      "reason": "Strategy and transformation framing without implementation evidence.",
+      "example": "Chief AI Transformation Officer, AI Strategy & Innovation Lead"
+    },
+    {
+      "pattern": "CTO at massive org (400+ person engineering org, $100M+ budget)",
+      "reason": "Scope and comp ceiling mismatch. Robert Babinski pattern.",
+      "example": "CTO Investments & Capital Markets @ Freddie Mac (400-person org)"
+    },
+    {
+      "pattern": "MD / EVP / CDAO / CXO at large financial institution",
+      "reason": "Too senior, too expensive. Swatee Singh pattern.",
+      "example": "EVP & CDAIO @ TIAA, MD @ Barclays (1,100-person team)"
+    },
+    {
+      "pattern": "Partner at Big4 consulting",
+      "reason": "Too senior, comp ceiling mismatch.",
+      "example": "Partner @ Deloitte / Accenture / McKinsey"
+    },
+    {
+      "pattern": "AI experience = adopting tools, not building systems",
+      "reason": "Implementing GitHub Copilot, Devin, or off-the-shelf AI tools is not the same as building AI systems.",
+      "example": "Gerard Pento pattern: implementing GitHub Copilot and Devin across engineering"
+    },
+    {
+      "pattern": "Customer Success or Pre-Sales adjacent role",
+      "reason": "Client-facing demos and adoption, not engineering delivery.",
+      "example": "Head of Customer Solutions, Pre-Sales Solutions Architect"
+    },
+    {
+      "pattern": "Product Manager of ML/AI teams",
+      "reason": "Directs engineering, does not build. Shannon Mullen pattern.",
+      "example": "SVP Data & Analytics Product Manager @ Citi"
+    },
+    {
+      "pattern": "Solo boutique consultant / fractional executive",
+      "reason": "No enterprise-scale AI practice leadership demonstrated.",
+      "example": "Founder, Good Strategy Group (1-person consulting)"
+    }
+  ],
+
+  "gate_evaluation_order": [
+    {
+      "gate": 1,
+      "name": "Diversity (first pass only)",
+      "rule": "Women OR non-Indian candidates only on diversity pass. South Asian males = skip without opening."
+    },
+    {
+      "gate": 2,
+      "name": "Seniority calibration",
+      "rule": "See title_floor and title_ceiling_note. Apply Jon Dorando principle for startup CTOs (<150 employees). Apply Robert Babinski rule for large-org CTOs (400+ person org)."
+    },
+    {
+      "gate": 3,
+      "name": "Technical depth (hard filter)",
+      "pass_signals": [
+        "Specific tools personally used: LangGraph, LlamaIndex, DSPy, Haystack, CrewAI, Temporal, etc.",
+        "Phrases: I architected, I implemented, I built, I deployed to production",
+        "GitHub/open source contributions, research publications",
+        "Fine-tuned models, built RAG pipelines, designed evaluation frameworks themselves",
+        "ML engineering titles with implementation evidence"
+      ],
+      "fail_signals": [
+        "Solutions Architect at cloud vendor",
+        "Head of AI Products / VP AI Products",
+        "AI Transformation Executive / AI Strategy",
+        "CDO with no hands-on engineering evidence",
+        "AI experience = GitHub Copilot / Devin adoption",
+        "Customer Success or Pre-Sales adjacent"
+      ]
+    },
+    {
+      "gate": 4,
+      "name": "BFSI domain",
+      "rule": "At least one BFSI employer or BFSI-domain project. Banking, financial services, capital markets, insurance, asset management. Not healthcare, retail, or tech-adjacent."
+    },
+    {
+      "gate": 5,
+      "name": "GenAI fluency",
+      "rule": "Post-2022 work with evidence of LLM deployment, RAG system design, agentic architectures, evaluation frameworks, RLHF/fine-tuning, or model selection/benchmarking. Strategy without implementation = insufficient."
+    }
+  ],
+
+  "calibration_examples": {
+    "strong_saves": [
+      {
+        "name": "Jon Dorando",
+        "why": "Co-Founder & CTO Boosted.ai (~30-person startup), PhD Cornell, personally builds the system, institutional finance domain ($3T AUM), 15-20yr exp. CXO title at scrappy startup = applies. Bloomberg ML R&D prior."
+      },
+      {
+        "name": "Bojan Ciric",
+        "why": "Technology Fellow at Deloitte (consulting title, not big-org CTO), 12.8yr, hands-on LangGraph/CrewAI/AWS Bedrock, builds agentic AI for Tier-1 banks. Serbian. Director-equivalent in practice."
+      },
+      {
+        "name": "Indu Kuppusamy",
+        "why": "VP at Goldman Sachs, 15yr+, personally builds Agentic AI, MCP Servers, Semantic Search, Data & AI Marketplace. VP title with hands-on technical evidence. Female."
+      },
+      {
+        "name": "Alexander Zakharov",
+        "why": "Principal Architect at Icertis, MIT MEng, personally building agentic workflows with Temporal/MCP/A2A, deep fixed income/credit trading background at Tradeweb + CodeStreet + BofA. Non-Indian."
+      }
+    ],
+    "incorrect_saves": [
+      {
+        "name": "Robert Babinski",
+        "why": "CTO at Freddie Mac, 400-person org, $130M budget, 30+ years. Large-org CTO = too senior, wrong scope, very expensive."
+      },
+      {
+        "name": "Swatee Singh",
+        "why": "EVP/CDAIO at TIAA, MD Barclays (1,100-person team). Way above scope and compensation ceiling."
+      },
+      {
+        "name": "Richa Kaul",
+        "why": "Customer success + pre-sales solutions architecture at AWS. Demos AI for clients, not builds it."
+      },
+      {
+        "name": "Amir Elkabir",
+        "why": "Head of AI Products = product management layer. High-level leadership of product strategy and transformation, not technical depth required."
+      },
+      {
+        "name": "Gerard Pento",
+        "why": "CTO/Global Head @ Citi, 300-person org. AI implementation = GitHub Copilot + Devin adoption. Too senior + wrong depth."
+      },
+      {
+        "name": "Shannon Mullen",
+        "why": "SVP/VP Product Manager of ML at Citi/JPMorgan. Product manager profile, not engineer. Directs, does not build."
+      }
+    ],
+    "borderline_verify": [
+      {
+        "name": "Susan Malkin",
+        "why": "VP Deutsche Bank, Founder/CTO Mona Holdings (small), ~20yr. Keep but verify technical depth — is she a builder or manager?"
+      },
+      {
+        "name": "david goldberg",
+        "why": "SVP CDAO at small RIA (EFE) + built RAG chatbot himself. SVP at EFE ≠ SVP at Goldman. Small-firm context helps. Confirm threshold."
+      },
+      {
+        "name": "Pratik Shah",
+        "why": "Engineering Director & Head of GenAI at Morgan Stanley 10+ years. GenAI work is real (LangChain, RAG, MCP) but GitHub Copilot adoption language is a yellow flag. Open profile, verify Gate 3 carefully."
+      }
+    ]
+  },
+
+  "diversity_mandate": {
+    "first_pass": "Women OR non-Indian candidates only",
+    "skip_rule": "South Asian males = skip without opening on first pass",
+    "note": "If paginating through 15 pages and finding only 3 diverse candidates who meet the bar, that is a successful run."
+  },
+
+  "search_kit_id": "10c0183e-f28b-49a0-b10f-680c73ab6fba",
+  "linkedin_project": "Head of Applied AI Lab",
+  "linkedin_project_id": "1957683706",
+
+  "permanent_filters": {
+    "location": "New York City Metropolitan Area",
+    "company_filters": "NONE",
+    "keywords": "Boolean strings from search kit only",
+    "seniority": ["Director", "VP", "Senior"],
+    "seniority_excluded": ["CXO", "Partner"],
+    "years_experience": "15-30"
+  },
+
+  "execution_notes": [
+    "BFSI filtering happens at evaluation time, not search time — kit strings are GenAI-agnostic",
+    "Expect high noise on broad Recall strings — diversity + 15yr floor + BFSI + Gate 3 are the precision levers",
+    "Never click Similar Profiles",
+    "Minimum 5 pages per string before marking complete",
+    "Checkpoint after every completed string",
+    "Do NOT remove any candidates already saved to the LinkedIn project — leave cleanup to Sam"
+  ]
+}
