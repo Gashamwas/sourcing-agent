@@ -1,0 +1,279 @@
+{
+  "role_title": "Junior Frontier Data Lead",
+  "role_level": "IC4",
+  "role_summary": "Translates client specifications from frontier AI lab researchers into concrete data requirements, creates exemplar samples, writes quality scripts for automated assessment, performs independent QA on data batches, and tech-leads 1-2 engineers. Works cross-timezone with frontier lab clients (OpenAI, Anthropic, Google, Meta) and internal delivery teams. The core skill is data quality judgment — knowing what good training data looks like, how to measure it, and how to build systems that enforce it. This is a hands-on IC role with a data-centric ML focus, not a research role.",
+  "geography": "Brazil",
+  "linkedin_project": "Brazil FDL Pipeline",
+
+  "capability_areas": [
+    {
+      "name": "1. RL & Post-Training Data Systems",
+      "description": "Building or working with reinforcement learning pipelines, reward models, RLHF/DPO/PPO training loops, preference data collection, or post-training alignment systems. This is the highest-priority capability area.",
+      "builder_signals": [
+        "Built or contributed to RLHF/DPO/GRPO/PPO training pipelines in any context",
+        "Designed reward models or preference data collection workflows",
+        "Built RL environments, simulators, or verifier systems",
+        "Worked with synthetic data generation for RL or post-training",
+        "Explored or prototyped RLHF/RLAIF even in a corporate or personal project context"
+      ],
+      "user_signals": [
+        "Mentioned RL/RLHF only as a skill keyword with no project evidence",
+        "Used a pre-trained RLHF-tuned model via API without training involvement",
+        "Managed an annotation team labeling preferences without designing the methodology"
+      ],
+      "key_terms": ["RLHF", "DPO", "GRPO", "PPO", "reward model", "preference data", "RLAIF", "constitutional AI", "post-training", "alignment"]
+    },
+    {
+      "name": "2. Coding Agent & SWE Agent Data",
+      "description": "Building datasets, benchmarks, evaluation harnesses, or training infrastructure for AI systems that write, debug, or test code. Includes experience with code generation models, code evaluation, or automated testing for LLM outputs.",
+      "builder_signals": [
+        "Built or contributed to code evaluation benchmarks (SWE-bench, HumanEval, MBPP, or custom)",
+        "Designed training data pipelines for code generation models",
+        "Created evaluation harnesses for coding agent performance",
+        "Built automated testing or quality assessment systems for LLM-generated code",
+        "Published on neural program synthesis or code LLM training"
+      ],
+      "user_signals": [
+        "Used Copilot/ChatGPT for coding without building evaluation or training systems",
+        "Built CI/CD pipelines or dev tools (standard SWE infrastructure, not AI evaluation)"
+      ],
+      "key_terms": ["SWE-bench", "HumanEval", "MBPP", "code LLM", "code generation", "coding agent", "neural program synthesis"]
+    },
+    {
+      "name": "3. Agentic Systems, Tool-Calling & Agent Evaluation",
+      "description": "Building AI agents, multi-agent systems, tool-calling/function-calling infrastructure, MCP servers, browser-use/computer-use environments, or evaluation frameworks for agent behavior. The JD explicitly calls out three environment types: coding agents, browser-use agents, and MCP/function-calling agents. People building production agentic systems with hands-on LLM work are directly relevant.",
+      "builder_signals": [
+        "Built AI agents or multi-agent systems with LLM orchestration (tool-calling, function-calling, state machines, routing)",
+        "Designed or implemented MCP servers, function-calling infrastructure, or tool-use interfaces for AI agents",
+        "Built browser-use or computer-use agent environments",
+        "Designed evaluation frameworks for agent behavior (multi-step workflows, long-horizon tasks, trajectory analysis)",
+        "Built LLM-as-a-Judge or automated evaluation systems for AI outputs",
+        "Implemented agent observability, guardrails, or quality systems for production LLM agents",
+        "Deployed open-source LLMs (Llama, Mistral, etc.) hands-on — not just via API — with custom inference or serving"
+      ],
+      "user_signals": [
+        "Used pre-built agent frameworks (AutoGPT, BabyAGI) without designing the agent architecture or evaluation",
+        "Built simple chatbots or RAG systems without agent orchestration, evaluation, or tool-calling complexity",
+        "Used LLM APIs to build products without any evaluation design or quality systems"
+      ],
+      "key_terms": ["AI agent", "multi-agent", "tool-calling", "function calling", "MCP", "Model Context Protocol", "browser-use", "computer-use", "agent evaluation", "LLM-as-a-Judge", "agentic"]
+    },
+    {
+      "name": "4. Data Quality, Curation & Evaluation Systems",
+      "description": "Designing and building systems that measure, enforce, or improve data quality for ML model training. This includes evaluation suite design, LLM evaluation frameworks, data augmentation strategies, automated quality checks, rubric/annotation methodology design, and quality systems for AI outputs. This capability area captures the CORE DAILY WORK of the role.",
+      "builder_signals": [
+        "Designed evaluation suites or quality metrics for model outputs (hallucination detection, faithfulness scoring, TruLens, DeepEval, custom evals)",
+        "Built LLM evaluation frameworks or pipelines (automated scoring, A/B evaluation, regression testing for model quality)",
+        "Built data curation pipelines — selection, filtering, deduplication, quality scoring of training data",
+        "Created data augmentation or synthetic data generation systems",
+        "Wrote automated quality assessment scripts or rubrics for data/model evaluation",
+        "Designed annotation methodologies, labeling guidelines, or inter-annotator agreement systems",
+        "Led data quality improvement projects where the goal was better model performance via better data",
+        "Built data cleaning pipelines that required understanding of model training impacts",
+        "Implemented custom ML code for evaluation, quality assessment, or data analysis with ML awareness"
+      ],
+      "user_signals": [
+        "Built ETL/data pipelines for analytics or BI without ML training awareness",
+        "Did data cleaning for dashboards or reporting, not for model training",
+        "Managed data labeling teams operationally without designing the methodology"
+      ],
+      "key_terms": ["data curation", "data quality", "evaluation suite", "hallucination metrics", "annotation methodology", "synthetic data", "data augmentation", "quality rubric", "TruLens", "DeepEval", "LLM evaluation", "automated evaluation", "LLM-as-a-Judge"]
+    },
+    {
+      "name": "5. STEM & Multimodal Reasoning",
+      "description": "Building training data, evaluation systems, or fine-tuning pipelines for models that reason across modalities (vision+text) or in STEM domains (math, science, code+reasoning). Roughly equal priority with each other.",
+      "builder_signals": [
+        "Designed multimodal training datasets or benchmarks",
+        "Built evaluation frameworks for vision-language models",
+        "Created STEM reasoning datasets or evaluation harnesses",
+        "Fine-tuned or trained multimodal models (not just deployed them)",
+        "Published on VLMs, visual reasoning, or mathematical reasoning for LLMs"
+      ],
+      "user_signals": [
+        "Used vision APIs for image classification in production applications",
+        "Applied OCR or document processing without model training involvement",
+        "Built RAG systems that happen to include images without multimodal model training"
+      ],
+      "key_terms": ["VLM", "VLA", "vision-language", "multimodal", "STEM reasoning", "mathematical reasoning"]
+    },
+    {
+      "name": "6. LLM Fine-Tuning & Model Training",
+      "description": "Hands-on experience fine-tuning or training language models in ANY context — corporate, academic, personal projects. This is a catch-all for ML practitioners who have direct model training experience but don't fit neatly into the above categories. The key is hands-on involvement with training, not just deployment.",
+      "builder_signals": [
+        "Fine-tuned LLMs (SFT, instruction tuning, domain adaptation) with hands-on PyTorch/HuggingFace work",
+        "Trained models from scratch or significantly modified training procedures",
+        "Built training data pipelines specifically for model fine-tuning",
+        "Designed or ran experiments to improve model performance through data or training changes",
+        "Published ML research involving model training or evaluation methodology"
+      ],
+      "user_signals": [
+        "Used pre-trained models via API (OpenAI, Anthropic, etc.) without fine-tuning",
+        "Deployed models to production without involvement in training",
+        "Used AutoML or no-code ML platforms"
+      ],
+      "key_terms": ["fine-tuning", "SFT", "instruction tuning", "LoRA", "PEFT", "training pipeline", "model training", "PyTorch", "HuggingFace", "transformers"]
+    },
+    {
+      "name": "7. Embodied AI & Simulation",
+      "description": "Building simulation infrastructure, synthetic data generation, or training environments for physically-grounded AI. Lower priority than other areas but still relevant — the infrastructure skills transfer directly to RL environment and synthetic data work.",
+      "builder_signals": [
+        "Built simulation environments for robot training (Isaac Sim, PyBullet, MuJoCo)",
+        "Designed synthetic data generation pipelines for embodied agents",
+        "Created sim-to-real transfer frameworks",
+        "Built RL training loops in simulation contexts"
+      ],
+      "user_signals": [
+        "Used simulation tools only for classical control validation",
+        "Did mechanical engineering or hardware design without ML training"
+      ],
+      "key_terms": ["sim-to-real", "Isaac Sim", "embodied AI", "synthetic data generation", "simulation environment"]
+    }
+  ],
+
+  "depth_distinction": {
+    "builder_definition": "Has done hands-on ML work where data quality, model training, or evaluation methodology was a primary focus of their effort — in ANY context. This includes: fine-tuning LLMs at a corporate R&D lab, building evaluation suites for a product team's models, designing data curation pipelines, creating synthetic data generators, training models in an academic setting, or building RL environments as a side project. The key question is: did this person get their hands dirty with training data, model training, or evaluation design? 'Hands-on' means writing code, not managing a team that writes code.",
+    "user_definition": "Uses ML models as components in applications without involvement in how those models are trained, evaluated, or improved through data. This includes: calling model APIs to build products, deploying pre-trained models without fine-tuning, building data pipelines for analytics/BI (not for training), managing ML teams without personal technical depth, using AutoML or no-code platforms. The distinguishing question: if you asked this person 'how would you improve model X through better training data?', would they have a substantive answer from experience?",
+    "edge_case_guidance": "CAREER TRANSITIONERS: Someone currently doing hands-on ML/data work (even for 6-12 months) after a career in adjacent fields (DevOps, SWE, data engineering) should be evaluated on CURRENT work, not career history length. If their current role involves building RLHF environments or fine-tuning LLMs, that matters more than 3 prior years of DevOps. Apply the 4-year bar to total ML-adjacent experience (including SWE with ML components), not to post-training experience specifically. SPARSE PROFILES: If a profile has PhD + strong title + strong employer but sparse bullets, use the INFERENTIAL_SAVE pathway (see below). The base rate for 'PhD in ML + Staff/Senior ML Engineer at a known company' being relevant is high enough to warrant recruiter review. CORPORATE R&D: Work at corporate research labs (Dell OCTO, Samsung AI Center, Microsoft Research) counts fully — 'not a frontier lab' is not a reason to reject if the work involves model training, evaluation, or data quality."
+  },
+
+  "inferential_save_rules": {
+    "description": "For profiles where evidence is sparse but priors are strong, the agent should SAVE with a flag rather than REJECT on insufficient evidence. These candidates get passed to the recruiter for manual review rather than being silently dropped.",
+    "conditions": [
+      "PhD in ML/AI/CS + title indicating ML IC work (Research Scientist, ML Engineer, Applied Scientist, Staff/Senior ML) at any company — even without detailed summary bullets",
+      "Currently employed at a frontier lab or strong AI company in a technical role — even if profile lacks detail",
+      "Profile shows clear progression into ML from adjacent field (SWE → ML Engineer → current ML role) with most recent role being directly relevant — even if bullets are sparse"
+    ],
+    "save_tag": "INFERENTIAL_SAVE",
+    "confidence_range": [0.4, 0.6],
+    "note": "These are not confident saves — they're 'too strong to reject on insufficient evidence, needs human review.' The recruiter should prioritize reviewing these."
+  },
+
+  "non_fit_patterns": [
+    {
+      "label": "Pure data analytics / BI",
+      "description": "Data analysts and BI professionals who build dashboards, reports, and SQL queries for business stakeholders. Their 'data' work is reporting and visualization, not training data or model evaluation.",
+      "why_not": "No connection to model training, evaluation design, or data quality for ML. 'Data' in their context means business data for human consumption, not training data for models.",
+      "examples": ["BI analyst building Tableau dashboards", "Data analyst writing SQL for marketing reports", "Analytics engineer building dbt models for finance team"]
+    },
+    {
+      "label": "Pure software engineering with no ML component",
+      "description": "Backend, frontend, or full-stack engineers building web applications, APIs, or infrastructure with zero ML/AI involvement across their career.",
+      "why_not": "Software engineering skills are necessary but not sufficient. Without any evidence of ML work — model training, data pipeline for training, evaluation — there's no signal for the data-centric ML focus the role requires.",
+      "examples": ["Full-stack engineer building React/Node apps", "Backend engineer building REST APIs and microservices", "Mobile developer building iOS/Android apps"]
+    },
+    {
+      "label": "ML deployment / MLOps without training involvement",
+      "description": "Engineers who deploy, monitor, and serve ML models in production but are not involved in training, fine-tuning, or evaluation design. They build the infrastructure AROUND models, not the models or data themselves.",
+      "why_not": "Adjacent to ML but on the wrong side of the training/serving boundary. Their expertise is reliability, scaling, and observability — not data quality or model improvement through better training.",
+      "examples": ["MLOps engineer managing Kubeflow/SageMaker pipelines", "ML platform engineer building feature stores", "DevOps engineer who happens to deploy ML models"]
+    },
+    {
+      "label": "Data engineering / ETL without ML awareness",
+      "description": "Engineers building data pipelines, warehouses, and ETL processes for analytics, not for model training. The key distinction: are they building pipelines that feed into model training with awareness of data quality impact, or pipelines that feed into dashboards?",
+      "why_not": "Moves and transforms data but doesn't design data for model training. If they've never thought about how their data pipeline affects model performance, the role's core competency is missing.",
+      "examples": ["Data engineer building Spark pipelines for a data warehouse", "ETL developer building Airflow DAGs for reporting"]
+    },
+    {
+      "label": "Annotation / data labeling operations only",
+      "description": "People who manage or perform data annotation as an operational role — labeling images, rating text, following rubrics — without designing the annotation methodology, quality metrics, or evaluation systems.",
+      "why_not": "The role DESIGNS labeling methodologies and quality systems. Performing labels or managing labelers is the execution layer, not the design layer. However: someone who both manages labelers AND designs the rubrics/quality metrics is closer to a fit — evaluate the design side.",
+      "examples": ["AI trainer at Scale AI or Turing doing annotation tasks", "Annotation QA specialist following existing rubrics", "Labeling team lead focused on throughput and headcount"]
+    },
+    {
+      "label": "Project / program management without technical IC work",
+      "description": "Managers, PMs, and scrum masters who coordinate ML teams but don't personally write code, train models, or design data systems. The role is a hands-on IC position.",
+      "why_not": "The role requires writing quality scripts, creating exemplar samples, and doing independent QA — all hands-on IC work. A manager who coordinates this work but doesn't do it personally doesn't have the right skill set.",
+      "examples": ["Technical program manager for an ML team", "Product manager for an AI product", "Scrum master for a data science team"]
+    }
+  ],
+
+  "non_fit_override_rule": "A non-fit pattern is OVERRIDDEN if the candidate's summary bullets show specific evidence of work in a capability area at the builder level. Feliphe Galiza at iFood doing SFT/instruction tuning on their commerce LLM is NOT 'applied ML for business' — he's doing hands-on model fine-tuning. The non-fit label describes default expectations for a company/title combination; the actual evidence in summary bullets always wins. When evidence contradicts the non-fit pattern, note the conflict and evaluate on evidence.",
+
+  "employer_signal_rules": [
+    {
+      "tier": "frontier_lab",
+      "employer_patterns": ["OpenAI", "Anthropic", "Google DeepMind", "Meta FAIR", "Microsoft Research", "xAI", "Mistral", "Cohere"],
+      "evidence_required": "Any technical role at a frontier lab is a strong signal. Even roles not directly in post-training (infra, research engineering) typically touch training and evaluation systems. Title + lab is sufficient for SAVE, though specific capability area evidence increases confidence.",
+      "save_on_employer_alone": true
+    },
+    {
+      "tier": "strong_ai",
+      "employer_patterns": ["Google Brain", "Microsoft Turing", "Amazon AGI", "Apple MLR", "Maritaca AI", "Samsung AI Center", "Hugging Face", "AI2", "Stability AI", "Sepal AI", "Scale AI"],
+      "evidence_required": "Technical ML role at these companies is strong prior. Need at least one signal beyond title — a team name suggesting training/eval work, a research area, or a relevant keyword in headline. But the bar is low: 'ML Engineer at Hugging Face' or 'Research Engineer at Samsung AI Center' is enough.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "corporate_rd",
+      "employer_patterns": ["Dell OCTO", "IBM Research", "Bosch Research", "Siemens AI Lab", "Petrobras CENPES"],
+      "evidence_required": "Corporate R&D doing genuine research (publications, invention disclosures, model training) counts fully. Need evidence of research output or hands-on model work — title alone at a corporate lab isn't sufficient because these labs also have pure engineering roles.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "brazilian_tech",
+      "employer_patterns": ["Nubank", "iFood", "Itaú", "Stone", "Mercado Libre", "Rappi", "PagSeguro", "VTEX", "Loft", "QuintoAndar", "Creditas"],
+      "evidence_required": "ML roles at these companies span from applied (fraud, recommendations, pricing) to training-adjacent (fine-tuning, evaluation, data quality). CANNOT reject on company alone — need to see summary bullets to distinguish. At facial stage, any ML title at these companies is AMBIGUOUS and defaults to YES. At full stage, evaluate based on actual work in bullets. Someone doing LLM fine-tuning or evaluation design at iFood is just as relevant as the same work at a startup.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "neutral",
+      "employer_patterns": [],
+      "evidence_required": "Same standard as any candidate — capability area mapping + depth test based on profile evidence.",
+      "save_on_employer_alone": false
+    }
+  ],
+
+  "minimum_years_experience": 4,
+  "minimum_bar_description": "4+ years of total ML-adjacent experience — which includes software engineering roles where ML was a component, data science with model building, ML research, or ML engineering. Does NOT require 4 years specifically in post-training, RLHF, or evaluation work. A software engineer with 6 years total and 1.5 years of direct LLM fine-tuning experience meets the bar. A career transitioner with 3 years of DevOps and 1 year of hands-on RLHF environment building ALSO meets the bar if the current work is directly relevant — evaluate the trajectory, not the arithmetic. The minimum bar exists to filter out junior developers and career-starters, not to penalize people who arrived at ML through a non-linear path.",
+
+  "facial_calibration": {
+    "expected_yes_rate_low": 0.35,
+    "expected_yes_rate_high": 0.60,
+    "fast_exit_patterns": [
+      "ENTIRE career is IT support, helpdesk, or system administration with no ML/AI/data science signal at any position",
+      "ENTIRE career is sales, business development, or account management",
+      "ENTIRE career is HR, recruiting, or people operations",
+      "ENTIRE career is marketing, content creation, or social media with no technical roles",
+      "ENTIRE career is project/program management with no technical IC positions",
+      "ENTIRE career is web/mobile frontend development with no ML/data signal across all roles",
+      "ENTIRE career is manual QA/testing with no ML automation or data science"
+    ],
+    "trajectory_yes_patterns": [
+      "Any position at a frontier AI lab or strong AI company in a technical role",
+      "Career includes Research Scientist / Research Engineer / Applied Scientist titles at any company",
+      "PhD in ML, AI, CS, EE, or related field visible in education — regardless of current employer",
+      "Title contains 'LLM', 'NLP', 'RL', 'reinforcement learning', 'fine-tuning', 'training data', 'data quality', or 'evaluation' at any position",
+      "Progression from SWE/data roles INTO ML-specific roles (Data Scientist → ML Engineer, or SWE → AI Engineer) — trajectory toward ML",
+      "Current position involves 'AI Research', 'R&D', 'AI Lab', or 'Machine Learning' in the team/company name",
+      "Academic roles (professor, postdoc, researcher) at universities with ML/AI affiliations"
+    ],
+    "trajectory_ambiguous_patterns": [
+      "ML Engineer / Data Scientist / AI Engineer at a Brazilian tech company — could be applied ML or training-relevant work, CANNOT tell from snippet",
+      "Software Engineer at any company with 'AI' or 'ML' mentioned in headline — might be ML-adjacent SWE or genuine ML work",
+      "'Data Scientist' title at a non-tech company — could range from SQL analytics to genuine model training",
+      "Mix of technical roles across different domains — trajectory direction unclear without bullets",
+      "Career change visible (non-ML roles → recent ML role) — current relevance unclear from titles alone",
+      "Title says 'Senior' or 'Lead' but company is unknown — seniority without domain context"
+    ],
+    "trajectory_no_patterns": [
+      "ENTIRE career is data analytics / BI / reporting across all positions with no ML engineering titles",
+      "ENTIRE career is traditional software engineering (backend/frontend/mobile) with zero ML/AI/research signal across ALL positions",
+      "ENTIRE career is data engineering / ETL with no ML model training or research positions at any point",
+      "ENTIRE career is DevOps / SRE / infrastructure with no recent pivot to ML (note: if most recent role IS ML, this becomes trajectory_yes, not trajectory_no)",
+      "ENTIRE career is non-technical roles (operations, finance, legal) with no technical positions"
+    ]
+  },
+
+  "market_density": "dense",
+  "employer_blacklist": ["Turing"],
+  "jd_path": "/Users/sam.vangelos/Downloads/Frontier Data Lead (Generic).md",
+
+  "bias_controls": {
+    "max_consecutive_saves": 7,
+    "max_consecutive_rejects": 15,
+    "parse_failure_alarm_rate": 0.03
+  },
+
+  "version": "3.0",
+  "author": "Sam Vangelos",
+  "notes": "V3 recalibration based on 0/161 save rate failure with V2 and hiring manager intake call. Key shifts: (1) depth distinction is 'hands-on ML with data quality focus' not 'frontier builder', (2) 4-year bar applies to total ML experience not post-training specifically, (3) inferential save pathway for sparse high-prior profiles, (4) non-fit patterns are overridden by actual evidence in summary bullets, (5) capability areas broadened to include data quality/curation and general LLM fine-tuning, (6) career transitioners evaluated on current work not history length. Test candidates: Roger (VTEX data scientist, LLM fine-tuning + eval suites → SAVE via cap areas 3+5), Sarah (Dell OCTO R&D lead, multimodal LLM research + PhD → SAVE via cap areas 4+5), Higor (Sepal AI, currently building RLHF environments → SAVE via cap area 1 despite DevOps history)."
+}

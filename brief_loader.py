@@ -1,17 +1,27 @@
 """Brief loader — normalizes any brief JSON into a standard Brief dataclass.
 
-Handles the two known brief formats (Brazil FDL, Head of AI Lab) and any future
-brief that follows either pattern. The loader maps idiosyncratic field names to
-a common schema so all downstream modules use a single interface.
+Handles three brief formats:
+1. Brazil FDL (old) — archetypes as dicts with save_signals/skip_signals
+2. Head of AI Lab (old) — sweet_spot.archetypes as strings
+3. V2 schema (new) — capability_areas, depth_distinction, non_fit_patterns, employer_signal_rules
+
+For V2 briefs, loads into both the old Brief (for strategy.py/adaptation compat)
+and the new brief_schema.Brief (for judgment_templates.py). The new brief is
+stored as Brief._new_brief.
 """
 
 from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 KIT_BASE_URL = "https://search-kit-library.vercel.app/kit"
+
+
+def _is_v2_brief(raw: dict) -> bool:
+    """Detect if a brief JSON uses the V2 schema (has capability_areas)."""
+    return "capability_areas" in raw and "depth_distinction" in raw
 
 
 @dataclass
@@ -33,18 +43,188 @@ class Brief:
     experience_floor: dict
     search_priorities: list[str] = field(default_factory=list)
     noise_predictions: list[dict] = field(default_factory=list)
+    # Lightweight brief fields — JD-driven mode
+    jd_text: str = ""
+    intake_notes: str = ""
+    instructions: list[str] = field(default_factory=list)
+    employer_blacklist: list[str] = field(default_factory=list)
     raw: dict = field(default_factory=dict)
+    # V2 brief schema object (set when loading a V2 brief)
+    _new_brief: Any = field(default=None, repr=False)
+
+    def needs_preflight(self) -> bool:
+        """Check if this brief needs Sourcing Preflight to fill eval criteria."""
+        # V2 briefs never need preflight — they carry their own eval criteria
+        if self._new_brief is not None:
+            return False
+        has_jd = bool(self.jd_text)
+        has_archetypes = bool(self.archetypes)
+        has_minimum_bar = bool(self.minimum_bar)
+        return has_jd and (not has_archetypes or not has_minimum_bar)
+
+    @property
+    def has_v2_schema(self) -> bool:
+        """Whether this brief was loaded from a V2 schema with structured evaluation."""
+        return self._new_brief is not None
 
 
 def load_brief(path: str | Path) -> Brief:
     """Load a brief JSON file and return a normalized Brief dataclass."""
     with open(path) as f:
         raw = json.load(f)
+    if _is_v2_brief(raw):
+        return _load_v2_brief(raw)
     return normalize_brief(raw)
 
 
+def _load_v2_brief(raw: dict) -> Brief:
+    """Load a V2 brief: create the new brief_schema.Brief AND map to old Brief for compat."""
+    from integration_example import load_brief as _load_new_brief_from_dict
+    from brief_schema import Brief as NewBrief, CapabilityArea, DepthDistinction, \
+        NonFitPattern, EmployerSignalRule, FacialCalibration, BiasControls, MarketDensity
+
+    # --- Build the new brief_schema.Brief ---
+    capability_areas = [
+        CapabilityArea(
+            name=ca["name"], description=ca["description"],
+            builder_signals=ca["builder_signals"],
+            user_signals=ca.get("user_signals", []),
+            key_terms=ca.get("key_terms", []),
+        ) for ca in raw["capability_areas"]
+    ]
+    depth = DepthDistinction(
+        builder_definition=raw["depth_distinction"]["builder_definition"],
+        user_definition=raw["depth_distinction"]["user_definition"],
+        edge_case_guidance=raw["depth_distinction"]["edge_case_guidance"],
+    )
+    non_fit_patterns = [
+        NonFitPattern(
+            label=nf["label"], description=nf["description"],
+            why_not=nf["why_not"], examples=nf.get("examples", []),
+        ) for nf in raw.get("non_fit_patterns", [])
+    ]
+    employer_rules = [
+        EmployerSignalRule(
+            tier=er["tier"], employer_patterns=er["employer_patterns"],
+            evidence_required=er["evidence_required"],
+            save_on_employer_alone=er.get("save_on_employer_alone", False),
+        ) for er in raw.get("employer_signal_rules", [])
+    ]
+    fc_data = raw.get("facial_calibration", {})
+    facial = FacialCalibration(
+        expected_yes_rate_low=fc_data.get("expected_yes_rate_low", 0.25),
+        expected_yes_rate_high=fc_data.get("expected_yes_rate_high", 0.55),
+        fast_exit_patterns=fc_data.get("fast_exit_patterns", []),
+        trajectory_yes_patterns=fc_data.get("trajectory_yes_patterns", []),
+        trajectory_ambiguous_patterns=fc_data.get("trajectory_ambiguous_patterns", []),
+        trajectory_no_patterns=fc_data.get("trajectory_no_patterns", []),
+    )
+    bc_data = raw.get("bias_controls", {})
+    bias = BiasControls(
+        max_consecutive_saves=bc_data.get("max_consecutive_saves", 5),
+        max_consecutive_rejects=bc_data.get("max_consecutive_rejects", 20),
+        parse_failure_alarm_rate=bc_data.get("parse_failure_alarm_rate", 0.03),
+    )
+    new_brief = NewBrief(
+        role_title=raw["role_title"],
+        role_level=raw.get("role_level", ""),
+        role_summary=raw.get("role_summary", ""),
+        geography=raw.get("geography", ""),
+        linkedin_project=raw.get("linkedin_project", ""),
+        capability_areas=capability_areas,
+        depth_distinction=depth,
+        non_fit_patterns=non_fit_patterns,
+        employer_signal_rules=employer_rules,
+        minimum_years_experience=raw.get("minimum_years_experience", 4),
+        minimum_bar_description=raw.get("minimum_bar_description", ""),
+        facial_calibration=facial,
+        market_density=MarketDensity(raw.get("market_density", "moderate")),
+        employer_blacklist=raw.get("employer_blacklist", []),
+        kit_url=raw.get("kit_url"),
+        jd_path=raw.get("jd_path"),
+        bias_controls=bias,
+        inferential_save_rules=raw.get("inferential_save_rules"),
+        non_fit_override_rule=raw.get("non_fit_override_rule", ""),
+        version=raw.get("version", "2.0"),
+        author=raw.get("author", ""),
+        notes=raw.get("notes", ""),
+    )
+
+    # --- Map V2 fields to old Brief for strategy.py / adaptation compat ---
+    # capability_areas → archetypes
+    archetypes = []
+    for ca in raw["capability_areas"]:
+        archetypes.append({
+            "name": ca["name"],
+            "capability_area": ca["name"],
+            "pattern": ca["description"],
+            "save_signals": ca.get("builder_signals", []),
+            "skip_signals": ca.get("user_signals", []),
+        })
+
+    # non_fit_patterns → noise_archetypes
+    noise_archetypes = []
+    for nf in raw.get("non_fit_patterns", []):
+        noise_archetypes.append({
+            "name": nf["label"],
+            "description": nf["description"],
+            "signals": nf.get("examples", []),
+        })
+
+    # hard_skips from fast_exit_patterns
+    hard_skips = fc_data.get("fast_exit_patterns", [])
+
+    # minimum_bar from minimum_bar_description
+    min_bar = raw.get("minimum_bar_description", "")
+    min_years = raw.get("minimum_years_experience", 4)
+    if min_bar and min_years:
+        min_bar = f"{min_years}+ years. {min_bar}"
+
+    # permanent_filters from geography
+    permanent_filters = {}
+    if raw.get("geography"):
+        permanent_filters["Location"] = raw["geography"]
+
+    # experience_floor
+    experience_floor = {
+        "required": f"{min_years}+ years hands-on",
+        "disqualifying": "",
+    }
+
+    # Load JD text from jd_path if provided
+    jd_text = raw.get("jd", "") or raw.get("jd_text", "")
+    if not jd_text and raw.get("jd_path"):
+        jd_file = Path(raw["jd_path"])
+        if jd_file.exists():
+            jd_text = jd_file.read_text()
+
+    old_brief = Brief(
+        id=raw.get("role_title", "v2-brief"),
+        role_title=raw["role_title"],
+        role_description=raw.get("role_summary", ""),
+        kit_url=raw.get("kit_url", ""),
+        linkedin_project=raw.get("linkedin_project", ""),
+        linkedin_project_id=raw.get("linkedin_project_id", ""),
+        minimum_bar=min_bar,
+        archetypes=archetypes,
+        noise_archetypes=noise_archetypes,
+        hard_skips=hard_skips,
+        clear_skips_from_review=[],
+        known_noise_patterns=[],
+        permanent_filters=permanent_filters,
+        save_instructions={"destination": raw.get("linkedin_project", "")},
+        experience_floor=experience_floor,
+        employer_blacklist=raw.get("employer_blacklist", []),
+        jd_text=jd_text,
+        intake_notes=raw.get("intake_notes", ""),
+        raw=raw,
+        _new_brief=new_brief,
+    )
+    return old_brief
+
+
 def normalize_brief(raw: dict) -> Brief:
-    """Normalize a raw brief dict into a Brief dataclass."""
+    """Normalize an old-format brief dict into a Brief dataclass."""
 
     # --- ID ---
     brief_id = raw.get("name") or raw.get("brief_id") or "unknown"
@@ -92,7 +272,6 @@ def normalize_brief(raw: dict) -> Brief:
     # --- Save instructions ---
     save_instructions = raw.get("save_instructions", {})
     if not save_instructions:
-        # Construct from individual fields
         si = {}
         if raw.get("linkedin_project"):
             si["destination"] = raw["linkedin_project"]
@@ -112,6 +291,22 @@ def normalize_brief(raw: dict) -> Brief:
     search_priorities = raw.get("search_priorities", [])
     noise_predictions = raw.get("noise_predictions", [])
 
+    # --- Lightweight brief fields (JD-driven mode) ---
+    jd_text = raw.get("jd", "") or raw.get("jd_text", "")
+    if jd_text and not jd_text.strip().startswith(("#", "*", "T", "W", "A")):
+        jd_path_candidate = Path(jd_text)
+        if jd_path_candidate.exists() and jd_path_candidate.suffix in (".md", ".txt"):
+            jd_text = jd_path_candidate.read_text()
+    # If no inline JD text, try loading from jd_path
+    if not jd_text and raw.get("jd_path"):
+        jd_file = Path(raw["jd_path"])
+        if jd_file.exists():
+            jd_text = jd_file.read_text()
+
+    intake_notes = raw.get("intake_notes", "")
+    instructions = raw.get("instructions", [])
+    employer_blacklist = raw.get("employer_blacklist", [])
+
     return Brief(
         id=brief_id,
         role_title=role_title,
@@ -130,6 +325,10 @@ def normalize_brief(raw: dict) -> Brief:
         experience_floor=experience_floor,
         search_priorities=search_priorities,
         noise_predictions=noise_predictions,
+        jd_text=jd_text,
+        intake_notes=intake_notes,
+        instructions=instructions,
+        employer_blacklist=employer_blacklist,
         raw=raw,
     )
 

@@ -39,7 +39,7 @@ def form_strategy(
     Returns:
         ExecutionPlan with generated compound strings and coverage gaps.
     """
-    system = _build_strategy_system(brief)
+    system = _build_strategy_system(brief, has_kit=bool(kit_strings))
     user_prompt = _build_strategy_user(brief, kit_strings, prior_run_data)
 
     print("  Strategizing... (Opus is synthesizing compound search strings)")
@@ -60,7 +60,7 @@ def form_strategy(
         return _default_strategy(kit_strings)
 
 
-def _build_strategy_system(brief: Brief) -> str:
+def _build_strategy_system(brief: Brief, has_kit: bool = True) -> str:
     noise_section = ""
     if brief.noise_archetypes:
         noise_section = f"\n## Noise Archetypes\n{json.dumps(brief.noise_archetypes, indent=2)}"
@@ -86,33 +86,130 @@ Role: {brief.role_title}
 {json.dumps(brief.permanent_filters, indent=2)}
 
 ## Your Task
-You are given a Search Kit — a library of Boolean search terms organized by competency domain.
-These kit strings are YOUR VOCABULARY — raw building blocks, NOT executable queries.
-Do NOT include kit strings directly in the execution queue.
+{"You are given a Search Kit — a library of Boolean search terms organized by competency domain. These kit strings are YOUR VOCABULARY — raw building blocks, NOT executable queries. Do NOT include kit strings directly in the execution queue." if has_kit else "No pre-built search kit is available. You will generate compound Boolean strings directly from the role description, archetypes, JD context, and any sourcing instructions provided."}
 
-Your job: synthesize targeted compound Boolean strings by combining terms from multiple kit clusters with domain qualifiers from the brief.
+Your job: synthesize targeted compound Boolean strings {"by combining terms from multiple kit clusters with domain qualifiers from the brief" if has_kit else "from the role requirements, using LinkedIn-compatible Boolean syntax"}.
 
 ### 1. GENERATE compound Boolean strings
-The kit provides terms organized by skill cluster. This role requires an INTERSECTION of skills.
-Create compound Boolean strings that AND-gate high-signal terms from different kit clusters with domain/seniority qualifiers from the brief.
+{"The kit provides terms organized by skill cluster. This" if has_kit else "This"} role requires an INTERSECTION of skills.
+Create compound Boolean strings that AND-gate high-signal terms {"from different kit clusters with" if has_kit else "with"} domain/seniority qualifiers from the brief.
 
 Example compound: ("agentic" OR "LLM agent") AND ("financial services" OR "banking" OR "BFSI") AND ("production" OR "deployment" OR "enterprise")
 
-Generate 10-25 compound strings, ordered from highest to lowest expected signal density.
+Generate 15-30 compound strings. You MUST include a mix of TWO string types:
 
-Guidelines for compound generation:
+**Type A: Recall strings (10-15 strings)**
+Broad searches that surface the general cohort. 500-5000 expected results.
 - AND-gate 2-3 clusters: skill terms AND domain terms AND seniority/depth signals
-- Pull skill terms from the kit's high-value clusters
+- Keep each clause to 3-6 OR'd terms
+
+**Type B: Precision "sniper" strings (5-15 strings)**
+Narrow searches using specific tool names, framework names, benchmark names, or niche technical terms that only genuine practitioners would have on their profile. 20-500 expected results.
+- {"Use the kit's Precision cluster terms — specific tools, libraries, benchmarks, methods" if has_kit else "Use specific tool names, framework names, benchmark names, or method-specific terms from the JD and role description"}
+- Cross with minimal domain qualifiers (or none — the tool name IS the qualifier)
+- Examples of precision signals: specific framework names (Axolotl, vLLM, DeepSpeed), benchmark names (SWE-bench, MMLU, HumanEval), method-specific terms (Constitutional AI, GRPO), infrastructure (TRL, PEFT)
+- These strings may return few results but nearly every result is a real practitioner
+- {"Look through the kit vocabulary for the most specific, least ambiguous terms and USE them" if has_kit else "Mine the JD for the most specific, least ambiguous terms and USE them"}
+
+Order: alternate between Type A and Type B so precision strings run early, not just as an afterthought.
+
+SEQUENCING — BACKLOAD RL/RLHF STRINGS:
+Place strings anchored primarily to RL/RLHF/post-training vocabulary in the SECOND HALF of the execution sequence. Front-load strings targeting other capability areas first (agentic systems, data quality/evaluation, coding agents, STEM/multimodal, embodied AI, general fine-tuning). Rationale:
+- RL/RLHF strings surface the densest, most well-trodden talent pool — they will still run, but later
+- Thinner capability area pools are faster to work through and surface more net-new candidates per string
+- RL practitioners also appear in non-RL strings (someone building RL environments shows up on "simulation" or "agent" strings too — and that incidental RL signal is often stronger than the boilerplate RLHF keyword match)
+- By the time RL strings execute, the adaptation loop will have learned from earlier strings' signal/noise patterns, producing more strategic RL searches than the obvious keyword combinations
+This is NOT deprioritization — all RL strings still execute. It is sequencing for maximum marginal yield.
+
+Guidelines for all strings:
+- {"Pull skill terms from the kit's high-value clusters" if has_kit else "Pull skill terms from the JD's capability areas and technical requirements"}
 - Pull domain terms from the brief's archetypes, minimum bar, and role description
-- Keep each clause to 3-6 OR'd terms to avoid over-constraining
 - Use LinkedIn-compatible Boolean syntax: parenthetical groups joined by AND
-- Start with the tightest, most specific compounds (highest precision)
-- Progress to broader compounds that sacrifice precision for recall
+
+### LinkedIn Search Behavior (MANDATORY — governs every OR group)
+
+LinkedIn Recruiter search has three properties that dictate how you construct every OR group:
+
+1. **Case-insensitive.** "AgentBench" and "agentbench" return identical results. NEVER include case-only variants — they waste OR slots and add zero coverage.
+
+2. **No stemming.** Every character difference is a different search token. "model" does NOT match "models." "fine-tuning" does NOT match "fine-tuned." You MUST include all morphological variants as separate OR terms:
+   - Singular AND plural: "reward model" AND "reward models"
+   - Base AND past tense: "fine-tuning" AND "fine-tuned"
+   - Noun AND gerund: "reward model" AND "reward modeling"
+   - Spacing/hyphenation variants: "fine-tuning" AND "fine tuning" AND "finetuning"
+   - Common truncations practitioners use: "evals" for "evaluations", "env" for "environment"
+   - Acronym + expansion: "RLHF" AND "reinforcement learning from human feedback"
+   No penalty for long OR strings — 8 well-chosen variants is better than 3. Every missing variant is a missing candidate.
+
+3. **Substring-embedded.** "reward model" DOES match "reward model development" because the exact character sequence is embedded. NEVER add superstrings of existing terms — they add zero coverage.
+
+### Signal Test (every OR group must pass)
+
+- **Recall groups:** "Does this group anchor me to the right general population for this role?" It should return people plausibly in the right space, even if not all are perfect fits.
+  - PASS: ("RLHF" OR "reinforcement learning from human feedback") → returns post-training practitioners
+  - FAIL: ("machine learning") → too broad, returns everyone in ML
+  - FAIL: ("Python") → returns all of software engineering
+
+- **Precision groups:** "Does this group confirm specific expertise that distinguishes specialists from generalists?"
+  - PASS: ("SWE-bench" OR "SWE bench" OR "swebench") → specific benchmark, only builders know it
+  - FAIL: ("code" OR "coding") → everyone codes
+  - FAIL: ("trajectory") → matches "career trajectory" on every profile
+
+### Disambiguation — No Bare Generic Terms
+
+A bare single-word term with a dominant non-technical meaning on LinkedIn MUST NOT appear in any OR group. Test: if a recruiter pastes this word alone into LinkedIn search, would the majority of results be non-ML? If yes, use only qualified compound forms.
+
+Wrong: ("alignment" OR "AI alignment" OR "model alignment") — bare "alignment" matches organizational alignment, strategic alignment, etc.
+Right: ("AI alignment" OR "model alignment" OR "LLM alignment") — every form is qualified.
+
+Common traps: trajectory, episode, agent, alignment, grounding, planning, reflection, oracle, sandbox, rollout, simulation, curriculum, exploration — all have dominant everyday meanings. Use only compound forms: "agent trajectory", "RL episode", "AI agent", "model alignment", etc.
+
+### Abbreviation Collision Filter
+
+An abbreviation MUST NOT appear standalone if it has a more common non-ML meaning on LinkedIn.
+
+- "IPO" → Initial Public Offering. FAIL — use only "identity preference optimization"
+- "ORM" → Object-Relational Mapping. FAIL — use only "outcome reward model"
+- "CAI" → various non-ML meanings. FAIL — use only "constitutional AI"
+- "PPO" → Preferred Provider Organization. Borderline — "proximal policy optimization" is safer
+- "RLHF" → No dominant non-ML meaning. PASS.
+- "DPO" → Data Protection Officer in some markets. Acceptable if paired with expansion: ("DPO" OR "direct preference optimization")
+
+Rule: an abbreviation that fails alone IS acceptable when paired with its full expansion in the same OR group.
+
+### Blacklist — NEVER Include
+
+**Universal infrastructure:** PyTorch, TensorFlow, JAX, Keras, Docker, Kubernetes, AWS, GCP, Azure, Spark, Airflow, Kafka, Redis, PostgreSQL, MongoDB, Git, GitHub, pandas, NumPy, SciPy, scikit-learn
+
+**Universal ML:** machine learning, deep learning, neural network, gradient descent, backpropagation, cross-validation, hyperparameter, training (alone), inference (alone), model (alone), transformer (alone), encoder, decoder
+
+**Generic software:** CI/CD, GitHub Actions, Jenkins, unit testing, code review, API integration, microservices, REST, GraphQL
+
+**User tools (not builder tools):** GitHub Copilot, Cursor, ChatGPT, Claude (product), Gemini, LangChain, LlamaIndex, AutoGPT, BabyAGI
+
+**Buzzwords:** AI-powered, intelligent automation, cutting-edge, generative AI (alone), autonomous (alone), automation (alone), data-driven, next-generation
+
+### Tool/Library Names Are Proper Nouns
+
+Do NOT fabricate compound expansions for tool names. No practitioner writes "playwright automation" or "MuJoCo physics" on their profile.
+
+Valid expansions: package/repo names ("mujoco-py", "axolotl-ai"), version identifiers ("SWE-bench Lite"), known alternate names ("OpenDevin" for OpenHands), spacing/hyphenation variants ("SWE-bench" / "SWE bench" / "swebench").
+
+A single-term group is valid. If a tool has no variants, the group is just ("Tianshou") and that is correct.
+
+### Mandatory Self-Review Before Output
+
+Execute these checks on every OR group in your output:
+
+1. **Case dedup:** Do any two terms differ ONLY by capitalization? Delete one.
+2. **Disambiguation:** Any bare single-word terms that fail the recruiter-paste test? Replace with compound forms.
+3. **Abbreviation check:** Any standalone abbreviations with non-ML meanings without their expansion paired? Remove or expand.
+4. **Lexical expansion:** Does each group include all necessary variants — singular/plural, base/past tense, noun/gerund, spacing/hyphenation, common truncations? Every missing variant is a missing candidate. But never add superstrings (substring embedding handles those). Tool names are proper nouns — do not invent variants.
 
 ### 2. IDENTIFY coverage gaps
-What candidate populations does the kit vocabulary NOT reach? Examples:
-- People who describe their work differently than the kit's terminology
-- Adjacent skill sets not represented in any kit block
+What candidate populations {"does the kit vocabulary NOT reach" if has_kit else "might your generated strings miss"}? Examples:
+- People who describe their work differently {"than the kit's terminology" if has_kit else "than the JD's terminology"}
+- Adjacent skill sets {"not represented in any kit block" if has_kit else "not covered by your generated strings"}
 - Domain-specific terms the kit misses
 - Title patterns or employer patterns that could surface candidates
 
@@ -121,12 +218,17 @@ For each gap, provide a ready-to-execute Boolean string if possible.
 ### 3. PREDICT noise collisions
 Based on the vocabulary and this geography/role, predict which terms will produce noise and what the collision patterns will be.
 
+IMPORTANT: Each string you generate is a NET — it catches whoever matches the Boolean, regardless of archetype.
+A string built from post-training vocabulary might surface a STEM reasoning engineer or an RL environment builder.
+That's good. The evaluator downstream judges every candidate against ALL archetypes, not just the one the string was "designed for."
+Your strings are search tools, not archetype filters. Label them descriptively but do NOT treat them as archetype-scoped.
+
 Return JSON with this structure:
 - "strategy_rationale": Overall strategy explanation (string)
 - "generated_strings": Array of compound strings to execute, in priority order. Each object:
   - "boolean": The full Boolean string (string)
-  - "rationale": Why this compound targets the role's intersection (string)
-  - "source_clusters": Which kit blocks/clusters the terms come from (string)
+  - "rationale": Why this compound is likely to surface strong candidates for the role (string)
+  - "vocabulary_sources": {"Which kit blocks/clusters the terms come from" if has_kit else "Which JD sections or capability areas the terms derive from"} (string) — this is for traceability only, NOT for scoping evaluation
 - "coverage_gaps": Array of gaps identified. Each object:
   - "gap": Description of the missing coverage (string)
   - "suggested_boolean": Optional Boolean string to fill the gap, or null (string|null)
@@ -152,17 +254,34 @@ def _build_strategy_user(
         for ks in strings:
             vocab_text += f"  [{ks.subblock} / {ks.string_type}]: {ks.boolean}\n"
 
-    prompt = f"""## Boolean Search Vocabulary ({len(kit_strings)} terms across {len(blocks)} competency blocks)
+    if kit_strings:
+        prompt = f"""## Boolean Search Vocabulary ({len(kit_strings)} terms across {len(blocks)} competency blocks)
 These are your raw building blocks. Combine terms from multiple blocks to create targeted compound searches.
 {vocab_text}
 """
+    else:
+        prompt = """## No Kit Vocabulary Available
+No pre-built search kit was provided. Generate compound Boolean strings directly from
+the role description, archetypes, and JD context below. Apply all LinkedIn Boolean rules.
+"""
+
+    # Include JD text if available (supplementary context for string generation)
+    if brief.jd_text:
+        prompt += f"\n## Job Description (source material for search vocabulary)\n{brief.jd_text}\n"
+
+    if brief.intake_notes:
+        prompt += f"\n## Intake Notes\n{brief.intake_notes}\n"
+
     if prior_run_data:
         prompt += f"\n## Prior Run Data\n{json.dumps(prior_run_data, indent=2)}\n"
 
     if brief.search_priorities:
         prompt += f"\n## User Hints\nSearch priorities: {', '.join(brief.search_priorities)}\n"
 
-    prompt += "\nSynthesize compound search strings from this vocabulary."
+    if brief.instructions:
+        prompt += f"\n## Sourcing Instructions\n" + "\n".join(f"- {i}" for i in brief.instructions) + "\n"
+
+    prompt += "\nSynthesize compound search strings" + (" from this vocabulary." if kit_strings else " from the JD and role context.")
     return prompt
 
 
@@ -240,13 +359,27 @@ def adapt_after_block(
 Role: {brief.role_title}
 {brief.role_description}
 
-You've just received a report on a completed block of Boolean searches. Based on the results:
+You've just received a report on a batch of completed Boolean searches. Based on the results:
 1. Generate NEW compound Boolean strings that target signal patterns you observed — use the kit vocabulary below as building blocks
 2. Identify remaining queued strings to skip (redundant, similar to zero-save strings)
 3. Suggest reordering of remaining queued strings based on observed signal
 4. Update noise pattern knowledge
 
+IMPORTANT: Each Boolean string is a NET that catches candidates for ANY archetype, not just one.
+A string built from post-training terms might surface a STEM reasoning engineer. That's expected and good.
+Evaluate string productivity by total saves across ALL archetypes, not just the archetype the string was "designed for."
+
 When generating new strings, combine terms from the kit vocabulary with domain qualifiers. The most valuable new strings will target the specific intersection of skills and domain this role requires.
+
+Include BOTH broad recall strings AND narrow precision "sniper" strings that use specific tool/framework/benchmark names from the kit vocabulary — terms only real practitioners would have on their profiles.
+
+## LinkedIn Boolean Rules (MANDATORY)
+- LinkedIn does NOT stem: "model" ≠ "models" — include all morphological variants
+- LinkedIn IS substring-embedded: "reward model" matches "reward model development" — never add superstrings
+- LinkedIn IS case-insensitive: never add case-only variants
+- Bare ambiguous terms MUST be qualified: "agent" → "AI agent"
+- Abbreviations with non-domain meanings must include spelled-out form
+- Tool/library names are proper nouns — do not fabricate compound expansions
 
 Return JSON with this structure:
 - "new_strings": Array of objects with "boolean" (string), "rationale" (string)
@@ -258,7 +391,7 @@ Return valid JSON only."""
 
     remaining_text = ""
     for ss in remaining_strings:
-        remaining_text += f"  #{ss.id} [{ss.block}]: {ss.boolean[:100]}\n"
+        remaining_text += f"  #{ss.id}: {ss.boolean[:100]}\n"
 
     user_prompt = f"""{block_report.to_summary_text()}
 

@@ -74,7 +74,7 @@ def test_full_prompt_includes_brazil_brief_content():
     prompt = _build_full_system(BRAZIL_BRIEF)
     assert "Post-Training Data Engineer" in prompt
     assert "save_signals" in prompt.lower() or "Save signals" in prompt
-    assert "skip_signals" in prompt.lower() or "Skip signals" in prompt
+    assert "caution signals" in prompt.lower() or "Caution signals" in prompt
     assert "Fintech ML Engineer" in prompt
     assert "experience_floor" in prompt.lower() or "Experience Floor" in prompt
 

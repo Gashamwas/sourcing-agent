@@ -1,0 +1,12 @@
+{
+  "name": "fdl-brazil-v2",
+  "jd": "/Users/sam.vangelos/Downloads/Frontier Data Lead (Generic).md",
+  "kit_url": "https://search-kit-library.vercel.app/kit/124de3db-4ae6-4d02-aeae-fdd4af95e06d",
+  "instructions": [],
+  "employer_blacklist": ["Turing"],
+  "permanent_filters": {
+    "Location": "Brazil"
+  },
+  "linkedin_project": "FDL Brazil (Agent)",
+  "linkedin_project_id": "1968867218"
+}

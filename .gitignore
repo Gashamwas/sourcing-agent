@@ -12,3 +12,4 @@ progress--*.json
 !progress-sample-redacted.json
 run-log--*.md
 .DS_Store
+greenhouse-mcp/

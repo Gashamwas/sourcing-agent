@@ -23,7 +23,7 @@ def opus_llm(system_prompt: str, user_prompt: str, expect_json: bool = True, max
     """Call Opus for candidate judgment. Returns parsed JSON or raw string."""
     import anthropic
 
-    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=300.0)
     message = client.messages.create(
         model=config.OPUS_MODEL_NAME,
         max_tokens=max_tokens,
@@ -46,18 +46,20 @@ def opus_llm(system_prompt: str, user_prompt: str, expect_json: bool = True, max
 def _call_openai(system_prompt: str, user_prompt: str, expect_json: bool) -> str | dict | list:
     from openai import OpenAI
 
-    client = OpenAI(api_key=config.OPENAI_API_KEY)
+    client = OpenAI(api_key=config.OPENAI_API_KEY, timeout=60.0)
     kwargs = {}
     if expect_json:
         kwargs["response_format"] = {"type": "json_object"}
 
     response = client.chat.completions.create(
         model=config.CHEAP_MODEL_NAME,
+        max_tokens=8192,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ],
         temperature=0.1,
+        timeout=120.0,
         **kwargs,
     )
     text = response.choices[0].message.content.strip()

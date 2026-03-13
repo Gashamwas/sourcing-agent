@@ -73,7 +73,7 @@ class BlockReport:
         return asdict(self)
 
     def to_summary_text(self) -> str:
-        lines = [f'Block "{self.block_name}" complete.']
+        lines = [f'Batch "{self.block_name}" — {self.strings_run} strings complete.']
         lines.append(f"- {self.strings_run} strings run, {self.strings_with_saves} produced saves")
         lines.append(f"- {self.strings_run - self.strings_with_saves} strings produced zero results or all noise")
         if self.top_performers:
@@ -137,6 +137,7 @@ class CandidateSnippet:
     page: int
     result_rank: int
     experience_entries: list[str] = field(default_factory=list)
+    card_index: int = -1  # DOM position of <li> in ol.profile-list; -1 = unknown
 
     def to_dict(self) -> dict:
         return asdict(self)

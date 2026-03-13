@@ -6,11 +6,18 @@ walked directly to produce KitString objects.
 
 from __future__ import annotations
 import re
+import ssl
 import urllib.request
 import urllib.error
 import json
 from schemas import KitString
 import config
+
+try:
+    import certifi
+    _SSL_CONTEXT = ssl.create_default_context(cafile=certifi.where())
+except ImportError:
+    _SSL_CONTEXT = ssl.create_default_context()
 
 KIT_BASE_URL = "https://search-kit-library.vercel.app/kit"
 SUPABASE_REST_URL = "https://bnxshcanjdnpfjktvkvl.supabase.co/rest/v1/search_kits"
@@ -47,7 +54,7 @@ def extract_kit_strings(kit_url_or_id: str) -> list[KitString]:
 
     print(f"  Fetching kit {kit_id} from Supabase...")
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15, context=_SSL_CONTEXT) as resp:
             data = json.loads(resp.read().decode())
     except urllib.error.URLError as e:
         raise RuntimeError(f"Failed to fetch kit from Supabase: {e}") from e

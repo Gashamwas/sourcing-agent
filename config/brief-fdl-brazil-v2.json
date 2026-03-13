@@ -1,0 +1,216 @@
+{
+  "role_title": "Junior Frontier Data Lead",
+  "role_level": "IC4",
+  "role_summary": "Translates research goals into concrete data specifications, RL environment designs, and evaluation frameworks that improve frontier model training. Owns the technical bridge between what researchers need and what the data/environment infrastructure produces.",
+  "geography": "Brazil",
+  "linkedin_project": "Brazil FDL Pipeline",
+
+  "capability_areas": [
+    {
+      "name": "Post-Training Data & RLHF Pipelines",
+      "description": "Designing and building the data pipelines, reward models, and human feedback systems used to align and improve LLMs after pre-training.",
+      "builder_signals": [
+        "Designed reward models or preference data collection systems",
+        "Built RLHF/DPO/PPO/GRPO training pipelines",
+        "Created data quality frameworks for human feedback",
+        "Published on alignment, reward modeling, or preference optimization"
+      ],
+      "user_signals": [
+        "Fine-tuned pre-trained models for business applications",
+        "Used RLHF-tuned models via API",
+        "Managed annotation teams without designing the annotation methodology",
+        "Deployed LLM-based products without training involvement"
+      ],
+      "key_terms": ["RLHF", "DPO", "GRPO", "PPO", "reward model", "preference data", "constitutional AI", "RLAIF"]
+    },
+    {
+      "name": "RL Environments & Verifier-Based Training",
+      "description": "Building simulation environments, verifiers, and evaluation harnesses that test and train models through interaction rather than static data.",
+      "builder_signals": [
+        "Built custom simulation environments for RL agent training",
+        "Designed verifier systems for automated evaluation",
+        "Created synthetic environment generators",
+        "Published on RL environment design or sim-to-real transfer"
+      ],
+      "user_signals": [
+        "Used OpenAI Gym / Stable Baselines for standard RL tasks",
+        "Applied RL to robotics control without designing the environment",
+        "Ran experiments in existing environments without modifying them"
+      ],
+      "key_terms": ["verifier", "environment design", "sim-to-real", "Isaac Sim", "Isaac Lab", "synthetic environment", "RL gym"]
+    },
+    {
+      "name": "Coding Agent & SWE Agent Data",
+      "description": "Building the datasets, benchmarks, and evaluation infrastructure for AI systems that write, debug, and test code autonomously.",
+      "builder_signals": [
+        "Built or contributed to SWE-bench, HumanEval, MBPP, or similar benchmarks",
+        "Designed training data pipelines for code generation models",
+        "Created evaluation harnesses for coding agent performance",
+        "Published on neural program synthesis or code LLM training"
+      ],
+      "user_signals": [
+        "Used Copilot / ChatGPT for coding assistance",
+        "Built CI/CD pipelines or developer tools (standard SWE, not AI)",
+        "Applied code generation models to business problems"
+      ],
+      "key_terms": ["SWE-bench", "HumanEval", "MBPP", "code LLM", "neural program synthesis", "coding agent"]
+    },
+    {
+      "name": "Multimodal & STEM Reasoning",
+      "description": "Building training data, evaluation systems, and benchmarks for models that reason across modalities (vision, text, math, science).",
+      "builder_signals": [
+        "Designed multimodal training datasets or benchmarks",
+        "Built evaluation frameworks for vision-language models",
+        "Created STEM reasoning datasets or evaluation harnesses",
+        "Published on VLMs, visual reasoning, or mathematical reasoning for LLMs"
+      ],
+      "user_signals": [
+        "Used vision APIs for image classification/detection in production",
+        "Applied OCR or document processing models",
+        "Built RAG systems with multimodal retrieval"
+      ],
+      "key_terms": ["VLM", "VLA", "vision-language", "multimodal benchmark", "STEM reasoning", "mathematical reasoning"]
+    },
+    {
+      "name": "Embodied AI & Simulation Infrastructure",
+      "description": "Building the simulation infrastructure, synthetic data generation, and training environments for robots and physically-grounded AI systems.",
+      "builder_signals": [
+        "Built simulation environments for robot training (Isaac Sim, PyBullet, MuJoCo)",
+        "Designed synthetic data generation pipelines for embodied agents",
+        "Created sim-to-real transfer frameworks",
+        "Published on embodied AI training, manipulation, or locomotion learning"
+      ],
+      "user_signals": [
+        "Used simulation tools for classical control validation only",
+        "Applied pre-trained vision models to robotics without training involvement",
+        "Did mechanical engineering or hardware design without ML training"
+      ],
+      "key_terms": ["sim-to-real", "Isaac Sim", "embodied AI", "synthetic data generation", "imitation learning", "manipulation learning"]
+    }
+  ],
+
+  "depth_distinction": {
+    "builder_definition": "Designs training methodology, builds data/evaluation pipelines, creates environments or benchmarks, or conducts research that produces artifacts used to train or evaluate frontier models. The output of their work feeds into model training, not into a business application.",
+    "user_definition": "Fine-tunes or deploys pre-trained models for business use cases (fraud detection, recommendations, ad ranking, chatbots). Uses ML as a tool to solve business problems rather than building the infrastructure that makes models better.",
+    "edge_case_guidance": "MLOps/platform engineers who touch training infrastructure are borderline — save if their work directly enables model training (designed the training data pipeline, built the evaluation framework) but reject if they only manage the compute/deployment layer. Researchers at strong companies whose specific publications are in adjacent but non-target areas (e.g., NLP for information extraction, not for training data) should be evaluated on whether their methodology transfers, not whether their topic matches."
+  },
+
+  "non_fit_patterns": [
+    {
+      "label": "Applied ML for business metrics",
+      "description": "ML engineers and data scientists building models that optimize business KPIs — fraud detection, credit scoring, churn prediction, recommendation engines, ad targeting, demand forecasting",
+      "why_not": "Strong ML practitioners but their work optimizes business outcomes, not model training quality. No connection to post-training data, RL environments, or evaluation systems.",
+      "examples": ["Fraud detection at Nubank", "Recommendation systems at iFood", "Credit scoring at Itaú", "Ad ranking at Meta"]
+    },
+    {
+      "label": "ML platform / MLOps without training",
+      "description": "Engineers who build deployment infrastructure, feature stores, model serving, A/B testing frameworks, or CI/CD for ML — but don't touch training data or model training",
+      "why_not": "Infrastructure adjacent to ML but not to the training/evaluation side. Their systems deploy models; they don't make models better.",
+      "examples": ["ML platform engineer managing Kubeflow clusters", "Feature store architect at a fintech"]
+    },
+    {
+      "label": "NLP application layer",
+      "description": "Engineers building chatbots, sentiment analysis, entity extraction, document processing, or search systems using pre-trained NLP models",
+      "why_not": "Uses language models as components in applications rather than building the training data, evaluation, or fine-tuning infrastructure for the models themselves.",
+      "examples": ["Chatbot engineer at a bank", "NLP engineer doing entity extraction for compliance"]
+    },
+    {
+      "label": "Data engineering / ETL without training data design",
+      "description": "Engineers building data pipelines, warehouses, and ETL processes for analytics or business intelligence",
+      "why_not": "Moves and transforms data but doesn't design data for model training. 'Data' in their context means business data, not training data.",
+      "examples": ["Data engineer at a tech company building Spark pipelines", "Analytics engineer building dbt models"]
+    },
+    {
+      "label": "Classical simulation without learned components",
+      "description": "Engineers doing CFD, FEA, circuit simulation, or other physics-based simulation without RL, learned models, or synthetic training data generation",
+      "why_not": "Simulation expertise that doesn't transfer to RL environment design or synthetic data for model training. 'Simulation' in their context is physics, not AI training.",
+      "examples": ["Aerospace simulation engineer doing flight dynamics", "Chip design engineer using Monte Carlo simulation"]
+    },
+    {
+      "label": "Annotation / data labeling operations",
+      "description": "People who manage or perform data annotation, labeling, or AI training tasks as an operational role rather than a research/engineering role",
+      "why_not": "Adjacent to training data but at the execution layer, not the design layer. The role requires someone who designs what gets annotated and how, not someone who performs the annotation.",
+      "examples": ["AI trainer at Scale AI or Turing", "Annotation team lead", "Data labeling QA specialist"]
+    }
+  ],
+
+  "employer_signal_rules": [
+    {
+      "tier": "frontier_lab",
+      "employer_patterns": ["OpenAI", "Anthropic", "Google DeepMind", "Meta FAIR", "Microsoft Research"],
+      "evidence_required": "Any evidence of working on model training, evaluation, or data quality. At frontier labs, even adjacent roles (research engineering, infrastructure) often touch training directly. Title + lab is strong but still need some signal of what they actually do.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "strong_ai",
+      "employer_patterns": ["Google Brain", "Microsoft Turing", "Amazon AGI", "Apple MLR", "Maritaca AI", "Samsung AI", "Hugging Face", "Cohere", "AI2"],
+      "evidence_required": "Specific evidence of work in a capability area — team name, project description, publication, or skill keywords. Employer indicates they work around strong models, but many roles at these companies are application-layer.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "general_tech",
+      "employer_patterns": ["Nubank", "iFood", "Itaú", "Stone", "Mercado Libre", "Rappi", "PagSeguro"],
+      "evidence_required": "Must show specific evidence of work in a capability area, not just 'ML at a strong company.' These companies have strong ML teams but most ML work there is applied (fraud, recommendations, pricing). Employer signal alone is NOT sufficient — this is the most common false positive source.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "neutral",
+      "employer_patterns": [],
+      "evidence_required": "Same standard as any other candidate — capability area mapping + depth test. Unknown employer means the profile evidence carries all the weight.",
+      "save_on_employer_alone": false
+    }
+  ],
+
+  "minimum_years_experience": 4,
+  "minimum_bar_description": "4-5+ years hands-on building deep learning systems where data quality, model training, evaluation, or environment design was the primary output of their work — not a side effect of building a product. PhD research years count if the research involved building systems (not just analysis).",
+
+  "facial_calibration": {
+    "expected_yes_rate_low": 0.30,
+    "expected_yes_rate_high": 0.55,
+    "fast_exit_patterns": [
+      "ENTIRE career is IT support, helpdesk, system administration — no ML/AI signal at any position",
+      "ENTIRE career is sales, business development, account management",
+      "ENTIRE career is HR, recruiting, people operations",
+      "ENTIRE career is pure management consulting with no technical implementation at any role",
+      "ENTIRE career is marketing, content creation, social media management",
+      "ENTIRE career is product management without technical ML work at any position",
+      "ENTIRE career is web development / frontend / mobile with no ML signal at any position",
+      "ENTIRE career is QA / manual testing without ML automation"
+    ],
+    "trajectory_yes_patterns": [
+      "Any position at a frontier AI lab (OpenAI, Anthropic, DeepMind, Meta FAIR, Microsoft Research) in a technical role",
+      "Career progression through ML research roles — Research Scientist/Engineer titles at multiple companies",
+      "Academic positions (PhD, postdoc, professor) with ML/AI affiliation visible in headline or education",
+      "Transitions from research/academia into industry ML roles — suggests research depth applied to practice",
+      "Any title containing 'RL', 'reinforcement learning', 'post-training', 'evaluation', 'training data', or 'simulation' at any position"
+    ],
+    "trajectory_ambiguous_patterns": [
+      "ML Engineer / Data Scientist at a strong tech company — could be applied ML or training infrastructure, CANNOT tell from snippet alone",
+      "Software Engineer at an AI company — could be product SWE or ML infrastructure",
+      "'AI' or 'ML' in headline but career history is mostly at non-AI companies — might be transitioning into the field",
+      "Mix of research and applied roles — trajectory direction unclear without job description bullets",
+      "Title says 'Senior' or 'Staff' ML at a known company but specific domain unknown from snippet"
+    ],
+    "trajectory_no_patterns": [
+      "ENTIRE career is data analytics / BI / reporting with no ML engineering positions at any point",
+      "ENTIRE career is traditional software engineering with no ML/AI/research signal across all positions",
+      "ENTIRE career is data engineering / ETL with no ML model training or research positions",
+      "ENTIRE career is IT infrastructure / DevOps / SRE with no ML signal",
+      "ENTIRE career is project/program management with no technical IC roles"
+    ]
+  },
+
+  "market_density": "dense",
+  "employer_blacklist": ["Turing"],
+  "kit_url": "https://search-kit-library.vercel.app/kit/124de3db-4ae6-4d02-aeae-fdd4af95e06d",
+
+  "bias_controls": {
+    "max_consecutive_saves": 5,
+    "max_consecutive_rejects": 20,
+    "parse_failure_alarm_rate": 0.03
+  },
+
+  "version": "2.0",
+  "author": "Sam Vangelos",
+  "notes": "Rebuilt from the OpenClaw campaign learnings. The general_tech employer tier is the most important calibration — Session 5's String #31 failure was caused by saving every ML engineer at Brazilian tech companies without requiring capability-area evidence."
+}

@@ -1,8 +1,9 @@
 {
   "name": "fdl-brazil",
   "description": "Frontier Data Lead sourcing in Brazil. Targeting engineers with 4-5+ years building deep learning systems where data quality, evaluation, and environment design drove model improvement. Role spans five capability areas: post-training, coding agents, multimodal, STEM reasoning, and embodied AI.",
-  "kit_url": "https://search-kit-library.vercel.app/kit/527ad0b5-6b37-481b-a75c-414c45ee503a",
+  "kit_url": "https://search-kit-library.vercel.app/kit/124de3db-4ae6-4d02-aeae-fdd4af95e06d",
   "project_name": "FDL Brazil",
+  "linkedin_project_id": "1968867218",
 
   "minimum_bar": "The candidate must show evidence of BUILDING model training systems, not just USING models or model APIs. Application-layer work (LangChain apps, RAG pipelines, dashboards, prompt engineering, multi-agent orchestration, model API integrations) does not qualify unless combined with actual training infrastructure work. Requires 4-5+ years hands-on building or improving deep learning systems where data quality or model behavior was the primary output, plus genuine technical depth in at least one of the five capability areas below. Both axes required — strong signals in one do not compensate for missing the other.",
 
@@ -237,6 +238,7 @@
     ]
   },
 
+  "employer_blacklist": ["Turing"],
   "save_instructions": {
     "method": "Click 'Save to pipeline' button directly on the candidate's profile card or profile page",
     "destination": "FDL Brazil > uncontacted",

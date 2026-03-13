@@ -10,16 +10,19 @@ It does NOT launch a new browser or handle login.
 from __future__ import annotations
 import asyncio
 import re
-from typing import Optional
-from playwright.async_api import async_playwright, Browser, Page, BrowserContext
+from typing import Optional, TYPE_CHECKING
 import config
+
+if TYPE_CHECKING:
+    from rebrowser_playwright.async_api import Browser, Page, BrowserContext
 
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 5
 
 
 async def _retry(coro_fn, retries=MAX_RETRIES, delay=RETRY_DELAY_SECONDS):
-    """Retry an async callable up to `retries` times with `delay` second waits."""
+    """Retry an async callable up to `retries` times with randomized delay."""
+    import random
     last_err = None
     for attempt in range(retries):
         try:
@@ -27,8 +30,9 @@ async def _retry(coro_fn, retries=MAX_RETRIES, delay=RETRY_DELAY_SECONDS):
         except Exception as e:
             last_err = e
             if attempt < retries - 1:
+                jittered = delay * random.uniform(0.5, 1.5)
                 print(f"    [retry {attempt + 1}/{retries}] {e}")
-                await asyncio.sleep(delay)
+                await asyncio.sleep(jittered)
     raise last_err
 
 
@@ -40,8 +44,10 @@ class LinkedInBrowser:
         self._browser: Optional[Browser] = None
         self._context: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
+        self._cursor = None  # GhostCursor for human-like mouse movement
 
     async def connect(self) -> None:
+        from rebrowser_playwright.async_api import async_playwright
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.connect_over_cdp(config.CDP_URL)
         contexts = self._browser.contexts
@@ -54,17 +60,24 @@ class LinkedInBrowser:
                 if "linkedin.com/talent" in page.url:
                     self._context = ctx
                     self._page = page
-                    print(f"  Connected to browser. Active page: {self._page.url}")
+                    # Initialize ghost-cursor for human-like mouse trajectories
+                    try:
+                        from python_ghost_cursor.playwright_async import create_cursor
+                        self._cursor = create_cursor(self._page)
+                        print(f"  Connected to browser (ghost-cursor active). Active page: {self._page.url}")
+                    except Exception as e:
+                        print(f"  Connected to browser (ghost-cursor unavailable: {e}). Active page: {self._page.url}")
                     return
 
-        # List what tabs we did find so the error is actionable
+        # No Recruiter tab found
         all_urls = []
         for ctx in contexts:
             for page in ctx.pages:
                 all_urls.append(page.url)
         urls_text = "\n    ".join(all_urls) if all_urls else "(no tabs open)"
         raise RuntimeError(
-            f"No LinkedIn Recruiter tab found. Open linkedin.com/talent in Chrome first.\n"
+            f"No LinkedIn Recruiter tab found.\n"
+            f"  Open linkedin.com/talent in Chrome, then run again.\n"
             f"  Found {len(all_urls)} tab(s):\n    {urls_text}"
         )
 
@@ -72,11 +85,101 @@ class LinkedInBrowser:
         if self._playwright:
             await self._playwright.stop()
 
+    async def _ghost_click(self, selector: str) -> bool:
+        """Click using ghost-cursor (Bézier trajectory + Fitts's Law timing).
+
+        Falls back to JS eval click if ghost-cursor unavailable or fails.
+        Returns True if ghost-cursor succeeded, False if fell back to JS.
+        """
+        if self._cursor:
+            try:
+                await asyncio.wait_for(self._cursor.click(selector), timeout=5.0)
+                return True
+            except Exception:
+                pass
+        return False
+
+    async def _ghost_move(self, selector: str) -> bool:
+        """Move cursor to element without clicking. Returns True if succeeded."""
+        if self._cursor:
+            try:
+                await asyncio.wait_for(self._cursor.move(selector), timeout=5.0)
+                return True
+            except Exception:
+                pass
+        return False
+
     @property
     def page(self) -> Page:
         if not self._page:
             raise RuntimeError("Browser not connected. Call connect() first.")
         return self._page
+
+    # ------------------------------------------------------------------
+    # Emergency recovery — "break glass" protocol
+    # ------------------------------------------------------------------
+
+    async def check_and_recover(self) -> bool:
+        """Detect error/stuck states and attempt recovery. Returns True if recovery happened."""
+        try:
+            # Check for LinkedIn's "Something went wrong" error page
+            error_heading = self.page.locator('text="Something went wrong"').first
+            try_again_btn = self.page.locator('button:has-text("Try again")').first
+
+            if await error_heading.is_visible(timeout=1000):
+                print("  [recovery] Detected 'Something went wrong' page — attempting recovery...")
+                # Strategy 1: Click "Try again" if present
+                try:
+                    if await try_again_btn.is_visible(timeout=2000):
+                        await try_again_btn.click()
+                        await self.page.wait_for_timeout(5000)
+                        # Check if recovery succeeded
+                        if not await error_heading.is_visible(timeout=2000):
+                            print("  [recovery] 'Try again' click succeeded.")
+                            return True
+                except Exception:
+                    pass
+
+                # Strategy 2: Reload the page
+                print("  [recovery] 'Try again' didn't work — reloading page...")
+                await self.page.reload(wait_until="domcontentloaded", timeout=30000)
+                await self.page.wait_for_timeout(5000)
+                if not await error_heading.is_visible(timeout=2000):
+                    print("  [recovery] Page reload succeeded.")
+                    return True
+
+                # Strategy 3: Navigate back to LinkedIn Recruiter base
+                print("  [recovery] Reload didn't work — navigating to LinkedIn Recruiter home...")
+                await self.page.goto("https://www.linkedin.com/talent/search", wait_until="domcontentloaded", timeout=30000)
+                await self.page.wait_for_timeout(5000)
+                print("  [recovery] Navigated to LI Recruiter home. Will need to re-enter project.")
+                return True
+        except Exception:
+            pass  # No error page detected — normal state
+
+        # Check for blank/empty page (no LinkedIn DOM at all)
+        try:
+            url = self.page.url
+            if "linkedin.com" not in url:
+                print(f"  [recovery] Page navigated away from LinkedIn ({url}) — going back...")
+                await self.page.go_back(wait_until="domcontentloaded", timeout=30000)
+                await self.page.wait_for_timeout(3000)
+                return True
+        except Exception:
+            pass
+
+        # Check for login redirect
+        try:
+            if "/login" in self.page.url or "/uas/login" in self.page.url:
+                print("  [recovery] CRITICAL: Redirected to login page. Session may have expired.")
+                print("  [recovery] Please re-authenticate in the browser window and resume the run.")
+                raise RuntimeError("LinkedIn session expired — re-authenticate and resume.")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+
+        return False
 
     # ------------------------------------------------------------------
     # Navigation
@@ -320,10 +423,13 @@ class LinkedInBrowser:
 
     async def get_results_list_innertext(self) -> str:
         """Get innerText of ol.profile-list (the results container)."""
+        # Fast guard: don't burn 75s retrying if the list doesn't exist
+        if await self.page.locator("ol.profile-list").count() == 0:
+            return ""
         async def _do():
             el = self.page.locator("ol.profile-list").first
-            await el.wait_for(state="attached", timeout=10000)
-            return await el.inner_text(timeout=15000)
+            await el.wait_for(state="attached", timeout=5000)
+            return await el.inner_text(timeout=10000)
         return await _retry(_do)
 
     async def get_card_innertext(self, card_index: int) -> str:
@@ -366,7 +472,8 @@ class LinkedInBrowser:
             if visible:
                 await next_link.scroll_into_view_if_needed()
                 await self.page.wait_for_timeout(500)
-                await next_link.click()
+                if not await self._ghost_click('a.pagination__quick-link--next'):
+                    await next_link.click()
             else:
                 # Fallback: button[aria-label="Next"] for non-project pages
                 next_btn = self.page.locator(
@@ -374,7 +481,8 @@ class LinkedInBrowser:
                 ).first
                 if not await next_btn.is_enabled(timeout=3000):
                     return False
-                await next_btn.click()
+                if not await self._ghost_click('button[aria-label="Next"]:not(.skyline-pagination-button)'):
+                    await next_btn.click()
 
             await self.page.wait_for_timeout(3000)
 
@@ -416,25 +524,111 @@ class LinkedInBrowser:
     async def open_profile(self, candidate_name: str) -> None:
         """Click candidate name link to open the slide-in profile panel.
 
-        Uses text-based matching instead of index position, resilient to DOM reflows.
+        Tries multiple strategies: Playwright text match, then JS click by name substring.
         """
         async def _do():
-            name_link = self.page.locator(
-                f'ol.profile-list article.profile-list-item a:has-text("{candidate_name}")'
-            ).first
-            await name_link.wait_for(state="visible", timeout=5000)
-            await name_link.click()
+            # Strategy 1: Ghost-cursor with Playwright text match
+            selector = f'ol.profile-list article.profile-list-item a:has-text("{candidate_name}")'
+            try:
+                name_link = self.page.locator(selector).first
+                if await name_link.count() > 0:
+                    await name_link.wait_for(state="visible", timeout=5000)
+                    if not await self._ghost_click(selector):
+                        await name_link.evaluate("el => el.click()")
+                    await self.page.locator("div.profile-slidein__container").wait_for(
+                        state="visible", timeout=10000
+                    )
+                    await self.page.wait_for_timeout(1500)
+                    return
+            except Exception:
+                pass
+
+            # Strategy 2: JS click — find link by name substring (handles special chars)
+            escaped_name = candidate_name.replace("'", "\\'").replace('"', '\\"')
+            clicked = await self.page.evaluate(f"""() => {{
+                const links = document.querySelectorAll('ol.profile-list article.profile-list-item a');
+                // Strip credential suffixes (PhD, MBA, M.Sc., etc.) and trailing punctuation
+                let target = '{escaped_name}'.replace(/,?\\s*(PhD|Ph\\.?D|MBA|M\\.?Sc\\.?|M\\.?S\\.?|Dr\\.?|CFA|PMP|PE)\\s*$/gi, '').trim().toLowerCase();
+                for (const link of links) {{
+                    const text = link.textContent.trim().toLowerCase();
+                    if (text.includes(target) || target.includes(text)) {{
+                        link.click();
+                        return true;
+                    }}
+                }}
+                // Fuzzy: try matching just the first name + last name (ignore middle/suffix)
+                const parts = target.split(/\\s+/);
+                if (parts.length >= 2) {{
+                    const first = parts[0];
+                    // Find last part that's not a single letter (initial)
+                    let last = parts[parts.length - 1];
+                    for (let i = parts.length - 1; i >= 1; i--) {{
+                        if (parts[i].length > 1) {{ last = parts[i]; break; }}
+                    }}
+                    for (const link of links) {{
+                        const text = link.textContent.trim().toLowerCase();
+                        if (text.includes(first) && text.includes(last)) {{
+                            link.click();
+                            return true;
+                        }}
+                    }}
+                }}
+                return false;
+            }}""")
+            if not clicked:
+                raise Exception(f"Could not find profile link for '{candidate_name}'")
             await self.page.locator("div.profile-slidein__container").wait_for(
                 state="visible", timeout=10000
             )
             await self.page.wait_for_timeout(1500)
         await _retry(_do)
 
+    async def ensure_card_rendered(self, card_index: int) -> None:
+        """Scroll the Nth <li> in the results list into view to force article rendering.
+
+        LinkedIn uses virtual scrolling — <li> containers are always in the DOM
+        but <article> elements inside only render when the <li> is visible.
+        Call this before open_profile_by_url/open_profile to guarantee the
+        target card's links exist in the DOM.
+        """
+        try:
+            li = self.page.locator("ol.profile-list > li").nth(card_index)
+            await li.scroll_into_view_if_needed(timeout=3000)
+            await self.page.wait_for_timeout(600)  # Let article render
+        except Exception as e:
+            print(f"    [warn] ensure_card_rendered({card_index}) failed: {e}")
+
     async def open_profile_by_url(self, profile_url: str) -> None:
-        """Open a profile by matching the name link href in the results list."""
+        """Open a profile by matching the name link href in the results list.
+
+        Uses JS click to bypass overlay issues. Falls back to Playwright locator.
+        Caller should call ensure_card_rendered() first to guarantee the article is in the DOM.
+        """
         async def _do():
-            link = self.page.locator(f'ol.profile-list a[href*="{profile_url}"]').first
-            await link.click()
+            # Extract the unique profile ID segment for more reliable matching
+            url_fragment = profile_url
+            if "/talent/profile/" in profile_url:
+                url_fragment = profile_url.split("/talent/profile/")[-1].split("?")[0]
+
+            selector = f'ol.profile-list a[href*="{url_fragment}"]'
+
+            # Strategy 1: Ghost-cursor click (Bézier trajectory + mouse events)
+            if not await self._ghost_click(selector):
+                # Strategy 2: JS click by href match (bypasses overlay)
+                clicked = await self.page.evaluate(f"""() => {{
+                    const fragment = '{url_fragment}';
+                    const links = document.querySelectorAll('ol.profile-list a[href*="/talent/profile/"]');
+                    for (const link of links) {{
+                        if (link.href.includes(fragment)) {{
+                            link.click();
+                            return true;
+                        }}
+                    }}
+                    return false;
+                }}""")
+                if not clicked:
+                    raise Exception(f"Could not find profile link for URL fragment '{url_fragment}'")
+
             await self.page.locator("div.profile-slidein__container").wait_for(
                 state="visible", timeout=10000
             )
@@ -444,15 +638,65 @@ class LinkedInBrowser:
     async def get_profile_innertext(self) -> str:
         """Get trimmed innerText from div.profile__main-container.
 
-        Keeps header + Summary + Experience + Education. Skips Accomplishments,
-        Volunteer Experience, Personal Information, Similar Profiles, tabs.
+        Expands all collapsed "Read more" / "see more" sections first,
+        then extracts text. Keeps header + Summary + Experience + Education.
+        Skips Accomplishments, Volunteer Experience, Personal Information, etc.
         """
         async def _do():
             container = self.page.locator("div.profile__main-container").first
             await container.wait_for(state="attached", timeout=10000)
+
+            # Expand all collapsed sections before extracting text
+            await self._expand_all_readmore(container)
+
             full_text = await container.inner_text(timeout=15000)
             return _trim_profile_text(full_text)
         return await _retry(_do)
+
+    async def _expand_all_readmore(self, container) -> None:
+        """Expand collapsed sections in the profile slide-in.
+
+        Only expands content sections that matter for evaluation:
+        - About/Summary "see more" links
+        - Experience entry description bullets
+        - Education details
+
+        Capped at 15 clicks to avoid bot-like rapid-fire DOM interaction.
+        Skips skills endorsements, recommendations, and other non-eval sections.
+        """
+        MAX_EXPANSIONS = 15
+
+        # Single JS pass: click only text-based "see more" / "read more" links,
+        # scoped to content areas (not skill endorsements, recommendations, etc.)
+        try:
+            expanded = await container.evaluate("""(container) => {
+                const MAX = 15;
+                let clicked = 0;
+
+                // Only expand links/buttons whose visible text is a "see more" variant.
+                // The broad class-based selectors ([class*="show-more"]) caught too many
+                // unrelated UI elements (skill pills, endorsement toggles, etc.)
+                const expandTexts = ['see more', 'read more', 'show more', 'ver mais'];
+                const clickables = container.querySelectorAll('a, button, [role="button"]');
+                for (const el of clickables) {
+                    if (clicked >= MAX) break;
+                    const text = (el.textContent || '').trim().toLowerCase();
+                    // Only match if the ENTIRE visible text is a "see more" variant
+                    // (not a button that happens to contain "more" in a longer label)
+                    if (text.length < 20 && expandTexts.some(t => text.includes(t)) && el.offsetParent !== null) {
+                        el.click();
+                        clicked++;
+                    }
+                }
+
+                return clicked;
+            }""")
+        except Exception:
+            expanded = 0
+
+        if expanded:
+            await self.page.wait_for_timeout(800)
+            print(f"    [profile] Expanded {expanded} collapsed section(s)")
 
     async def go_back_to_results(self) -> None:
         """Dismiss the profile slide-in panel if it's open.
@@ -582,10 +826,12 @@ class LinkedInBrowser:
         that intercept pointer events inside the profile slide-in.
         """
         async def _do():
-            save_btn = self.page.locator("button.save-to-pipeline__button").first
+            selector = "button.save-to-pipeline__button"
+            save_btn = self.page.locator(selector).first
             await save_btn.wait_for(state="visible", timeout=5000)
-            # JS click bypasses Playwright's pointer-events interception check
-            await save_btn.evaluate("el => el.click()")
+            # Ghost-cursor first (generates mouse trajectory), JS click as fallback
+            if not await self._ghost_click(selector):
+                await save_btn.evaluate("el => el.click()")
             await self.page.wait_for_timeout(2000)
             return True
         try:

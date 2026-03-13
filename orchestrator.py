@@ -10,10 +10,13 @@ Usage:
 from __future__ import annotations
 import asyncio
 import json
+import random
 import signal
 import time
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
+
+from human_timing import human_delay, human_delay_correlated
 
 from schemas import (
     CandidateSnippet, CandidateProfileSummary, OpusDecision,
@@ -25,6 +28,7 @@ from extractors import extract_snippets_from_list_dom, extract_profile_from_dom
 from judger import facial_judge, full_judge, init_judger
 from storage import append_jsonl, read_jsonl_set, log_event, write_json, read_json
 from brief_loader import load_brief, Brief
+from bias_controls import BiasMonitor, DecisionRecord
 import config
 
 
@@ -80,6 +84,18 @@ class Pipeline:
         # Kit strings (populated by run_full)
         self._kit_strings: list[KitString] = []
         self._execution_plan: Optional[ExecutionPlan] = None
+
+        # Bias monitor (V2 briefs only — uses brief's BiasControls + FacialCalibration)
+        self._bias_monitor: Optional[BiasMonitor] = None
+        self.bias_checkpoint_path = self.output_dir / "bias_monitor.json"
+        if self.brief_obj.has_v2_schema:
+            self._bias_monitor = BiasMonitor.from_brief(self.brief_obj._new_brief)
+
+        # Cadence pause — anti-detection idle breaks
+        self._last_pause_time: float = time.time()
+
+        # URL snapshot — last known good URL for recovery fallback
+        self._last_good_url: str = ""
 
     # ------------------------------------------------------------------
     # Main entry points
@@ -238,6 +254,15 @@ class Pipeline:
         await self.browser.connect()
         log_event(self.log_path, "pipeline_start", mode="full_run_resume" if resume else "full_run")
 
+        # Navigate to the project search page if we're not already there
+        project_url = self._get_project_url()
+        if project_url and "/talent/hire/" not in self.browser.page.url:
+            print(f"  Navigating to project search page...")
+            await self.browser.navigate_to_search(project_url)
+        elif "linkedin.com/talent" not in self.browser.page.url:
+            print(f"  Navigating to LinkedIn Recruiter...")
+            await self.browser.navigate_to_search("https://www.linkedin.com/talent/search")
+
         # Start with empty dedup set — only dedup within this run, not across runs.
         # Prior runs may have different evaluation criteria or candidates may have updated profiles.
         self._seen_urls = set()
@@ -275,6 +300,11 @@ class Pipeline:
                 if plan_path.exists():
                     self._execution_plan = ExecutionPlan.from_dict(read_json(str(plan_path)))
 
+                # Load bias monitor checkpoint
+                if self._bias_monitor and self.bias_checkpoint_path.exists():
+                    self._bias_monitor.load_checkpoint(str(self.bias_checkpoint_path))
+                    print(f"  Resumed bias monitor from checkpoint")
+
                 done_count = sum(1 for s in progress.strings if s.status == "done")
                 total_count = len(progress.strings)
                 print(f"  {done_count}/{total_count} strings already complete")
@@ -282,17 +312,26 @@ class Pipeline:
                 # --- Fresh run: archive stale output files ---
                 self._archive_stale_outputs()
 
-                # --- Phase 1: Extract kit strings (direct Supabase fetch, no browser) ---
+                # --- Phase 0: Sourcing Preflight (if JD provided without full eval criteria) ---
+                if self.brief_obj.needs_preflight():
+                    print("\n--- Phase 0: Sourcing Preflight (V2 structured) ---")
+                    self._run_preflight_v2()
+
+                # --- Phase 1: Extract kit strings (if kit URL provided) ---
                 print("\n--- Phase 1: Kit Extraction ---")
-                self._kit_strings = extract_kit_strings(self.brief_obj.kit_url)
-                if not self._kit_strings:
-                    print("  [ERROR] No strings extracted from kit. Aborting.")
-                    return
+                if not self.brief_obj.kit_url:
+                    print("  No kit URL provided — strategy will generate strings from JD context only.")
+                    self._kit_strings = []
+                else:
+                    self._kit_strings = extract_kit_strings(self.brief_obj.kit_url)
+                    if not self._kit_strings:
+                        print("  [warn] No strings extracted from kit — proceeding with JD context only.")
 
                 # Save extracted kit for reference
-                kit_data = [ks.to_dict() for ks in self._kit_strings]
-                write_json(self.output_dir / "kit_strings.json", kit_data)
-                print(f"  Kit strings saved to {self.output_dir / 'kit_strings.json'}")
+                if self._kit_strings:
+                    kit_data = [ks.to_dict() for ks in self._kit_strings]
+                    write_json(self.output_dir / "kit_strings.json", kit_data)
+                    print(f"  Kit strings saved to {self.output_dir / 'kit_strings.json'}")
 
                 # --- Phase 2: Strategy formation ---
                 print("\n--- Phase 2: Strategy Formation (Opus) ---")
@@ -303,7 +342,8 @@ class Pipeline:
                 self._execution_plan = form_strategy(self.brief_obj, self._kit_strings, prior_data)
                 write_json(self.output_dir / "execution_plan.json", self._execution_plan.to_dict())
                 print(f"  Strategy: {self._execution_plan.strategy_rationale[:120]}...")
-                print(f"  {len(self._execution_plan.generated_strings)} compound strings synthesized from kit vocabulary")
+                source = "kit vocabulary" if self._kit_strings else "JD context"
+                print(f"  {len(self._execution_plan.generated_strings)} compound strings synthesized from {source}")
                 if self._execution_plan.coverage_gaps:
                     gap_with_boolean = sum(1 for g in self._execution_plan.coverage_gaps if g.get("suggested_boolean"))
                     print(f"  {len(self._execution_plan.coverage_gaps)} coverage gaps identified ({gap_with_boolean} with executable strings)")
@@ -394,6 +434,8 @@ class Pipeline:
                 search_string.status = "done"
                 block_strings.append(search_string)
                 progress.save(str(self.progress_path))
+                if self._bias_monitor:
+                    self._bias_monitor.save_checkpoint(str(self.bias_checkpoint_path))
                 log_event(self.log_path, "string_complete", string_id=search_string.id, **self.stats)
                 self._print_session_summary(progress)
 
@@ -412,8 +454,12 @@ class Pipeline:
         finally:
             if self._progress:
                 self._progress.save(str(self.progress_path))
+            if self._bias_monitor:
+                self._bias_monitor.save_checkpoint(str(self.bias_checkpoint_path))
             await self.browser.disconnect()
             self._print_summary()
+            if self._progress:
+                self._generate_run_report(self._progress)
             log_event(self.log_path, "pipeline_end", **self.stats)
 
     # ------------------------------------------------------------------
@@ -451,9 +497,18 @@ class Pipeline:
         if not search_string.original_boolean:
             search_string.original_boolean = search_string.boolean
 
+        # Emergency recovery check before starting
+        await self._ensure_browser_healthy()
+
         current_boolean = search_string.boolean
         print(f"  Entering Boolean: {current_boolean[:80]}...")
         await self.browser.enter_search_string(current_boolean)
+
+        # Snapshot URL after search entry — known good state for recovery
+        try:
+            self._last_good_url = self.browser.page.url
+        except Exception:
+            pass
 
         result_count_text = await self.browser.get_results_count_text()
         result_count = await self.browser.get_results_count()
@@ -482,20 +537,37 @@ class Pipeline:
         max_pages = config.MAX_PAGES_PER_STRING or 999
 
         while page_num <= max_pages:
+            # Emergency recovery check before each page
+            await self._ensure_browser_healthy()
+
             phase_label = search_string.phase.upper()
             refinement_depth = len(search_string.refinement_stack)
             print(f"\n  --- Page {page_num} [{phase_label}] (refinement depth: {refinement_depth}) ---")
             progress.current_page = page_num
 
+            # Check for 0-result page before trying to scroll/extract
+            try:
+                no_results = self.browser.page.locator('text="No search results"').first
+                if await no_results.is_visible(timeout=2000):
+                    print("  No search results for this string. Skipping.")
+                    break
+            except Exception:
+                pass
+
             card_count = await self.browser.scroll_to_load_all_results()
-            print(f"  {card_count} cards loaded after scroll")
+            print(f"  {card_count} cards loaded after scroll", flush=True)
+
+            if card_count == 0:
+                print("  0 cards on page. Skipping string.")
+                break
+
             innertext = await self.browser.get_results_list_innertext()
-            print(f"  Text size: {len(innertext) / 1024:.0f} KB")
+            print(f"  Text size: {len(innertext) / 1024:.0f} KB", flush=True)
 
             snippets = extract_snippets_from_list_dom(
                 innertext, search_string.id, search_string.name, page_num
             )
-            print(f"  Extracted {len(snippets)} candidates")
+            print(f"  Extracted {len(snippets)} candidates", flush=True)
 
             if not snippets:
                 print("  No candidates found on this page. Moving on.")
@@ -504,15 +576,21 @@ class Pipeline:
             # Get name+URL pairs atomically from DOM (innerText strips hrefs)
             card_pairs = await self.browser.get_card_name_url_pairs()
             url_by_name: dict[str, str] = {}
-            for pair in card_pairs:
-                if pair["name"] and pair["url"]:
-                    url_by_name[pair["name"].strip().lower()] = pair["url"]
+            index_by_name: dict[str, int] = {}
+            for i, pair in enumerate(card_pairs):
+                key = pair["name"].strip().lower() if pair["name"] else ""
+                if key and pair["url"]:
+                    url_by_name[key] = pair["url"]
+                if key:
+                    index_by_name[key] = i
             matched = 0
             for snippet in snippets:
                 key = snippet.name.strip().lower()
                 if key in url_by_name:
                     snippet.profile_url = url_by_name[key]
                     matched += 1
+                if key in index_by_name:
+                    snippet.card_index = index_by_name[key]
             if matched < len(snippets):
                 print(f"  [warn] URL match: {matched}/{len(snippets)} snippets matched to DOM cards")
 
@@ -537,6 +615,12 @@ class Pipeline:
                 string_stats["candidates"] += 1
 
                 decision = await self._evaluate_snippet(snippet, page_report)
+
+                # If go_back_to_results failed, panel is still open — skip remaining candidates on this page
+                if decision and getattr(decision, '_panel_stuck', False):
+                    print(f"    [ERROR] Panel stuck after {snippet.name} — skipping remaining candidates on this page")
+                    log_event(self.log_path, "panel_stuck", name=snippet.name, page=page_num)
+                    break
 
                 outcome = "error"
                 if decision:
@@ -566,6 +650,14 @@ class Pipeline:
                     "page": page_num,
                 })
 
+                # Cooperative yield point for decoy interleaving.
+                # If session_orchestrator has set _pause_requested, we pause here
+                # (between candidates, after evaluation is complete and results are safe).
+                if hasattr(self, '_pause_requested') and self._pause_requested.is_set():
+                    self._pause_requested.clear()  # Acknowledge the pause
+                    progress.save(str(self.progress_path))
+                    await self._resume_event.wait()  # Block until decoy burst completes
+
             string_stats["pages"] = page_num
             search_string.pages_reviewed = page_num
             progress.save(str(self.progress_path))
@@ -576,6 +668,13 @@ class Pipeline:
                 search_string, current_boolean, result_count_text,
                 all_candidates, string_stats,
             )
+
+            # Enforce minimum pagination depth — override premature stop/abandon
+            if adapt_action in ("abandon", "stop"):
+                min_pages = self._get_min_pages(result_count)
+                if page_num < min_pages:
+                    print(f"  [pagination] Opus wants to {adapt_action}, but page {page_num} < min {min_pages} for {result_count} results. Continuing.")
+                    adapt_action = "continue"
 
             if adapt_action == "abandon":
                 print(f"  [adapt] Opus says ABANDON this string entirely.")
@@ -597,11 +696,19 @@ class Pipeline:
                 depth = len(search_string.refinement_stack)
                 print(f"  [adapt] NARROW (depth {depth}): {new_boolean[:80]}...")
                 search_string.notes = (search_string.notes or "") + f" Narrowed on page {page_num} (depth {depth})."
-                await self.browser.enter_search_string(new_boolean)
-                result_count_text = await self.browser.get_results_count_text()
-                result_count = await self.browser.get_results_count()
-                search_string.result_count = result_count
-                print(f"  Results after narrow: {result_count_text or 'unknown'} (parsed: {result_count})")
+                try:
+                    await self.browser.enter_search_string(new_boolean)
+                    result_count_text = await self.browser.get_results_count_text()
+                    result_count = await self.browser.get_results_count()
+                    search_string.result_count = result_count
+                    print(f"  Results after narrow: {result_count_text or 'unknown'} (parsed: {result_count})")
+                except Exception as e:
+                    print(f"  [ERROR] Narrow failed: {e} — reverting to previous boolean")
+                    log_event(self.log_path, "narrow_failed", string=search_string.name, error=str(e))
+                    search_string.refinement_stack.pop()  # Undo the push
+                    current_boolean = search_string.refinement_stack[-1] if search_string.refinement_stack else search_string.boolean
+                    search_string.boolean = current_boolean
+                    break
                 # Reset page counter and accumulated data for the narrowed search
                 page_num = 1
                 all_candidates.clear()
@@ -619,11 +726,17 @@ class Pipeline:
                     depth = len(search_string.refinement_stack)
                     print(f"  [adapt] BROADEN (depth now {depth}): reverting to {previous_boolean[:80]}...")
                     search_string.notes = (search_string.notes or "") + f" Broadened on page {page_num} (depth {depth})."
-                    await self.browser.enter_search_string(previous_boolean)
-                    result_count_text = await self.browser.get_results_count_text()
-                    result_count = await self.browser.get_results_count()
-                    search_string.result_count = result_count
-                    print(f"  Results after broaden: {result_count_text or 'unknown'} (parsed: {result_count})")
+                    try:
+                        await self.browser.enter_search_string(previous_boolean)
+                        result_count_text = await self.browser.get_results_count_text()
+                        result_count = await self.browser.get_results_count()
+                        search_string.result_count = result_count
+                        print(f"  Results after broaden: {result_count_text or 'unknown'} (parsed: {result_count})")
+                    except Exception as e:
+                        print(f"  [ERROR] Broaden failed: {e} — abandoning string")
+                        log_event(self.log_path, "broaden_failed", string=search_string.name, error=str(e))
+                        search_string.notes = (search_string.notes or "") + f" Broaden failed on page {page_num}."
+                        break
                     # Reset page counter — broadened search starts fresh
                     page_num = 1
                     all_candidates.clear()
@@ -643,9 +756,73 @@ class Pipeline:
                     print("  No more pages.")
                     break
                 page_num += 1
-                await asyncio.sleep(config.PAGE_DELAY_SECONDS)
+                await asyncio.sleep(human_delay_correlated(config.PAGE_DELAY_SECONDS))
             else:
                 break
+
+    @staticmethod
+    def _get_min_pages(result_count: int) -> int:
+        """Get minimum pages to review before allowing stop/abandon."""
+        for threshold, min_pages in config.MIN_PAGES_BY_RESULT_COUNT:
+            if result_count >= threshold:
+                return min_pages
+        return 1
+
+    async def _ensure_browser_healthy(self) -> None:
+        """Check for error states, attempt recovery, and enforce cadence pauses."""
+        # --- Cadence pause: human-like idle break ---
+        await self._maybe_cadence_pause()
+
+        # --- Snapshot current URL as known-good before checking for errors ---
+        try:
+            current_url = self.browser.page.url
+            if "linkedin.com/talent" in current_url and "/login" not in current_url:
+                self._last_good_url = current_url
+        except Exception:
+            pass
+
+        # --- Error recovery ---
+        recovered = await self.browser.check_and_recover()
+        if recovered:
+            # Try project URL first, then last known good URL
+            recovery_url = self._get_project_url() or self._last_good_url
+            if recovery_url:
+                print(f"  [recovery] Re-navigating to: {recovery_url[:60]}...")
+                await self.browser.navigate_to_search(recovery_url)
+            else:
+                print("  [recovery] No recovery URL available — continuing from current page.")
+
+    def _get_project_url(self) -> str:
+        """Construct LinkedIn Recruiter project URL from brief fields."""
+        pid = self.brief_obj.linkedin_project_id
+        if pid:
+            return f"https://www.linkedin.com/talent/hire/{pid}"
+        return ""
+
+    async def _maybe_cadence_pause(self) -> None:
+        """Pause if enough continuous activity time has elapsed (anti-detection)."""
+        if config.CADENCE_INTERVAL_MINUTES <= 0:
+            return
+
+        elapsed = (time.time() - self._last_pause_time) / 60.0
+        # Jitter the interval ±20% so it's not metronomic
+        jittered_interval = human_delay(
+            config.CADENCE_INTERVAL_MINUTES * 0.8,
+            config.CADENCE_INTERVAL_MINUTES * 1.4,
+        )
+
+        if elapsed >= jittered_interval:
+            # Jitter the pause duration ±25%
+            pause_secs = human_delay(
+                config.CADENCE_PAUSE_SECONDS * 0.6,
+                config.CADENCE_PAUSE_SECONDS * 2.0,
+            )
+            print(f"\n  [cadence] {elapsed:.0f}min of activity — pausing {pause_secs:.0f}s to look human...")
+            log_event(self.log_path, "cadence_pause", elapsed_minutes=round(elapsed, 1),
+                      pause_seconds=round(pause_secs, 1))
+            await asyncio.sleep(pause_secs)
+            self._last_pause_time = time.time()
+            print(f"  [cadence] Resuming.")
 
     async def _page_adapt(
         self,
@@ -716,9 +893,10 @@ class Pipeline:
 4. "abandon" — The string is fundamentally unproductive. Skip entirely.{broaden_text}
 
 ## How a sourcer thinks about pagination
-- SAVES are the only metric that matters. Facial YES is a weak signal — most get REJECTED after full review.
-- Save rate = saves / candidates evaluated. Below ~3% across 3+ pages = exhausting signal. Below ~1% = stop or narrow.
-- When saves appeared recently (last 1-2 pages), keep going. When saves dry up for 2+ pages, stop or narrow.
+- SAVES are the primary metric, but Facial YES also matters — it means the profile looked promising enough to open.
+- A string producing many Facial YES but few saves may mean the evaluation criteria are too strict, not that the string is unproductive. Consider this before abandoning.
+- Save rate below ~3% across 3+ pages suggests signal may be thinning. But weigh this against Facial YES rate — high facial pass with low save rate is a calibration signal, not a string quality signal.
+- When saves or strong Facial YES appeared recently (last 1-2 pages), keep going. When both dry up for 2+ pages, stop or narrow.
 - When narrowing, prefer adding AND terms to the current Boolean rather than rewriting.
 - Broaden ONLY when a recent narrowing clearly went too far (e.g., zero results, or cut off a category of good candidates).
 - Duplicates are expected and not a problem unless >30%."""
@@ -731,9 +909,22 @@ Role: {self.brief_obj.role_title}
 ## Minimum Bar
 {self.brief_obj.minimum_bar}
 
+## IMPORTANT: Strings are nets, not archetype filters
+Each Boolean string surfaces candidates for the ENTIRE role — any archetype, any combination of archetypes.
+A string built from post-training vocabulary might surface a STEM reasoning engineer or an RL environment builder.
+Judge string productivity by total saves and facial YES rates across ALL archetypes, not just one.
+
 ## Current Phase: {"SCOUT (page 1 exploration)" if is_scout else "PAGINATE (deep pagination)"}
 
 {actions_section}
+
+## LinkedIn Boolean Rules (MANDATORY when writing refined Booleans)
+- LinkedIn does NOT stem: "model" ≠ "models" — include all morphological variants as separate OR terms
+- LinkedIn IS substring-embedded: "reward model" matches "reward model development" — never add superstrings
+- LinkedIn IS case-insensitive: never add case-only variants
+- Bare ambiguous terms MUST be qualified: "agent" → "AI agent", "alignment" → "AI alignment"
+- Abbreviations with common non-domain meanings must include spelled-out form
+- Tool/library names are proper nouns — do not fabricate compound expansions
 
 Return JSON only:
 - "action": the chosen action
@@ -798,6 +989,22 @@ What next?"""
     ) -> Optional[OpusDecision]:
         """Run snippet through facial judgment -> full profile -> final judgment."""
 
+        # --- Employer blacklist check (no LLM call) ---
+        if self.brief_obj.employer_blacklist and snippet.current_company:
+            company_lower = snippet.current_company.lower()
+            for blocked in self.brief_obj.employer_blacklist:
+                if blocked.lower() in company_lower:
+                    print(f"    [BLACKLIST] {snippet.name} — current employer '{snippet.current_company}' matches '{blocked}'")
+                    self.stats.setdefault("blacklist_skips", 0)
+                    self.stats["blacklist_skips"] += 1
+                    if page_report:
+                        page_report.add_skip_preview(snippet.name, f"BLACKLIST: {blocked}")
+                    return OpusDecision(
+                        stage="facial", decision="FACIAL_NO", path="employer_blacklist",
+                        confidence=1.0, rationale=f"Employer blacklist: {blocked}",
+                        candidate_name=snippet.name, profile_url=snippet.profile_url,
+                    )
+
         # --- Facial judgment (Opus) ---
         print(f"    Facial judgment (Opus)...")
         try:
@@ -808,6 +1015,17 @@ What next?"""
             return None
 
         append_jsonl(self.facial_path, facial.to_dict())
+
+        # Record facial decision for bias monitoring
+        if self._bias_monitor:
+            self._bias_monitor.record_decision(DecisionRecord(
+                candidate_id=f"{snippet.source_string_id}_p{snippet.page}_r{snippet.result_rank}",
+                string_id=str(snippet.source_string_id),
+                stage="facial",
+                decision=facial.decision,
+                confidence=facial.confidence,
+                capability_area=None,
+            ))
 
         if facial.decision == "FACIAL_NO":
             print(f"    [FACIAL_NO] {facial.rationale}")
@@ -820,13 +1038,29 @@ What next?"""
         self.stats["facial_yes"] += 1
 
         # --- Full profile extraction (cheap model) ---
+        # Emergency recovery check before browser interaction
+        await self._ensure_browser_healthy()
+
         print(f"    Opening profile for full evaluation...")
+        # Pre-open pause — simulate scanning the snippet before deciding to click
+        await asyncio.sleep(human_delay_correlated(2.0))
+
         try:
+            # Re-render the target card's article (LinkedIn virtual scrolling de-renders offscreen)
+            if snippet.card_index >= 0:
+                await self.browser.ensure_card_rendered(snippet.card_index)
+
+            opened = False
             if snippet.profile_url:
-                await self.browser.open_profile_by_url(snippet.profile_url)
-            else:
+                try:
+                    await self.browser.open_profile_by_url(snippet.profile_url)
+                    opened = True
+                except Exception as url_err:
+                    print(f"    [warn] URL-based open failed ({url_err}), falling back to name match...")
+            if not opened:
                 await self.browser.open_profile(snippet.name)
-            await asyncio.sleep(config.PROFILE_DELAY_SECONDS)
+            # Jittered delay — simulate human reading the profile panel
+            await asyncio.sleep(human_delay_correlated(config.PROFILE_DELAY_SECONDS))
             profile_text = await self.browser.get_profile_innertext()
             print(f"    Profile text size: {len(profile_text) / 1024:.0f} KB")
 
@@ -849,13 +1083,42 @@ What next?"""
         except Exception as e:
             print(f"    [ERROR] Final judgment failed: {e}")
             log_event(self.log_path, "final_error", name=snippet.name, error=str(e))
-            await self.browser.go_back_to_results()
+            try:
+                await self.browser.go_back_to_results()
+            except Exception:
+                print(f"    [warn] go_back_to_results also failed after judgment error")
             return facial
 
         append_jsonl(self.final_path, final.to_dict())
 
-        if final.decision == "SAVE":
-            print(f"    [SAVE] {final.rationale}")
+        # Record full eval decision and check bias alerts
+        if self._bias_monitor:
+            self._bias_monitor.record_decision(DecisionRecord(
+                candidate_id=f"{snippet.source_string_id}_p{snippet.page}_r{snippet.result_rank}",
+                string_id=str(snippet.source_string_id),
+                stage="full",
+                decision=final.decision,
+                confidence=final.confidence,
+                capability_area=final.path if final.path != "none" else None,
+            ))
+            alerts = self._bias_monitor.check_alerts(str(snippet.source_string_id))
+            for alert in alerts:
+                if alert.severity == "pause":
+                    print(f"\n    ⚠ BIAS PAUSE: {alert.message}")
+                    log_event(self.log_path, "bias_alert", severity="pause",
+                              alert_type=alert.alert_type, message=alert.message,
+                              string_id=alert.string_id)
+                elif alert.severity == "flag":
+                    print(f"    ⚡ BIAS FLAG: {alert.message}")
+                    log_event(self.log_path, "bias_alert", severity="flag",
+                              alert_type=alert.alert_type, message=alert.message,
+                              string_id=alert.string_id)
+                elif alert.severity == "info":
+                    print(f"    ℹ BIAS INFO: {alert.message}")
+
+        if final.decision in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"):
+            tag = final.decision if final.decision in ("INFERENTIAL_SAVE", "TRANSFERABLE_SAVE") else "SAVE"
+            print(f"    [{tag}] {final.rationale}")
             self.stats["saved"] += 1
 
             if not self.test_mode:
@@ -869,6 +1132,8 @@ What next?"""
                         print(f"    Saved to LinkedIn pipeline")
                     else:
                         print(f"    [warn] LinkedIn save may have failed")
+                    # Post-save pause — simulate the decision moment
+                    await asyncio.sleep(human_delay_correlated(3.0))
                 log_event(self.log_path, "candidate_saved", name=snippet.name, linkedin_save=saved)
 
             if page_report:
@@ -881,8 +1146,12 @@ What next?"""
 
         try:
             await self.browser.go_back_to_results()
-        except Exception:
-            pass
+            await asyncio.sleep(human_delay_correlated(0.8))
+        except Exception as e:
+            print(f"    [ERROR] go_back_to_results failed: {e} — panel may still be open")
+            log_event(self.log_path, "go_back_error", name=snippet.name, error=str(e))
+            # Tag the result so the page loop knows state is corrupted
+            final._panel_stuck = True
 
         return final
 
@@ -959,9 +1228,9 @@ What next?"""
         progress: Progress,
         adapt_fn,
     ) -> None:
-        """After a block completes, send summary to Opus and apply adaptations."""
+        """After a batch of strings completes, send summary to Opus and apply adaptations."""
         print(f"\n{'═' * 60}")
-        print(f"  Block Adaptation: {block_name}")
+        print(f"  Adaptation checkpoint (after {len(block_strings)} strings)")
         print(f"{'═' * 60}")
 
         # Build block report
@@ -1056,6 +1325,78 @@ What next?"""
     # File management
     # ------------------------------------------------------------------
 
+    def _run_preflight_v2(self) -> None:
+        """Run V2 structured preflight: Opus answers specific questions → V2 brief JSON.
+
+        Generates a V2-compatible brief from the JD, saves it, and reloads the brief
+        so the pipeline uses structural templates + bias controls instead of freeform archetypes.
+        """
+        from preflight_v2 import generate_preflight_prompt, parse_preflight_response, preflight_to_brief_json
+        from llm_clients import opus_llm
+        import sys
+
+        jd_text = self.brief_obj.jd_text
+        geography = self.brief_obj.permanent_filters.get("Location", "")
+
+        prompt = generate_preflight_prompt(jd_text, geography or None)
+        print("  Preflight V2... (Opus generating structured eval criteria from JD)")
+
+        try:
+            raw_response = opus_llm(
+                "You are generating structured evaluation criteria for an autonomous sourcing agent. "
+                "Respond with ONLY the JSON object requested. No preamble.",
+                prompt,
+                expect_json=False,
+                max_tokens=16384,
+            )
+            preflight_data = parse_preflight_response(raw_response)
+        except Exception as e:
+            print(f"  [warn] Preflight V2 failed ({e}) — falling back to old preflight", file=sys.stderr)
+            from preflight import run_preflight, apply_preflight_to_brief
+            preflight_result = run_preflight(
+                jd_text=jd_text,
+                intake_notes=self.brief_obj.intake_notes,
+                instructions=self.brief_obj.instructions or None,
+                existing_archetypes=self.brief_obj.archetypes or None,
+                existing_minimum_bar=self.brief_obj.minimum_bar,
+            )
+            apply_preflight_to_brief(self.brief_obj, preflight_result)
+            init_judger(self.brief_obj)
+            if preflight_result:
+                write_json(self.output_dir / "preflight_output.json", preflight_result)
+            return
+
+        # Apply overrides from the brief's existing fields
+        overrides = {}
+        if self.brief_obj.linkedin_project:
+            overrides["linkedin_project"] = self.brief_obj.linkedin_project
+        if geography:
+            overrides["geography"] = geography
+        if self.brief_obj.kit_url:
+            overrides["kit_url"] = self.brief_obj.kit_url
+        if self.brief_obj.employer_blacklist:
+            overrides["employer_blacklist"] = self.brief_obj.employer_blacklist
+
+        brief_json = preflight_to_brief_json(preflight_data, overrides)
+
+        # Save the generated V2 brief for operator review and debugging
+        generated_path = self.output_dir / "preflight_v2_brief.json"
+        write_json(str(generated_path), brief_json)
+        print(f"  Preflight V2 brief saved to: {generated_path}")
+        print(f"  Capability areas: {len(brief_json.get('capability_areas', []))}")
+        print(f"  Non-fit patterns: {len(brief_json.get('non_fit_patterns', []))}")
+
+        # Reload as a V2 brief
+        from brief_loader import _load_v2_brief
+        self.brief_obj = _load_v2_brief(brief_json)
+        init_judger(self.brief_obj)
+
+        # Initialize bias monitor now that we have a V2 brief
+        if self.brief_obj.has_v2_schema:
+            self._bias_monitor = BiasMonitor.from_brief(self.brief_obj._new_brief)
+
+        print("  Preflight V2 complete — pipeline will use structural templates + bias controls")
+
     def _archive_stale_outputs(self) -> None:
         """Rename existing output JSONL files to timestamped backups before a fresh run."""
         from datetime import datetime
@@ -1139,7 +1480,147 @@ What next?"""
         print(f"  Facial NO:           {self.stats['facial_no']}")
         print(f"  SAVED:               {self.stats['saved']}")
         print(f"  REJECTED:            {self.stats['rejected']}")
+        if self._bias_monitor:
+            summary = self._bias_monitor.session_summary()
+            if summary.get("total_decisions", 0) > 0:
+                print(f"  ---")
+                print(f"  Facial YES rate:     {summary.get('facial_yes_rate', 0):.1%}")
+                print(f"  Full save rate:      {summary.get('save_rate', 0):.1%}")
+                print(f"  Parse failures:      {summary.get('parse_failures', 0)} ({summary.get('parse_failure_rate', 0):.1%})")
+                print(f"  Bias alerts fired:   {len(summary.get('alerts_fired', []))}")
         print(f"{'=' * 60}")
+
+    def _bias_summary_for_report(self) -> str:
+        """Format bias monitor summary for injection into the run report prompt."""
+        if not self._bias_monitor:
+            return ""
+        summary = self._bias_monitor.session_summary()
+        if summary.get("total_decisions", 0) == 0:
+            return ""
+        lines = [
+            "",
+            "## Bias Monitor Metrics",
+            f"- Facial YES rate: {summary.get('facial_yes_rate', 0):.1%}",
+            f"- Full save rate: {summary.get('save_rate', 0):.1%}",
+            f"- Parse failures: {summary.get('parse_failures', 0)} ({summary.get('parse_failure_rate', 0):.1%})",
+            f"- Alerts fired: {len(summary.get('alerts_fired', []))}",
+        ]
+        per_string = summary.get("per_string", {})
+        if per_string:
+            flagged = [(sid, s) for sid, s in per_string.items() if s.get("save_rate", 0) > 0.5 and s.get("total_full_evals", 0) >= 5]
+            if flagged:
+                lines.append("- High save-rate strings:")
+                for sid, s in flagged:
+                    lines.append(f"  - String {sid}: {s['save_rate']:.0%} save rate ({s['saves']} saves / {s['total_full_evals']} evals)")
+        return "\n".join(lines) + "\n"
+
+    def _generate_run_report(self, progress: Progress | None) -> None:
+        """Generate an Opus-written end-of-run debrief report."""
+        if not progress or not progress.strings:
+            return
+
+        from llm_clients import opus_llm
+
+        # Build per-string performance data
+        string_lines = []
+        for s in progress.strings:
+            if s.status == "done":
+                save_rate = f"{len(s.saves) / max(s.pages_reviewed * 25, 1) * 100:.1f}%" if s.pages_reviewed else "n/a"
+                saves_text = ", ".join(s.saves[:5])
+                if len(s.saves) > 5:
+                    saves_text += f" (+{len(s.saves) - 5} more)"
+                string_lines.append(
+                    f"  #{s.id} [{s.status}] {s.name[:80]}\n"
+                    f"    Results: {s.result_count} | Pages: {s.pages_reviewed} | "
+                    f"Saves: {len(s.saves)} ({save_rate}) | Notes: {s.notes or 'none'}\n"
+                    f"    Saved: {saves_text or 'none'}"
+                )
+            elif s.status == "skipped":
+                string_lines.append(
+                    f"  #{s.id} [skipped] {s.name[:80]}\n    {s.notes or 'Skipped by adaptation'}"
+                )
+        strings_text = "\n".join(string_lines)
+
+        # Load saves from final judgments file for richer context
+        saves_detail = ""
+        if self.final_path.exists():
+            try:
+                saves = []
+                for line in self.final_path.read_text().strip().split("\n"):
+                    if not line.strip():
+                        continue
+                    d = json.loads(line)
+                    if d.get("decision") in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"):
+                        saves.append(d)
+                if saves:
+                    detail_lines = []
+                    for sv in saves:
+                        detail_lines.append(
+                            f"  - {sv.get('candidate_name', '?')} | "
+                            f"Path: {sv.get('path', '?')} | "
+                            f"Confidence: {sv.get('confidence', '?')}\n"
+                            f"    {sv.get('rationale', '')[:200]}"
+                        )
+                    saves_detail = "\n".join(detail_lines)
+            except Exception:
+                pass
+
+        done_count = sum(1 for s in progress.strings if s.status == "done")
+        skipped_count = sum(1 for s in progress.strings if s.status == "skipped")
+        total_saves = sum(len(s.saves) for s in progress.strings)
+        total_results = sum(s.result_count for s in progress.strings if s.result_count > 0)
+        total_pages = sum(s.pages_reviewed for s in progress.strings)
+
+        system = f"""You are a senior sourcing strategist writing an end-of-run debrief report.
+
+Role: {self.brief_obj.role_title}
+{self.brief_obj.role_description}
+
+Write a comprehensive debrief report in markdown covering:
+
+1. **Executive Summary** — Total saves, total candidates evaluated, overall save rate, run duration in strings/pages
+2. **Top Performing Strings** — Which strings produced the most saves and why? What made them effective?
+3. **Underperforming Strings** — Which strings were stopped early or produced zero saves? What went wrong?
+4. **Candidate Profile** — What patterns emerge among the saved candidates? Common employers, titles, backgrounds, archetype distribution
+5. **Noise Patterns Observed** — What were the dominant noise categories? (e.g., product managers, strategy/GTM, non-domain backgrounds)
+6. **Adaptation Decisions** — How did the agent adapt during the run? Were refinements effective? Were strings correctly skipped?
+7. **Recommendations for Next Run** — What Boolean strategies should be tried next? What should be avoided? Any gaps in coverage?
+
+Be specific — cite string IDs, candidate names, and concrete patterns. This report should be actionable for planning the next sourcing run."""
+
+        user_prompt = f"""## Run Statistics
+- Strings executed: {done_count} ({skipped_count} skipped)
+- Total results across all strings: {total_results}
+- Total pages reviewed: {total_pages}
+- Candidates evaluated: {self.stats['snippets_extracted']}
+- Facial YES: {self.stats['facial_yes']}
+- Facial NO: {self.stats['facial_no']}
+- SAVED: {self.stats['saved']}
+- REJECTED: {self.stats['rejected']}
+- Overall save rate: {self.stats['saved'] / max(self.stats['snippets_extracted'], 1) * 100:.1f}%
+{self._bias_summary_for_report()}
+## Per-String Performance
+{strings_text}
+
+## Saved Candidates Detail
+{saves_detail or "No detailed save data available."}
+
+Write the debrief report."""
+
+        try:
+            print(f"\n{'=' * 60}")
+            print("  Generating end-of-run debrief report (Opus)...")
+            print(f"{'=' * 60}")
+            report = opus_llm(system, user_prompt, expect_json=False, max_tokens=8192)
+
+            # Save to file
+            report_path = self.output_dir / "run-report.md"
+            report_path.write_text(report)
+            print(f"\n{report}")
+            print(f"\n  Report saved to: {report_path}")
+            log_event(self.log_path, "run_report_generated", path=str(report_path))
+        except Exception as e:
+            print(f"  [warn] Report generation failed: {e}")
 
 
 # ---------------------------------------------------------------------------
