@@ -1,135 +1,209 @@
 # Autonomous Sourcing Agent
 
-An AI agent that autonomously sources candidates on LinkedIn Recruiter — running Boolean searches, evaluating profiles against role-specific criteria, and saving qualifying candidates to a pipeline. It operates for hours without human intervention, reports its reasoning in real time via WhatsApp, and improves its search strategy based on what it finds.
+An AI-powered sourcing pipeline that autonomously searches LinkedIn Recruiter, evaluates candidates against role-specific criteria through a multi-model architecture, and runs for hours unattended with built-in safety guardrails and ambient activity generation for anti-detection.
 
 Built during Feb–Mar 2026 for sourcing frontier AI roles (post-training, RL environments, coding agents) across Brazil and Colombia. Produced 69 pipeline candidates across 7 sessions.
 
-## How It Works
+## Architecture
 
 ```
-Search Kit Library ──→ Boolean strings
-                           │
-Sourcing Brief (JSON) ──→ Role config (archetypes, signals, noise patterns)
-                           │
-                    ┌──────┴──────┐
-                    │  SKILL.md   │  ← Structural rules for every run
-                    │  + Brief    │  ← Role-specific evaluation criteria
-                    └──────┬──────┘
-                           │
-                  OpenClaw Agent (Claude Opus)
-                           │
-              ┌────────────┼────────────┐
-              │            │            │
-         LinkedIn     Evaluate     Report via
-         Recruiter    profiles     WhatsApp
-              │            │            │
-         Run Boolean   Save/skip   Real-time
-         strings       decisions   reasoning
-              │            │            │
-              └────────────┼────────────┘
-                           │
-                    Progress logs (JSON)
-                    with per-candidate decisions
-```
-
-### The Loop
-
-1. Agent loads a **sourcing brief** (role parameters, evaluation criteria, known noise patterns)
-2. Navigates to LinkedIn Recruiter, applies permanent filters (geography, field of study)
-3. For each Boolean string from the [Search Kit Library](https://search-kit-library.vercel.app):
-   - Pastes the string into Keywords, reads result count
-   - Triages candidates from preview cards — only clicks into profiles with visible signal
-   - Evaluates each profile against the brief's archetypes and noise population definition
-   - Saves qualifying candidates to the LinkedIn Recruiter project pipeline
-   - Logs every decision (add/skip, archetype match, signals, confidence, reasoning)
-   - Reports progress via WhatsApp with per-candidate reasoning
-4. When strings fail (noise, zero results), the agent diagnoses why and adapts:
-   - Removes noisy terms, logs collision patterns
-   - Builds supplementary strings from its own analysis
-   - Produces market intelligence as a byproduct (talent nodes, keyword rankings, gap analysis)
-
-### What Makes the Evaluations Work
-
-The agent doesn't just keyword-match. It makes judgment calls that require domain knowledge:
-
-- **Disambiguation:** "Rejection sampling" on a chip design PhD's profile is Monte Carlo simulation, not RLHF. "Multimodal" as a company name building RAG pipelines is application-layer, not model training.
-- **Contextual inference:** Someone on Microsoft's internal "Turing" team doing "evaluation" is doing LLM post-training eval, not generic QA.
-- **Cross-role mapping:** An Isaac Sim robotics engineer building simulation environments for classical control has directly transferable skills to frontier RL environment design — even though the surface-level keywords don't match.
-
-## Repository Structure
-
-```
-├── agent-workspace/           # The agent's "brain"
-│   ├── SKILL.md               # Structural rules for all sourcing runs
-│   ├── AGENTS.md              # OpenClaw workspace config (memory, safety, comms)
-│   ├── briefs/                # Role-specific sourcing configurations
-│   │   ├── fdl-brazil-rl-gyms.json
-│   │   ├── fdl-brazil-kit-strings.json
-│   │   └── fdl-colombia-rl-gyms.json
-│   └── progress-sample-redacted.json  # Example progress log (names removed)
+session_orchestrator.py                    ← Single entry point
+├── Session Governor                       ← Hard safety limits (profile caps, time window)
+│   ├── 200/session, 400/24h profile caps
+│   ├── 3h session duration cap
+│   ├── 7 AM – 11 PM operating window (±30 min jitter)
+│   └── 3 sessions/day max
 │
-├── multi-model-pipeline/      # Experimental two-model architecture (Python)
-│   ├── orchestrator.py        # Main pipeline loop
-│   ├── browser.py             # Playwright browser automation
-│   ├── extractors.py          # Cheap-model DOM extraction
-│   ├── judger.py              # Opus evaluation calls
-│   ├── hard-filters.py        # Pre-screening filters
-│   ├── llm-clients.py         # API clients (Anthropic, OpenAI, Google)
-│   ├── schemas.py             # Pydantic data models
-│   ├── storage.py             # JSONL persistence
-│   ├── config.py              # Configuration
-│   ├── run.py                 # CLI entry point
-│   ├── test-extractors.py     # Extraction tests
-│   ├── requirements.txt
-│   ├── config.example.env
-│   ├── config/                # Brief and rubric configs
-│   │   ├── brief-brazil-v2.json
-│   │   ├── brief-colombia-v2.json
-│   │   ├── evaluation-rubric.json
-│   │   └── search-strings-and-filters.json
-│   └── README.md
+├── Sourcing Pipeline (orchestrator.py)    ← Main evaluation loop
+│   ├── Boolean search entry
+│   ├── Results extraction (cheap model)   ← GPT-4o-mini / Gemini Flash
+│   ├── Facial judgment (Opus)             ← Snippet-only triage
+│   ├── Full profile evaluation (Opus)     ← Deep assessment
+│   ├── Two-phase adaptation               ← Scout → Paginate with Opus decisions
+│   └── Block-level strategy adjustment    ← Opus reviews and pivots mid-run
 │
-└── docs/
-    └── business-case.html     # Internal investment case
+├── Decoy Agent (decoy/)                   ← Passive LinkedIn.com browsing
+│   ├── Feed scrolling (no engagement)
+│   ├── Notification checking
+│   └── Job browsing
+│
+└── Multi-Session Cycler
+    └── Sprint → Dormant (decoy only) → Sprint → Dormant → Sprint
 ```
 
-## Key Components
-
-### SKILL.md — The Agent's Rulebook
-
-289 lines of structural rules that apply to every sourcing run regardless of role or geography:
-
-- **Filter sanctity** — permanent filters (location, field of study) are never removed
-- **Noise pattern recognition** — adapt to term collisions without stopping to ask
-- **Evaluation threshold** — slightly expansive bias (when in doubt, save), but based on what the person *built*, not titles
-- **Target vs. noise population** — the critical distinction between builders and operators (e.g., ML engineers vs. data annotators)
-- **Decision documentation** — every eval logged with archetype match, signals, confidence, reasoning
-
-This file evolved across 7 sessions. The most important lesson: concise, trust-the-docs instructions outperform verbose, redundant ones. When the prompt bloated from 250 to 700 words and restated rules already in SKILL.md, evaluation quality collapsed (Session 5 — see business case).
-
-### Sourcing Briefs — Role Parameterization
-
-JSON configs that make the agent role-specific without changing the skill:
-
-- **Archetypes** — who you're looking for (e.g., "Lab Post-Training Engineer," "RL Infrastructure Engineer") with strong and moderate signals
-- **Noise population** — who looks like the target but isn't (e.g., data annotators with RLHF keywords)
-- **Known noise patterns** — term collisions specific to the geography (DPO = Data Protection Officer in Brazil, MBPP = nutrition industry term)
-- **Evaluation philosophy** — two paths to qualification (pedigree track vs. direct experience track)
-- **Calibration examples** — concrete save/skip/borderline calls the agent can reference
-
-### Multi-Model Pipeline — The Next Architecture
-
-The current system runs everything through Claude Opus — including mechanical browser tasks (clicking, scrolling, reading DOM) that require no judgment. The multi-model pipeline separates concerns:
+### Evaluation Pipeline
 
 ```
-LinkedIn DOM ──→ [Cheap Model: Extract] ──→ [Hard Filters] ──→ [Opus: Evaluate]
+LinkedIn Recruiter results page
+        │
+        ▼
+  Scroll to render all cards (virtual scrolling)
+        │
+        ▼
+  Extract snippets ──→ [Cheap Model] ──→ Structured candidate data
+        │
+        ▼
+  Facial judgment ──→ [Opus] ──→ FACIAL_YES / FACIAL_NO
+        │                              │
+        │ (FACIAL_YES only)            │ (skip — no profile open)
+        ▼                              │
+  Open profile panel (ghost-cursor)    │
+        │                              │
+        ▼                              │
+  Extract full profile ──→ [Cheap Model]
+        │
+        ▼
+  Final judgment ──→ [Opus] ──→ SAVE / REJECT / INFERENTIAL_SAVE
+        │
+        ▼
+  Save to Recruiter pipeline (if qualifying)
 ```
 
-- **Cheap model** (GPT-4o-mini / Gemini Flash): handles DOM extraction, produces structured JSON snippets
-- **Opus**: sees only structured candidate data (~200–1500 tokens vs ~15–20K tokens of raw DOM per page)
-- **Estimated cost reduction**: 80–90% of AI spend
+Only ~6 of 25 candidates per page pass facial judgment and trigger a profile open. This keeps the profile-open rate low while still evaluating every candidate.
 
-Status: architecture designed, code written, not yet tested in production.
+## Anti-Detection
+
+| Layer | Implementation |
+|-------|---------------|
+| **Browser** | `rebrowser-playwright` CDP connection (Runtime.Enable evasion) to a real Chrome session |
+| **Mouse movement** | `python-ghost-cursor` Bézier trajectories with Fitts's Law timing on all clicks (sourcing + decoy) |
+| **Scrolling** | Chunked `page.mouse.wheel()` with 40-150px increments and variable inter-chunk delays |
+| **Timing** | Log-normal distributions with temporal autocorrelation (`human_timing.py`). No uniform random. |
+| **Cadence breaks** | Decoy agent activity bursts replace fixed-interval pauses during active sourcing sessions |
+| **Cross-product diversity** | Decoy generates feed, notification, and job browsing activity interleaved with Recruiter sourcing |
+| **Session patterns** | Log-normal session durations (median 2h), dormant periods (median 110 min), and inter-burst intervals (median 25-30 min) |
+| **Time-of-day** | Operating window start jittered ±30 min per session. Hard cutoff at 11 PM. |
+
+## Safety Governor
+
+Hard limits — constants in `governor.py`, not configurable at runtime:
+
+| Limit | Value |
+|-------|-------|
+| Max session duration | 3 hours |
+| Max profile opens per session | 200 |
+| Max profile opens per rolling 24h | 400 |
+| Operating window | ~6:30-7:30 AM to 11:00 PM (start jittered, end rigid) |
+| Max sessions per day | 3 |
+
+When any limit is hit, the pipeline finishes its current candidate evaluation, saves progress, and transitions to dormant mode (decoy only) or shuts down.
+
+## Quick Start
+
+### 1. Launch Chrome with CDP
+
+```bash
+./launch-chrome.sh
+```
+
+This opens Chrome with `--remote-debugging-port=9222` using a persistent profile at `~/.chrome-cdp`. Log into LinkedIn Recruiter once — the session persists across restarts.
+
+### 2. Check your budget
+
+```bash
+python3 session_orchestrator.py --status
+```
+
+### 3. Run
+
+```bash
+# Full day cycle — autonomous multi-session with dormant periods
+python3 session_orchestrator.py \
+  --brief config/brief-fdl-brazil-v3.json \
+  --search-config config/search-strings-and-filters.json
+
+# Single session — one sprint, then stop
+python3 session_orchestrator.py \
+  --brief config/brief-fdl-brazil-v3.json \
+  --search-config config/search-strings-and-filters.json \
+  --single-session
+
+# Decoy only — passive browsing, no sourcing (cool-down days)
+python3 session_orchestrator.py --decoy-only
+
+# Or use the shortcut script:
+./run-search.sh                    # full day cycle with default brief
+./run-search.sh --single-session   # single session
+./run-search.sh --status           # check budget
+```
+
+### 4. Stop
+
+**Ctrl+C** — graceful shutdown. Finishes current candidate evaluation, saves progress to `output/progress.json`, exits cleanly. The system also auto-stops at the 11 PM hard cutoff.
+
+### Standalone pipeline (no orchestrator)
+
+`run.py` still works for direct pipeline runs without the session governor or decoy agent:
+
+```bash
+python3 run.py                                           # interactive mode
+python3 run.py --brief config/brief-X.json --full-run    # autonomous run
+python3 run.py --brief config/brief-X.json --full-run --resume
+python3 run.py --brief config/brief-X.json --test-single-page
+```
+
+## File Structure
+
+```
+├── session_orchestrator.py   # Entry point — day cycle, decoy interleaving, CLI
+├── governor.py               # Hard safety limits, profile open counting
+├── cooldown.py               # Persistent 24h rolling window tracker
+├── orchestrator.py           # Core sourcing pipeline (search → evaluate → save)
+├── browser.py                # Playwright CDP connection, ghost-cursor, DOM ops
+├── human_timing.py           # Log-normal delay distributions with autocorrelation
+├── config.py                 # Environment/settings loader
+├── run.py                    # Standalone CLI entry point (no orchestrator)
+│
+├── extractors.py             # Cheap-model DOM extraction (snippets + profiles)
+├── judger.py                 # Opus facial + full judgment calls
+├── judgment_templates.py     # System prompts for Opus evaluation
+├── strategy.py               # Opus strategy formation + block-level adaptation
+├── kit_extractor.py          # Boolean string extraction from LinkedIn Search Kit
+├── preflight.py              # Generate evaluation criteria from JD
+├── preflight_v2.py           # V2 preflight with structured brief output
+├── bias_controls.py          # Bias monitoring + alerting
+│
+├── schemas.py                # Data models (CandidateSnippet, Progress, SearchString)
+├── storage.py                # JSONL I/O, progress checkpointing
+├── llm_clients.py            # API clients (Anthropic, OpenAI, Google)
+├── brief_loader.py           # Load and validate sourcing briefs
+├── brief_schema.py           # Brief structure validation
+│
+├── decoy/
+│   ├── agent.py              # Decoy agent — tab management, burst execution
+│   ├── scheduler.py          # Log-normal burst timing with autocorrelation
+│   └── actions/
+│       ├── _utils.py         # Shared helpers (ghost_click, human_scroll)
+│       ├── feed.py           # Passive feed scrolling
+│       ├── notifications.py  # Notification checking
+│       └── jobs.py           # Job browsing
+│
+├── config/                   # Sourcing briefs and search configs
+│   ├── brief-fdl-brazil-v3.json
+│   ├── search-strings-and-filters.json
+│   └── ...
+│
+├── docs/
+│   ├── business-case.html
+│   ├── linkedin-recruiter-dom-map.md
+│   └── protocol-reference.md
+│
+├── output/                   # Pipeline output (gitignored)
+│   ├── progress.json         # Resume checkpoint
+│   ├── snippets.jsonl        # Extracted candidates
+│   ├── facial_judgments.jsonl
+│   ├── final_judgments.jsonl
+│   └── run_log.jsonl
+│
+├── launch-chrome.sh          # Start Chrome with CDP debugging
+├── run-search.sh             # Shortcut for session_orchestrator.py
+└── requirements.txt
+```
+
+State files at `~/.sourcing-governor/`:
+- `daily_stats.json` — rolling 24h profile open timestamps
+- `sessions.jsonl` — per-session summaries
+- `decoy.jsonl` — decoy activity log
 
 ## Results
 
@@ -143,67 +217,20 @@ Status: architecture designed, code written, not yet tested in production.
 | S7A Freestyle | Mar 5 | Brazil | 11 | 9 | 81.8% | 6.3 |
 | **Total** | | | **~557** | **69** | | |
 
-Session 5 was the failure case — a bloated prompt and removed filters caused the agent to bulk-save 398 annotation workers without evaluating them. The recovery (Sessions 6–7A) produced the system's best results: 100% save accuracy on kit strings, zero evaluation corrections needed.
+Session 5 was the failure case — a bloated prompt and removed filters caused the agent to bulk-save 398 annotation workers. The recovery (Sessions 6–7A) produced the system's best results: 100% save accuracy on kit strings, zero evaluation corrections needed.
 
 Full analysis in [`docs/business-case.html`](docs/business-case.html).
 
 ## Dependencies
 
-### Current System (OpenClaw-based)
-- [OpenClaw](https://www.npmjs.com/package/openclaw) — AI agent framework with browser integration
-- Claude Opus (Anthropic API) — evaluation model
-- WhatsApp channel — real-time reporting
-- LinkedIn Recruiter seat
-
-### Multi-Model Pipeline
 - Python 3.11+
-- Playwright (browser automation)
-- Anthropic API (Opus for judgment)
-- OpenAI or Google API (cheap model for extraction)
-
-### Search Kit Library
-- Separate repo — generates the Boolean string kits the agent executes
-- Live at [search-kit-library.vercel.app](https://search-kit-library.vercel.app)
-
-## Running the Agent (Current System)
-
-```bash
-# Install OpenClaw
-npm install -g openclaw@latest
-
-# Start the gateway
-openclaw gateway --port 18789
-
-# Attach a Chrome tab with LinkedIn Recruiter open
-# (click the OpenClaw Browser Relay extension icon)
-
-# Start a sourcing session
-openclaw agent --message "Run the linkedin-sourcing skill using fdl-brazil-rl-gyms brief"
-```
-
-The agent will:
-1. Load the brief and SKILL.md
-2. Navigate to the Search Kit Library to collect Boolean strings
-3. Apply permanent filters on LinkedIn Recruiter
-4. Begin sequential string execution with real-time WhatsApp reporting
-
-## Running the Multi-Model Pipeline
-
-```bash
-cd multi-model-pipeline
-python3 -m venv venv && source venv/bin/activate
-pip install -r requirements.txt
-playwright install chromium
-
-cp config.example.env .env
-# Edit .env with API keys
-
-# Test on a single page
-python run.py --brief config/brief-brazil-v2.json --test-single-page
-
-# Full run
-python run.py --brief config/brief-brazil-v2.json --search-config config/search-strings-and-filters.json
-```
+- `rebrowser-playwright` — CDP browser automation with detection evasion
+- `python-ghost-cursor` — Bézier mouse trajectory generation
+- `anthropic` — Claude Opus for judgment and strategy
+- `openai` or `google-generativeai` — cheap model for DOM extraction
+- `python-dotenv` — environment config
+- Chrome with `--remote-debugging-port=9222`
+- LinkedIn Recruiter seat with active session
 
 ## License
 
