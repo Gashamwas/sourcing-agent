@@ -60,9 +60,12 @@ class DecoyAgent:
         """
         self._context = browser_context
         self._page = None
+        self._cursor = None
 
     async def _ensure_tab(self):
-        """Find or create a linkedin.com tab (non-Recruiter)."""
+        """Find or create a linkedin.com tab (non-Recruiter).
+        Initializes ghost-cursor for Bézier mouse trajectories.
+        """
         if self._page and not self._page.is_closed():
             return
 
@@ -71,12 +74,22 @@ class DecoyAgent:
             url = page.url
             if "linkedin.com" in url and "/talent" not in url and "/recruiter" not in url:
                 self._page = page
+                self._init_cursor()
                 return
 
         # Create a new tab
         self._page = await self._context.new_page()
         await self._page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
         await asyncio.sleep(human_delay(2, 4))
+        self._init_cursor()
+
+    def _init_cursor(self):
+        """Initialize ghost-cursor for human-like mouse movement on the decoy tab."""
+        try:
+            from python_ghost_cursor.playwright_async import create_cursor
+            self._cursor = create_cursor(self._page)
+        except Exception as e:
+            self._cursor = None
 
     async def execute_burst(self) -> list[dict]:
         """Execute one activity burst: 1-3 random actions.
@@ -93,16 +106,16 @@ class DecoyAgent:
         action_names = [name for name, _ in actions]
         _log_decoy("burst_start", {"actions": action_names})
 
-        for name, fn in actions:
+        for i, (name, fn) in enumerate(actions):
             try:
-                result = await fn(self._page)
+                result = await fn(self._page, cursor=self._cursor)
                 results.append(result)
             except Exception as e:
                 _log_decoy("action_error", {"action": name, "error": str(e)})
                 results.append({"type": name, "error": str(e), "duration": 0})
 
             # Intra-burst delay between actions
-            if actions.index((name, fn)) < len(actions) - 1:
+            if i < len(actions) - 1:
                 await asyncio.sleep(human_delay(0.5, 3.0))
 
         total_duration = sum(r.get("duration", 0) for r in results)

@@ -5,13 +5,15 @@ import json
 import random
 import time
 from human_timing import human_delay, human_delay_correlated
+from decoy.actions._utils import ghost_click, human_scroll
 
 
-async def browse_jobs(page) -> dict:
+async def browse_jobs(page, cursor=None) -> dict:
     """Navigate to /jobs/, scroll listings, click into 1-3 jobs.
 
     Args:
         page: Playwright page object
+        cursor: python_ghost_cursor instance for Bézier click trajectories
 
     Returns:
         dict with action metadata
@@ -19,11 +21,11 @@ async def browse_jobs(page) -> dict:
     start = time.time()
     jobs_clicked = 0
 
-    # Navigate to jobs
+    # Navigate to jobs via nav bar (ghost-cursor click)
     try:
         jobs_nav = page.locator("#global-nav a[href*='/jobs']").first
         if await jobs_nav.count() > 0:
-            await jobs_nav.click()
+            await ghost_click(cursor, page, "#global-nav a[href*='/jobs']")
         else:
             await page.goto("https://www.linkedin.com/jobs/", wait_until="domcontentloaded")
     except Exception:
@@ -44,7 +46,7 @@ async def browse_jobs(page) -> dict:
     scroll_depth = random.randint(2, 5)
     for _ in range(scroll_depth):
         scroll_amount = int(vh * random.uniform(0.4, 0.7))
-        await page.evaluate(f"window.scrollBy(0, {scroll_amount})")
+        await human_scroll(page, scroll_amount)
         await asyncio.sleep(human_delay_correlated(1.5))
 
     # Click into 1-3 job listings
@@ -67,7 +69,7 @@ async def browse_jobs(page) -> dict:
                 break
 
             target = random.choice(visible)
-            await target.click()
+            await ghost_click(cursor, page, target)
             jobs_clicked += 1
 
             # Dwell on job detail (10-30s with log-normal shape)
@@ -75,7 +77,7 @@ async def browse_jobs(page) -> dict:
 
             # Optionally scroll within the job detail
             if random.random() > 0.4:
-                await page.evaluate(f"window.scrollBy(0, {random.randint(200, 500)})")
+                await human_scroll(page, random.randint(200, 500))
                 await asyncio.sleep(human_delay_correlated(1.5))
 
             await asyncio.sleep(human_delay(0.5, 2.0))

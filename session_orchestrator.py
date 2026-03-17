@@ -25,7 +25,7 @@ from pathlib import Path
 
 import config
 import cooldown
-from governor import SessionGovernor, GovernorLimitReached, MAX_SESSIONS_PER_DAY
+from governor import SessionGovernor, SessionExpired, GovernorLimitReached, MAX_SESSIONS_PER_DAY
 from decoy.agent import DecoyAgent
 from decoy.scheduler import BurstScheduler
 from human_timing import human_delay
@@ -138,7 +138,10 @@ async def _run_sourcing_session(
                     break
                 await asyncio.sleep(1)
             else:
-                # Pipeline didn't pause in time — skip this burst
+                # Pipeline didn't pause in time — skip this burst.
+                # Clear pause_requested to prevent stale flag from causing
+                # an unexpected pause next time pipeline hits the checkpoint.
+                pause_requested.clear()
                 resume_event.set()
                 continue
 
@@ -167,20 +170,32 @@ async def _run_sourcing_session(
 
     status_task = asyncio.create_task(_status_loop())
 
+    # Cooperative session duration cap — sets a flag that the pipeline checks
+    # at its next safe checkpoint, instead of hard-cancelling mid-operation.
+    session_expired = asyncio.Event()
+    pipeline._session_expired = session_expired
+
+    async def _session_timer():
+        """Sleep for session duration, then signal expiry."""
+        waited = 0.0
+        while waited < session_duration and not stop_interleave.is_set():
+            chunk = min(5.0, session_duration - waited)
+            await asyncio.sleep(chunk)
+            waited += chunk
+        session_expired.set()
+
+    timer_task = asyncio.create_task(_session_timer())
+
     # Run the sourcing pipeline
     shutdown_reason = None
     try:
-        # Set a wall-clock timeout for the session
-        async def _run_pipeline():
-            if search_config:
-                await pipeline.run()
-            else:
-                await pipeline.run_full(resume=resume)
-
-        await asyncio.wait_for(_run_pipeline(), timeout=session_duration)
+        if search_config:
+            await pipeline.run()
+        else:
+            await pipeline.run_full(resume=resume)
         shutdown_reason = "pipeline_complete"
 
-    except asyncio.TimeoutError:
+    except SessionExpired:
         shutdown_reason = "session_duration_cap"
         _print_governor(f"Session duration cap reached ({session_duration/3600:.1f}h)")
 
@@ -193,18 +208,15 @@ async def _run_sourcing_session(
         _print_governor(f"Session error: {e}")
 
     finally:
-        # Stop interleaving
+        # Stop background tasks
         stop_interleave.set()
-        interleave_task.cancel()
-        status_task.cancel()
-        try:
-            await interleave_task
-        except asyncio.CancelledError:
-            pass
-        try:
-            await status_task
-        except asyncio.CancelledError:
-            pass
+        session_expired.set()
+        for task in (interleave_task, status_task, timer_task):
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
         # Ensure pipeline saves progress
         if pipeline._progress:
@@ -358,10 +370,12 @@ async def run_decoy_only():
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
+    # Use governor for time-of-day checks (includes jitter)
+    governor = SessionGovernor()
+
     # Run until stopped or time window closes
     while not stop_event.is_set():
-        now_hour = int(time.strftime("%H"))
-        if now_hour < 7 or now_hour >= 23:
+        if not governor._in_time_window():
             _print_governor("Outside time-of-day window. Stopping.")
             break
 

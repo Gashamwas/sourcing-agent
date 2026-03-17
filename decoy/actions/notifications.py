@@ -4,13 +4,15 @@ import asyncio
 import random
 import time
 from human_timing import human_delay
+from decoy.actions._utils import ghost_click
 
 
-async def check_notifications(page) -> dict:
+async def check_notifications(page, cursor=None) -> dict:
     """Click the notifications bell, scan briefly, optionally click one.
 
     Args:
         page: Playwright page object
+        cursor: python_ghost_cursor instance for Bézier click trajectories
 
     Returns:
         dict with action metadata
@@ -18,11 +20,11 @@ async def check_notifications(page) -> dict:
     start = time.time()
     clicked_through = False
 
-    # Navigate to notifications
+    # Navigate to notifications via bell icon (ghost-cursor click)
     try:
         bell = page.locator("#global-nav a[href*='notifications']").first
         if await bell.count() > 0:
-            await bell.click()
+            await ghost_click(cursor, page, "#global-nav a[href*='notifications']")
         else:
             await page.goto("https://www.linkedin.com/notifications/", wait_until="domcontentloaded")
     except Exception:
@@ -36,11 +38,10 @@ async def check_notifications(page) -> dict:
     # 20% chance to click into one notification
     if random.random() < 0.2:
         try:
-            cards = page.locator(".nt-card, .notification-card").all()
-            card_list = await cards
+            card_list = await page.locator(".nt-card, .notification-card").all()
             if card_list and len(card_list) > 0:
                 idx = random.randint(0, min(len(card_list) - 1, 4))
-                await card_list[idx].click()
+                await ghost_click(cursor, page, card_list[idx])
                 clicked_through = True
                 # Dwell on notification detail
                 await asyncio.sleep(random.uniform(3, 8))

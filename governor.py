@@ -3,9 +3,10 @@
 All limits are constants. No flags, no env vars, no "just five more" escape hatches.
 """
 
-import asyncio
+import datetime
+import random
 import time
-from typing import Optional, Callable, Awaitable
+from typing import Optional
 
 import cooldown
 
@@ -17,7 +18,7 @@ MAX_SESSION_DURATION_SECONDS = 3 * 3600          # 3 hours wall clock
 MAX_PROFILE_OPENS_PER_SESSION = 200
 MAX_PROFILE_OPENS_PER_24H = 400
 TIME_OF_DAY_START_HOUR = 7                        # 7:00 AM local
-TIME_OF_DAY_END_HOUR = 23                         # 11:00 PM local
+TIME_OF_DAY_END_HOUR = 23                         # 11:00 PM local (hard ceiling — no jitter past this)
 MAX_SESSIONS_PER_DAY = 3
 CHECK_INTERVAL_SECONDS = 10 * 60                  # Check time-of-day every 10 min
 
@@ -25,6 +26,13 @@ CHECK_INTERVAL_SECONDS = 10 * 60                  # Check time-of-day every 10 m
 class GovernorLimitReached(Exception):
     """Raised when a governor limit is hit."""
     def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(reason)
+
+
+class SessionExpired(Exception):
+    """Raised when the session duration cap is reached cooperatively."""
+    def __init__(self, reason: str = "session_duration_cap"):
         self.reason = reason
         super().__init__(reason)
 
@@ -40,6 +48,10 @@ class SessionGovernor:
         self._original_open_profile = None
         self._original_open_profile_by_url = None
 
+        # Time-of-day jitter: sampled once per governor instance so sessions
+        # don't always start at exactly 7:00 AM. End hour is rigid (safety).
+        self._tod_start_jitter_minutes = random.randint(-30, 30)
+
     # ── Pre-session checks ──────────────────────────────────────────
 
     def can_start_session(self) -> tuple[bool, str]:
@@ -48,7 +60,7 @@ class SessionGovernor:
         """
         # Time-of-day window
         if not self._in_time_window():
-            return False, f"Outside time-of-day window ({TIME_OF_DAY_START_HOUR}:00 - {TIME_OF_DAY_END_HOUR}:00)"
+            return False, f"Outside time-of-day window"
 
         # Daily session cap
         sessions_today = cooldown.get_sessions_today()
@@ -155,10 +167,20 @@ class SessionGovernor:
         except GovernorLimitReached as e:
             return e.reason
 
-    @staticmethod
-    def _in_time_window() -> bool:
-        now_hour = int(time.strftime("%H"))
-        return TIME_OF_DAY_START_HOUR <= now_hour < TIME_OF_DAY_END_HOUR
+    def _in_time_window(self) -> bool:
+        """Check if current time is within the operating window.
+
+        Start hour is jittered ±30 min per instance to avoid exact-hour patterns.
+        End hour is rigid at 11 PM (hard safety ceiling).
+        """
+        now = datetime.datetime.now()
+        start = now.replace(
+            hour=TIME_OF_DAY_START_HOUR, minute=0, second=0, microsecond=0
+        ) + datetime.timedelta(minutes=self._tod_start_jitter_minutes)
+        end = now.replace(
+            hour=TIME_OF_DAY_END_HOUR, minute=0, second=0, microsecond=0
+        )
+        return start <= now < end
 
     # ── Status ──────────────────────────────────────────────────────
 

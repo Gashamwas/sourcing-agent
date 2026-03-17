@@ -650,6 +650,14 @@ class Pipeline:
                     "page": page_num,
                 })
 
+                # Cooperative session expiry check.
+                # If session_orchestrator's duration timer has fired, exit gracefully
+                # at this safe checkpoint instead of being hard-cancelled mid-operation.
+                if hasattr(self, '_session_expired') and self._session_expired.is_set():
+                    progress.save(str(self.progress_path))
+                    from governor import SessionExpired
+                    raise SessionExpired("session_duration_cap")
+
                 # Cooperative yield point for decoy interleaving.
                 # If session_orchestrator has set _pause_requested, we pause here
                 # (between candidates, after evaluation is complete and results are safe).
@@ -800,7 +808,15 @@ class Pipeline:
         return ""
 
     async def _maybe_cadence_pause(self) -> None:
-        """Pause if enough continuous activity time has elapsed (anti-detection)."""
+        """Pause if enough continuous activity time has elapsed (anti-detection).
+
+        When running under session_orchestrator, decoy interleave bursts serve as
+        cadence breaks — skip the independent timer to avoid double-pausing.
+        """
+        # Decoy interleaving replaces cadence pauses when session_orchestrator is active
+        if hasattr(self, '_pause_requested'):
+            return
+
         if config.CADENCE_INTERVAL_MINUTES <= 0:
             return
 
