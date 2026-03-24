@@ -16,8 +16,8 @@ from shared.brief_loader import load_brief, Brief
 # Test fixtures
 # ---------------------------------------------------------------------------
 
-BRAZIL_BRIEF_PATH = str(Path(__file__).parent / "config" / "brief-brazil-real.json")
-HEAD_AI_BRIEF_PATH = str(Path(__file__).parent / "config" / "brief-head-ai-lab-real.json")
+BRAZIL_BRIEF_PATH = str(Path(__file__).parent.parent / "config" / "brief-brazil-real.json")
+HEAD_AI_BRIEF_PATH = str(Path(__file__).parent.parent / "config" / "brief-head-ai-lab-real.json")
 
 BRAZIL_BRIEF = load_brief(BRAZIL_BRIEF_PATH)
 HEAD_AI_BRIEF = load_brief(HEAD_AI_BRIEF_PATH)
@@ -47,14 +47,14 @@ def _make_snippet(**kwargs) -> CandidateSnippet:
 
 def test_orchestrator_does_not_import_hard_filters():
     """Verify orchestrator.py has no reference to hard_filters."""
-    source = (Path(__file__).parent / "linkedin" / "orchestrator.py").read_text()
+    source = (Path(__file__).parent.parent / "linkedin" / "orchestrator.py").read_text()
     assert "hard_filters" not in source
     assert "hard_filter" not in source
 
 
 def test_hard_filters_module_deleted():
     """Verify hard_filters.py no longer exists."""
-    assert not (Path(__file__).parent / "hard_filters.py").exists()
+    assert not (Path(__file__).parent.parent / "hard_filters.py").exists()
 
 
 # ---------------------------------------------------------------------------
