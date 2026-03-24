@@ -26,6 +26,34 @@ Every string is governed by LinkedIn Boolean rules that most sourcers get wrong.
 
 A human sourcer typically writes 3-5 strings per role. The agent wrote 33 for the Colombia campaign, each more precisely targeted than any individual kit string.
 
+### Evaluation Pipeline
+
+```
+LinkedIn Recruiter results page
+        │
+        ▼
+  Scroll to render all cards (virtual scrolling)
+        │
+        ▼
+  Extract snippets ──→ [Cheap Model] ──→ Structured candidate data
+        │
+        ▼
+  Facial judgment ──→ [Opus] ──→ FACIAL_YES / FACIAL_NO
+        │                              │
+        │ (FACIAL_YES only)            │ (skip — no profile open)
+        ▼                              │
+  Open profile panel (ghost-cursor)    │
+        │                              │
+        ▼                              │
+  Extract full profile ──→ [Cheap Model]
+        │
+        ▼
+  Final judgment ──→ [Opus] ──→ SAVE / REJECT / INFERENTIAL_SAVE
+        │
+        ▼
+  Save to Recruiter pipeline (if qualifying)
+```
+
 ### Two-Phase Evaluation — Triage, Then Synthesis
 
 Every candidate on a results page is evaluated. The question is how deeply.
