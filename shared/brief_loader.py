@@ -79,7 +79,6 @@ def load_brief(path: str | Path) -> Brief:
 
 def _load_v2_brief(raw: dict) -> Brief:
     """Load a V2 brief: create the new brief_schema.Brief AND map to old Brief for compat."""
-    from integration_example import load_brief as _load_new_brief_from_dict
     from shared.brief_schema import Brief as NewBrief, CapabilityArea, DepthDistinction, \
         NonFitPattern, EmployerSignalRule, FacialCalibration, BiasControls, MarketDensity
 
