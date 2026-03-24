@@ -1,0 +1,500 @@
+"""GitHub profile enrichment pipeline.
+
+Takes a username, fetches data from multiple GitHub API endpoints, then uses
+the cheap model to synthesize sparse GitHub data into CandidateSnippet and
+CandidateProfileSummary objects compatible with the existing evaluation pipeline.
+
+The enrichment pipeline aggregates:
+    1. User profile (bio, company, location, email)
+    2. Top repositories (descriptions, topics, stars, languages)
+    3. Language distribution across all repos
+    4. Contribution frequency (monthly commit proxy via repo push dates)
+    5. Profile README (self-description)
+    6. Contact info (commit emails, social links)
+
+Usage:
+    async with GitHubClient() as client:
+        enricher = GitHubEnricher(client)
+        candidate = await enricher.enrich("torvalds")
+        if candidate.data_sufficiency != "insufficient":
+            snippet = candidate.to_snippet()
+            profile = candidate.to_profile_summary()
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import base64
+from html.parser import HTMLParser
+from typing import Optional
+
+from github.client import GitHubClient
+from github.schemas import (
+    GitHubUser,
+    GitHubRepo,
+    GitHubCandidate,
+    ContactInfo,
+)
+from shared.contact_discovery import discover_contacts
+from shared.llm_clients import cheap_llm
+import github.config as gc
+
+
+# ---------------------------------------------------------------------------
+# HTML text extraction helper
+# ---------------------------------------------------------------------------
+
+class _HTMLTextExtractor(HTMLParser):
+    """Simple HTML to text extractor."""
+    def __init__(self):
+        super().__init__()
+        self._text = []
+        self._skip = False
+    def handle_starttag(self, tag, attrs):
+        if tag in ("script", "style", "nav", "header", "footer"):
+            self._skip = True
+    def handle_endtag(self, tag):
+        if tag in ("script", "style", "nav", "header", "footer"):
+            self._skip = False
+    def handle_data(self, data):
+        if not self._skip:
+            self._text.append(data.strip())
+    def get_text(self) -> str:
+        return " ".join(t for t in self._text if t)
+
+def _html_to_text(html: str, max_length: int = 10000) -> str:
+    """Extract text from HTML, capped at max_length."""
+    extractor = _HTMLTextExtractor()
+    try:
+        extractor.feed(html[:50000])  # Don't parse huge pages
+        return extractor.get_text()[:max_length]
+    except Exception:
+        return ""
+
+
+# ---------------------------------------------------------------------------
+# Synthesis prompts
+# ---------------------------------------------------------------------------
+
+_PORTFOLIO_EXTRACTION_SYSTEM = """You are a technical analysis assistant. Given raw GitHub profile data, extract structured signals for a recruiting evaluation pipeline.
+
+Your output must be JSON with these fields:
+{{
+    "toolchain_detected": {{
+        "frameworks": ["list of frontier ML frameworks found in repos — e.g., trl, axolotl, lm-evaluation-harness, swe-bench, vllm, deepeval, unsloth, peft"],
+        "evidence": ["specific evidence for each framework — e.g., 'repo X imports trl.PPOTrainer', 'repo Y has axolotl YAML configs'"],
+        "capability_areas_signaled": ["which capability areas these frameworks signal — use the area names provided below"]
+    }},
+    "repo_summaries": [
+        {{
+            "name": "repo name",
+            "stars": 0,
+            "description": "what the repo does",
+            "readme_gist": "2-3 sentence summary of the README content",
+            "frameworks_used": ["frameworks detected in this repo"],
+            "topics": ["repo topics"],
+            "is_fork": false,
+            "builder_or_user": "builder — custom training loop, not default config"
+        }}
+    ],
+    "frontier_contributions": ["list of contributions to known frontier repos"],
+    "profile_summary": "one-line summary: role, followers, account age, key signals",
+    "website_papers": ["any paper titles or website highlights"],
+    "primary_languages": ["top languages by usage"],
+    "ml_signal_strength": "strong/moderate/weak/none — how likely is this person an ML practitioner?"
+}}
+
+CAPABILITY AREAS for this role:
+{capability_areas}
+
+FRONTIER TOOLCHAIN — these are practitioner fingerprints. Finding these in repos is high-signal evidence:
+{toolchain_list}
+
+Guidelines:
+- Focus on identifying WHICH frontier frameworks/tools are used in repos — this is the #1 signal
+- For each repo, determine if it shows BUILDER work (custom implementations, training scripts, eval harnesses) or USER work (forks with minimal changes, API wrappers, tutorial notebooks)
+- If repos import or configure frontier frameworks (trl, axolotl, lm-eval-harness, etc.), note this prominently
+- Map framework usage to capability areas
+- Be specific about what each repo actually does based on its README and description
+- If data is very sparse, set ml_signal_strength to "none" or "weak"
+"""
+
+_PORTFOLIO_EXTRACTION_USER = """Here is the GitHub profile data to analyze:
+
+**Username:** {username}
+**Name:** {name}
+**Bio:** {bio}
+**Company:** {company}
+**Location:** {location}
+**Account created:** {created_at}
+**Followers:** {followers}
+**Public repos:** {public_repos}
+
+**Profile README excerpt:**
+{readme}
+
+**Top repositories (by stars, non-fork):**
+{repos_text}
+
+**Repo README excerpts:**
+{repo_readmes_text}
+
+**Language distribution:**
+{languages_text}
+
+**Frontier repo contributions:**
+{frontier_text}
+
+**Website/paper content:**
+{website_text}
+
+Analyze this profile and output the structured JSON format."""
+
+
+# ---------------------------------------------------------------------------
+# Enricher
+# ---------------------------------------------------------------------------
+
+class GitHubEnricher:
+    """Multi-step profile enrichment pipeline."""
+
+    def __init__(self, client: GitHubClient, brief=None):
+        self._client = client
+        self._brief = brief
+        self._frontier_contributor_cache: dict[str, set[str]] = {}  # repo -> set of contributor logins
+
+    async def enrich(
+        self,
+        username: str,
+        source_strategy: str = "",
+        source_query: str = "",
+        skip_synthesis: bool = False,
+    ) -> Optional[GitHubCandidate]:
+        """Enrich a GitHub user into a full GitHubCandidate.
+
+        Returns None only on critical API failure (user doesn't exist).
+        Returns GitHubCandidate with data_sufficiency="insufficient" for
+        sparse profiles — caller decides whether to evaluate.
+        """
+        # Step 1: Fetch user profile
+        user_data = await self._client.get_user(username)
+        if not user_data:
+            return None
+
+        user = GitHubUser.from_api(user_data)
+        candidate = GitHubCandidate(
+            user=user,
+            source_strategy=source_strategy,
+            source_query=source_query,
+        )
+
+        # Step 2: Fetch repositories
+        repos_data = await self._client.get_user_repos(username, max_repos=gc.MAX_REPOS_PER_USER)
+        candidate.top_repos = [GitHubRepo.from_api(r) for r in repos_data]
+
+        # Sort non-fork repos by stars for synthesis
+        non_fork = [r for r in candidate.top_repos if not r.is_fork]
+        non_fork.sort(key=lambda r: r.stars, reverse=True)
+        candidate.top_repos = non_fork[:gc.MAX_REPOS_PER_USER]
+
+        # Step 3: Aggregate languages across repos
+        candidate.languages = self._aggregate_languages(candidate.top_repos)
+
+        # Step 4: Profile README (optional — 404 is fine)
+        readme = await self._client.get_profile_readme(username)
+        if readme:
+            candidate.readme_text = readme
+
+        # Step 4b: Fetch repo READMEs (top non-fork repos)
+        await self._fetch_repo_readmes(candidate)
+
+        # Step 4c: Check frontier repo contributions
+        await self._check_frontier_contributions(candidate)
+
+        # Step 4d: Crawl website and papers
+        await self._crawl_website_and_papers(candidate)
+
+        # Step 5: Contact discovery
+        candidate.contact = await discover_contacts(self._client, username, candidate.top_repos[:5])
+
+        # Step 6: Contribution frequency proxy
+        candidate.contribution_months = self._estimate_contribution_months(candidate.top_repos)
+
+        # Step 7: Assess data sufficiency
+        candidate.assess_data_sufficiency()
+
+        # Step 8: Cheap model synthesis (only if sufficient data)
+        if not skip_synthesis and candidate.data_sufficiency != "insufficient":
+            await self._extract_portfolio(candidate)
+
+        return candidate
+
+    async def enrich_from_search_result(
+        self,
+        search_item: dict,
+        source_strategy: str = "",
+        source_query: str = "",
+    ) -> Optional[GitHubCandidate]:
+        """Enrich from a search result dict (has login but minimal data)."""
+        username = search_item.get("login", "")
+        if not username:
+            return None
+        return await self.enrich(username, source_strategy, source_query)
+
+    # ── Portfolio Extraction ────────────────────────────────────────
+
+    async def _extract_portfolio(self, candidate: GitHubCandidate) -> None:
+        """Use cheap model to extract structured portfolio signals from GitHub data."""
+        repos_text = self._format_repos(candidate.top_repos[:10])
+        languages_text = self._format_languages(candidate.languages)
+        readme_excerpt = (candidate.readme_text[:1000] + "...") if len(candidate.readme_text) > 1000 else candidate.readme_text
+
+        # Format repo READMEs
+        repo_readmes_parts = []
+        for name, content in list(candidate.repo_readmes.items())[:5]:
+            repo_readmes_parts.append(f"--- {name} ---\n{content[:800]}")
+        repo_readmes_text = "\n\n".join(repo_readmes_parts) if repo_readmes_parts else "(no repo READMEs fetched)"
+
+        # Format frontier contributions
+        frontier_text = "\n".join(
+            f"- {fc.get('repo', '')}: {fc.get('type', '')} — {fc.get('detail', '')}"
+            for fc in candidate.frontier_contributions
+        ) if candidate.frontier_contributions else "(none detected)"
+
+        # Format website/papers
+        website_parts = []
+        if candidate.paper_titles:
+            website_parts.append("Papers: " + ", ".join(candidate.paper_titles))
+        if candidate.website_text:
+            website_parts.append(f"Website: {candidate.website_text[:500]}")
+        website_text = "\n".join(website_parts) if website_parts else "(none)"
+
+        # Build capability areas and toolchain list for the prompt
+        capability_areas = ""
+        toolchain_list = ""
+        if self._brief:
+            if hasattr(self._brief, '_new_brief') and self._brief._new_brief:
+                nb = self._brief._new_brief
+                capability_areas = "\n".join(f"- {ca.name}: {ca.description}" for ca in nb.capability_areas)
+                # Collect code signals
+                for ca in nb.capability_areas:
+                    if hasattr(ca, 'github_code_signals') and ca.github_code_signals:
+                        toolchain_list += f"{ca.name}: {', '.join(ca.github_code_signals)}\n"
+        if not toolchain_list:
+            # Fall back to FRONTIER_TOOLCHAIN from config
+            for area, frameworks in gc.FRONTIER_TOOLCHAIN.items():
+                toolchain_list += f"{area}: {', '.join(frameworks)}\n"
+
+        system_prompt = _PORTFOLIO_EXTRACTION_SYSTEM.format(
+            capability_areas=capability_areas or "(not specified)",
+            toolchain_list=toolchain_list,
+        )
+
+        user_prompt = _PORTFOLIO_EXTRACTION_USER.format(
+            username=candidate.user.username,
+            name=candidate.user.name,
+            bio=candidate.user.bio,
+            company=candidate.user.company,
+            location=candidate.user.location,
+            created_at=candidate.user.created_at[:10] if candidate.user.created_at else "",
+            followers=candidate.user.followers,
+            public_repos=candidate.user.public_repos,
+            readme=readme_excerpt or "(no profile README)",
+            repos_text=repos_text or "(no repositories)",
+            repo_readmes_text=repo_readmes_text,
+            languages_text=languages_text or "(no language data)",
+            frontier_text=frontier_text,
+            website_text=website_text,
+        )
+
+        try:
+            result = cheap_llm(system_prompt, user_prompt, expect_json=True)
+            if isinstance(result, dict):
+                candidate.portfolio_summary = result
+                candidate.capability_mapping = [result.get("toolchain_detected", {})]
+                candidate.builder_evidence = []
+                candidate.user_evidence = []
+                candidate.repo_analysis = result.get("repo_summaries", [])
+                # Extract builder/user evidence from repo analysis
+                for repo in candidate.repo_analysis:
+                    assessment = repo.get("builder_or_user", "")
+                    if "builder" in assessment.lower():
+                        candidate.builder_evidence.append(f"{repo.get('name', '')}: {assessment}")
+                    elif "user" in assessment.lower():
+                        candidate.user_evidence.append(f"{repo.get('name', '')}: {assessment}")
+                # Also keep backward compat fields
+                candidate.synthesized_headline = result.get("profile_summary", "")
+                candidate.synthesized_skills = result.get("primary_languages", [])
+        except Exception as e:
+            print(f"    [enricher] Portfolio extraction failed for {candidate.user.username}: {e}")
+
+    # ── Enrichment Helpers ───────────────────────────────────────────
+
+    async def _fetch_repo_readmes(self, candidate: GitHubCandidate) -> None:
+        """Fetch README content from top non-fork repos."""
+        non_fork = [r for r in candidate.top_repos if not r.is_fork]
+        for repo in non_fork[:gc.MAX_READMES_PER_CANDIDATE]:
+            try:
+                readme = await self._client.get_repo_readme(repo.full_name)
+                if readme:
+                    candidate.repo_readmes[repo.name] = readme
+            except Exception:
+                pass  # Not critical — skip silently
+
+    async def _check_frontier_contributions(self, candidate: GitHubCandidate) -> None:
+        """Check if candidate has contributed to frontier AI repos."""
+        # Check if any of their repos are forks of frontier repos
+        for repo in candidate.top_repos:
+            if repo.is_fork:
+                for frontier_repo in gc.FRONTIER_AI_REPOS:
+                    # Match by name (forks keep the repo name)
+                    frontier_name = frontier_repo.split("/")[-1]
+                    if repo.name.lower() == frontier_name.lower():
+                        candidate.frontier_contributions.append({
+                            "repo": frontier_repo,
+                            "type": "fork",
+                            "detail": f"Forked {frontier_repo} — may have contributed upstream",
+                        })
+
+        # Check contributor lists (with caching)
+        for frontier_repo in gc.DISCRIMINATING_REPOS:
+            if frontier_repo not in self._frontier_contributor_cache:
+                try:
+                    contributors = await self._client.get_repo_contributors(frontier_repo, max_contributors=500)
+                    self._frontier_contributor_cache[frontier_repo] = {
+                        c.get("login", "").lower() for c in contributors
+                    }
+                except Exception:
+                    self._frontier_contributor_cache[frontier_repo] = set()
+
+            if candidate.user.username.lower() in self._frontier_contributor_cache[frontier_repo]:
+                candidate.frontier_contributions.append({
+                    "repo": frontier_repo,
+                    "type": "contributor",
+                    "detail": f"Listed as contributor to {frontier_repo}",
+                })
+
+    async def _crawl_website_and_papers(self, candidate: GitHubCandidate) -> None:
+        """Crawl personal website and discover papers."""
+        urls_to_check = []
+
+        # Blog URL from profile
+        blog = candidate.user.blog
+        if blog and "linkedin.com" not in blog.lower():
+            if not blog.startswith("http"):
+                blog = f"https://{blog}"
+            urls_to_check.append(blog)
+
+        # Look for URLs in profile README
+        if candidate.readme_text:
+            # Find URLs in README
+            url_pattern = r'https?://[^\s\)\]>\"\'<]+'
+            found_urls = re.findall(url_pattern, candidate.readme_text)
+            for url in found_urls:
+                url_lower = url.lower()
+                if any(domain in url_lower for domain in ("arxiv.org", "scholar.google", "semanticscholar.org", "dl.acm.org")):
+                    candidate.paper_links.append(url)
+                elif "linkedin.com" not in url_lower and "github.com" not in url_lower:
+                    if url not in urls_to_check:
+                        urls_to_check.append(url)
+
+        # Fetch website content
+        for url in urls_to_check[:2]:  # Max 2 websites
+            try:
+                import aiohttp
+                import ssl
+                import certifi
+                ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+                connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+                async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
+                    async with session.get(url) as resp:
+                        if resp.status == 200:
+                            content_type = resp.headers.get("Content-Type", "")
+                            if "html" in content_type:
+                                html = await resp.text()
+                                candidate.website_text = _html_to_text(html, gc.MAX_WEBSITE_FETCH_SIZE)
+                                # Look for paper links in website
+                                paper_urls = re.findall(r'https?://arxiv\.org/abs/[^\s\)\]>\"\'<]+', html)
+                                candidate.paper_links.extend(paper_urls)
+            except Exception:
+                pass  # Not critical
+
+        # Deduplicate paper links
+        candidate.paper_links = list(dict.fromkeys(candidate.paper_links))
+
+        # Extract paper titles from arxiv links
+        for link in candidate.paper_links[:5]:  # Max 5 papers
+            if "arxiv.org" in link:
+                try:
+                    # Extract arxiv ID and fetch title from API
+                    arxiv_id = link.split("/abs/")[-1].split("/")[0].rstrip(".")
+                    if arxiv_id:
+                        import aiohttp
+                        import ssl
+                        import certifi
+                        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+                        connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+                        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
+                            async with session.get(f"https://export.arxiv.org/api/query?id_list={arxiv_id}") as resp:
+                                if resp.status == 200:
+                                    xml = await resp.text()
+                                    # Simple title extraction from Atom XML
+                                    title_match = re.search(r'<title[^>]*>(.*?)</title>', xml, re.DOTALL)
+                                    if title_match:
+                                        title = title_match.group(1).strip()
+                                        if title and title != "ArXiv Query":
+                                            candidate.paper_titles.append(title)
+                except Exception:
+                    pass
+
+    # ── Helpers ──────────────────────────────────────────────────────
+
+    @staticmethod
+    def _aggregate_languages(repos: list[GitHubRepo]) -> dict[str, int]:
+        """Aggregate language distribution from repo primary languages.
+
+        This is a rough estimate — for precise byte counts we'd need
+        GET /repos/{owner}/{repo}/languages per repo, but that's expensive.
+        We use the repo's primary language as a proxy.
+        """
+        langs: dict[str, int] = {}
+        for repo in repos:
+            if repo.language:
+                langs[repo.language] = langs.get(repo.language, 0) + max(repo.stars, 1)
+        return langs
+
+    @staticmethod
+    def _estimate_contribution_months(repos: list[GitHubRepo]) -> dict[str, int]:
+        """Estimate monthly contribution frequency from repo push dates.
+
+        Not precise (actual commits would need per-repo API calls), but
+        gives a signal of activity recency and consistency.
+        """
+        months: dict[str, int] = {}
+        for repo in repos:
+            if repo.pushed_at:
+                month_key = repo.pushed_at[:7]  # "2025-03"
+                months[month_key] = months.get(month_key, 0) + 1
+        return months
+
+    @staticmethod
+    def _format_repos(repos: list[GitHubRepo]) -> str:
+        """Format repos for the synthesis prompt."""
+        lines = []
+        for i, r in enumerate(repos, 1):
+            topics = f" [{', '.join(r.topics)}]" if r.topics else ""
+            lines.append(
+                f"{i}. {r.name} ({r.language or 'unknown'}, {r.stars}★, {r.forks} forks){topics}\n"
+                f"   {r.description or '(no description)'}\n"
+                f"   Last pushed: {r.pushed_at[:10] if r.pushed_at else 'unknown'}"
+            )
+        return "\n".join(lines) if lines else "(no repositories)"
+
+    @staticmethod
+    def _format_languages(languages: dict[str, int]) -> str:
+        """Format language distribution for the synthesis prompt."""
+        if not languages:
+            return "(no language data)"
+        sorted_langs = sorted(languages.items(), key=lambda x: x[1], reverse=True)
+        return ", ".join(f"{lang} ({weight})" for lang, weight in sorted_langs[:15])

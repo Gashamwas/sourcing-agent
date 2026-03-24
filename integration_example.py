@@ -21,9 +21,9 @@ from pathlib import Path
 # from storage import append_jsonl
 
 # --- New imports: reusable components ---
-from brief_schema import Brief, CapabilityArea, DepthDistinction, NonFitPattern, \
+from shared.brief_schema import Brief, CapabilityArea, DepthDistinction, NonFitPattern, \
     EmployerSignalRule, FacialCalibration, BiasControls, MarketDensity
-from judgment_templates import (
+from linkedin.judgment_templates import (
     assemble_facial_prompt,
     assemble_facial_prompt_batch,
     assemble_full_evaluation_prompt,
@@ -32,7 +32,7 @@ from judgment_templates import (
     FacialResult,
     FullEvaluationResult,
 )
-from bias_controls import BiasMonitor, DecisionRecord
+from shared.bias_controls import BiasMonitor, DecisionRecord
 
 
 # ---------------------------------------------------------------------------

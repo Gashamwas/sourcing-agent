@@ -8,7 +8,7 @@
 #   ./run-search.sh --decoy-only       # passive browsing only
 #   ./run-search.sh --status           # check 24h budget
 cd "$(dirname "$0")"
-python3 session_orchestrator.py \
+python3 linkedin/session_orchestrator.py \
   --brief config/brief-fdl-brazil-v3.json \
   --search-config config/search-strings-and-filters.json \
   "$@"

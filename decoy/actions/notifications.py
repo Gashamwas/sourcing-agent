@@ -3,7 +3,7 @@
 import asyncio
 import random
 import time
-from human_timing import human_delay
+from shared.human_timing import human_delay
 from decoy.actions._utils import ghost_click
 
 

@@ -7,9 +7,9 @@ import json
 import importlib
 from pathlib import Path
 
-from schemas import CandidateSnippet
-from judger import _build_facial_system, _build_full_system
-from brief_loader import load_brief, Brief
+from shared.schemas import CandidateSnippet
+from shared.judger import _build_facial_system, _build_full_system
+from shared.brief_loader import load_brief, Brief
 
 
 # ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@ def _make_snippet(**kwargs) -> CandidateSnippet:
 
 def test_orchestrator_does_not_import_hard_filters():
     """Verify orchestrator.py has no reference to hard_filters."""
-    source = (Path(__file__).parent / "orchestrator.py").read_text()
+    source = (Path(__file__).parent / "linkedin" / "orchestrator.py").read_text()
     assert "hard_filters" not in source
     assert "hard_filter" not in source
 
@@ -177,5 +177,5 @@ def test_raw_dict_preserved():
 
 def test_pipeline_import_works():
     """Verify orchestrator module imports cleanly."""
-    from orchestrator import Pipeline
+    from linkedin.orchestrator import Pipeline
     assert Pipeline is not None

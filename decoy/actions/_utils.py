@@ -2,7 +2,7 @@
 
 import asyncio
 import random
-from human_timing import human_delay
+from shared.human_timing import human_delay
 
 
 async def ghost_click(cursor, page, selector_or_locator):

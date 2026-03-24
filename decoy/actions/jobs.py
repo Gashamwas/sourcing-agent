@@ -4,7 +4,7 @@ import asyncio
 import json
 import random
 import time
-from human_timing import human_delay, human_delay_correlated
+from shared.human_timing import human_delay, human_delay_correlated
 from decoy.actions._utils import ghost_click, human_scroll
 
 

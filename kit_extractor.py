@@ -10,8 +10,8 @@ import ssl
 import urllib.request
 import urllib.error
 import json
-from schemas import KitString
-import config
+from shared.schemas import KitString
+import shared.config as config
 
 try:
     import certifi

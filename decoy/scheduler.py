@@ -5,7 +5,7 @@ Provides two timing profiles:
   - Interleave: during active sourcing (median ~30 min between bursts)
 """
 
-from human_timing import human_delay
+from shared.human_timing import human_delay
 
 
 class BurstScheduler:

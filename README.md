@@ -139,7 +139,7 @@ Hard limits — constants in `governor.py`, not configurable at runtime:
 
 | Limit | Value |
 |-------|-------|
-| Max session duration | 3 hours |
+| Max session duration | 5 hours |
 | Max profile opens per session | 200 |
 | Max profile opens per rolling 24h | 400 |
 | Operating window | ~6:30-7:30 AM to 1:00 AM (start jittered, end rigid) |

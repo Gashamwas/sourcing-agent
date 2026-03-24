@@ -15,7 +15,7 @@ from decoy.actions.feed import scroll_feed
 from decoy.actions.notifications import check_notifications
 from decoy.actions.jobs import browse_jobs
 from decoy.scheduler import BurstScheduler
-from human_timing import human_delay
+from shared.human_timing import human_delay
 
 LOG_DIR = Path.home() / ".sourcing-governor"
 DECOY_LOG = LOG_DIR / "decoy.jsonl"

@@ -12,7 +12,7 @@ When only a JD is available, preflight fills in the gaps.
 from __future__ import annotations
 import json
 import sys
-from llm_clients import opus_llm
+from shared.llm_clients import opus_llm
 
 
 def run_preflight(
