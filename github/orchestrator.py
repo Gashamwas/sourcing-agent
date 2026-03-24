@@ -455,9 +455,11 @@ class GitHubPipeline:
         append_jsonl(self.facial_path, facial_decision.to_dict())
 
         if self._bias_monitor:
-            self._bias_monitor.record(DecisionRecord(
+            self._bias_monitor.record_decision(DecisionRecord(
+                candidate_id=username,
                 stage="facial",
                 decision=facial_decision.decision,
+                confidence=1.0,
                 string_id=query.id,
             ))
 
@@ -483,9 +485,11 @@ class GitHubPipeline:
         append_jsonl(self.final_path, full_decision.to_dict())
 
         if self._bias_monitor:
-            self._bias_monitor.record(DecisionRecord(
+            self._bias_monitor.record_decision(DecisionRecord(
+                candidate_id=username,
                 stage="full",
                 decision=full_decision.decision,
+                confidence=full_decision.confidence,
                 string_id=query.id,
             ))
 
@@ -593,7 +597,7 @@ class GitHubPipeline:
     def _save_progress(self):
         if self._progress:
             self._progress.discovered_usernames = list(self._seen_usernames)
-            self._progress.api_calls_made = self._governor.api_calls_session
+            self._progress.api_calls_made = self._client.limiter.total_calls if self._client else 0
             self._progress.save(str(self.progress_path))
 
     def _build_batch_report(self, batch_stats: list[dict]) -> GitHubBatchReport:

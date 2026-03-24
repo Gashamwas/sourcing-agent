@@ -44,8 +44,6 @@ MIN_REPOS_FOR_EVALUATION: int = 1
 
 # --- Session Limits (GitHub governor) ---
 MAX_SESSION_DURATION_SECONDS: int = 3 * 3600  # 3 hours
-MAX_API_CALLS_PER_SESSION: int = 4000  # Leave 1000 buffer from 5000/hr
-MAX_API_CALLS_PER_24H: int = 8000  # Conservative across sessions
 MAX_ENRICHMENTS_PER_SESSION: int = 500  # Enrichment = multiple API calls per candidate
 MAX_SESSIONS_PER_DAY: int = 3
 

@@ -21,7 +21,6 @@ import github.config as gc
 # ---------------------------------------------------------------------------
 
 MAX_SESSION_DURATION_SECONDS = gc.MAX_SESSION_DURATION_SECONDS
-MAX_API_CALLS_PER_SESSION = gc.MAX_API_CALLS_PER_SESSION
 MAX_ENRICHMENTS_PER_SESSION = gc.MAX_ENRICHMENTS_PER_SESSION
 MAX_SESSIONS_PER_DAY = gc.MAX_SESSIONS_PER_DAY
 
@@ -148,7 +147,6 @@ class GitHubGovernor:
     def __init__(self):
         self._session_start: float = 0.0
         self._enrichments_session: int = 0
-        self._api_calls_session: int = 0
         self._active: bool = False
         self._shutdown_reason: Optional[str] = None
 
@@ -161,7 +159,6 @@ class GitHubGovernor:
     def start_session(self):
         self._session_start = time.time()
         self._enrichments_session = 0
-        self._api_calls_session = 0
         self._active = True
         self._shutdown_reason = None
 
@@ -169,16 +166,12 @@ class GitHubGovernor:
         self._active = False
         return {
             "enrichments_session": self._enrichments_session,
-            "api_calls_session": self._api_calls_session,
             "duration_seconds": int(time.time() - self._session_start),
             "shutdown_reason": self._shutdown_reason or "normal",
         }
 
     def record_enrichment(self):
         self._enrichments_session += 1
-
-    def record_api_call(self):
-        self._api_calls_session += 1
 
     def check_limits(self) -> Optional[str]:
         """Non-raising limit check. Returns reason string or None."""
@@ -194,10 +187,6 @@ class GitHubGovernor:
             self._shutdown_reason = f"enrichment_cap ({self._enrichments_session}/{MAX_ENRICHMENTS_PER_SESSION})"
             return self._shutdown_reason
 
-        if self._api_calls_session >= MAX_API_CALLS_PER_SESSION:
-            self._shutdown_reason = f"api_call_cap ({self._api_calls_session}/{MAX_API_CALLS_PER_SESSION})"
-            return self._shutdown_reason
-
         return None
 
     def check_limits_or_raise(self):
@@ -208,10 +197,6 @@ class GitHubGovernor:
     @property
     def enrichments_session(self) -> int:
         return self._enrichments_session
-
-    @property
-    def api_calls_session(self) -> int:
-        return self._api_calls_session
 
     @property
     def elapsed_seconds(self) -> float:
@@ -233,6 +218,5 @@ class GitHubGovernor:
         max_h = MAX_SESSION_DURATION_SECONDS // 3600
         return (
             f"Enrichments: {self._enrichments_session}/{MAX_ENRICHMENTS_PER_SESSION} | "
-            f"API calls: {self._api_calls_session}/{MAX_API_CALLS_PER_SESSION} | "
             f"Time: {h}:{m:02d}:{s:02d}/{max_h}:00:00"
         )
