@@ -42,6 +42,7 @@ class GitHubUser:
     profile_url: str = ""
     twitter_username: str = ""
     avatar_url: str = ""
+    account_type: str = "User"  # "User" | "Organization"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -65,6 +66,7 @@ class GitHubUser:
             profile_url=data.get("html_url", ""),
             twitter_username=data.get("twitter_username", "") or "",
             avatar_url=data.get("avatar_url", "") or "",
+            account_type=data.get("type", "User") or "User",
         )
 
 
@@ -576,6 +578,8 @@ class GitHubBatchReport:
     common_languages_in_saves: list[str] = field(default_factory=list)
     common_repos_in_saves: list[str] = field(default_factory=list)
     queries_hitting_result_cap: list[int] = field(default_factory=list)
+    query_details: list[dict] = field(default_factory=list)
+    # Each: {"query_id": int, "name": str, "query_string": str, "channel": str, "saves": int, "candidates": int}
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -597,4 +601,9 @@ class GitHubBatchReport:
             lines.append(f"- Common repos in saves: {', '.join(self.common_repos_in_saves)}")
         if self.queries_hitting_result_cap:
             lines.append(f"- Queries hitting 1,000 cap: {', '.join(f'#{qid}' for qid in self.queries_hitting_result_cap)}")
+        if self.query_details:
+            lines.append("- Per-query breakdown:")
+            for qd in self.query_details:
+                status = f"{qd['saves']} saves" if qd.get('saves') else "zero saves"
+                lines.append(f"  #{qd['query_id']} [{qd.get('channel', '?')}] [{status}, {qd.get('candidates', 0)} candidates]: {qd.get('query_string', '')[:150]}")
         return "\n".join(lines)

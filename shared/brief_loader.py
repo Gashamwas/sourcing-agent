@@ -20,8 +20,9 @@ KIT_BASE_URL = "https://search-kit-library.vercel.app/kit"
 
 
 def _is_v2_brief(raw: dict) -> bool:
-    """Detect if a brief JSON uses the V2 schema (has capability_areas)."""
-    return "capability_areas" in raw and "depth_distinction" in raw
+    """Detect if a brief JSON uses the V2 schema (has capability_areas or core_areas)."""
+    has_capability = "capability_areas" in raw or "core_areas" in raw
+    return has_capability and "depth_distinction" in raw
 
 
 @dataclass
@@ -43,11 +44,15 @@ class Brief:
     experience_floor: dict
     search_priorities: list[str] = field(default_factory=list)
     noise_predictions: list[dict] = field(default_factory=list)
+    # V2 brief fields surfaced for strategy formation
+    market_density: str = ""  # "sparse" | "moderate" | "dense" — from V2 brief
+    key_terms_by_area: dict = field(default_factory=dict)  # {area_name: [terms]}
     # Lightweight brief fields — JD-driven mode
     jd_text: str = ""
     intake_notes: str = ""
     instructions: list[str] = field(default_factory=list)
     employer_blacklist: list[str] = field(default_factory=list)
+    additional_search_terms: list[str] = field(default_factory=list)
     raw: dict = field(default_factory=dict)
     # V2 brief schema object (set when loading a V2 brief)
     _new_brief: Any = field(default=None, repr=False)
@@ -80,14 +85,19 @@ def load_brief(path: str | Path) -> Brief:
 def _load_v2_brief(raw: dict) -> Brief:
     """Load a V2 brief: create the new brief_schema.Brief AND map to old Brief for compat."""
     from shared.brief_schema import Brief as NewBrief, CapabilityArea, DepthDistinction, \
-        NonFitPattern, EmployerSignalRule, FacialCalibration, BiasControls, MarketDensity
+        NonFitPattern, EmployerSignalRule, FacialCalibration, BiasControls, MarketDensity, \
+        PostSaveModifier
 
     # --- Build the new brief_schema.Brief ---
+    # Normalize v3.1 field names: merge core_areas + differentiator_areas → capability_areas
+    if "core_areas" in raw and "capability_areas" not in raw:
+        raw["capability_areas"] = raw.get("core_areas", []) + raw.get("differentiator_areas", [])
+
     capability_areas = [
         CapabilityArea(
             name=ca["name"], description=ca["description"],
-            builder_signals=ca["builder_signals"],
-            user_signals=ca.get("user_signals", []),
+            builder_signals=ca.get("builder_signals", ca.get("positive_signals", [])),
+            user_signals=ca.get("user_signals", ca.get("false_positive_signals", [])),
             key_terms=ca.get("key_terms", []),
             github_code_signals=ca.get("github_code_signals", []),
         ) for ca in raw["capability_areas"]
@@ -129,6 +139,17 @@ def _load_v2_brief(raw: dict) -> Brief:
         max_consecutive_rejects=bc_data.get("max_consecutive_rejects", 20),
         parse_failure_alarm_rate=bc_data.get("parse_failure_alarm_rate", 0.03),
     )
+    post_save_modifiers = [
+        PostSaveModifier(
+            name=psm["name"],
+            trigger=psm.get("trigger", ""),
+            if_present=psm.get("if_present", ""),
+            if_absent=psm.get("if_absent", ""),
+            signals=psm.get("signals", []),
+        ) for psm in raw.get("post_save_modifiers", [])
+    ]
+    additional_search_terms = raw.get("additional_search_terms", [])
+
     new_brief = NewBrief(
         role_title=raw["role_title"],
         role_level=raw.get("role_level", ""),
@@ -149,6 +170,10 @@ def _load_v2_brief(raw: dict) -> Brief:
         bias_controls=bias,
         inferential_save_rules=raw.get("inferential_save_rules"),
         non_fit_override_rule=raw.get("non_fit_override_rule", ""),
+        calibration_examples=raw.get("calibration_examples"),
+        instructions=raw.get("instructions", []),
+        post_save_modifiers=post_save_modifiers,
+        additional_search_terms=additional_search_terms,
         version=raw.get("version", "2.0"),
         author=raw.get("author", ""),
         notes=raw.get("notes", ""),
@@ -162,8 +187,8 @@ def _load_v2_brief(raw: dict) -> Brief:
             "name": ca["name"],
             "capability_area": ca["name"],
             "pattern": ca["description"],
-            "save_signals": ca.get("builder_signals", []),
-            "skip_signals": ca.get("user_signals", []),
+            "save_signals": ca.get("builder_signals", ca.get("positive_signals", [])),
+            "skip_signals": ca.get("user_signals", ca.get("false_positive_signals", [])),
         })
 
     # non_fit_patterns → noise_archetypes
@@ -219,8 +244,17 @@ def _load_v2_brief(raw: dict) -> Brief:
         save_instructions={"destination": raw.get("linkedin_project", "")},
         experience_floor=experience_floor,
         employer_blacklist=raw.get("employer_blacklist", []),
+        additional_search_terms=additional_search_terms,
         jd_text=jd_text,
         intake_notes=raw.get("intake_notes", ""),
+        instructions=raw.get("instructions", []),
+        search_priorities=raw.get("search_priorities", []),
+        market_density=new_brief.market_density.value if new_brief.market_density else "",
+        key_terms_by_area={
+            ca.name: ca.key_terms
+            for ca in new_brief.capability_areas
+            if ca.key_terms
+        },
         raw=raw,
         _new_brief=new_brief,
     )

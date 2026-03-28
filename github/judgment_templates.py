@@ -106,14 +106,20 @@ MINIMUM BAR: {minimum_years_experience}+ years hands-on. {minimum_bar_descriptio
 WHAT YOU HAVE: An enriched GitHub profile — bio, profile README, public repos with full README content, detected toolchain/framework usage across repos, contributions to external repos, website content, papers, stars/forks counts, language distribution, and repo commit activity summaries.
 
 EVIDENCE HIERARCHY (GitHub-specific — ranked by diagnostic value):
-1. FRONTIER TOOLCHAIN USAGE — HIGHEST. Repos that import, configure, or extend frontier frameworks (axolotl, trl, lm-eval-harness, swe-bench, vllm, megatron, deepspeed, nemo, alignment-handbook). The brief's capability areas define what counts. A repo with `from trl import DPOTrainer` and custom config is stronger signal than any number of stars.
-2. README CONTENT + REPO STRUCTURE — HIGHEST (tied). Architecture explanations, training procedure documentation, directory structures showing data pipelines, eval harness configs, and results tables. A well-documented training repo is equivalent to LinkedIn summary bullets describing the same work.
-3. FRONTIER REPO CONTRIBUTIONS — HIGH. Merged PRs or substantive issues on huggingface/trl, EleutherAI/lm-evaluation-harness, vllm-project/vllm, etc. Drive-by typo fixes do not count.
-4. WEBSITE + PAPERS — HIGH. Personal site with ML project writeups, arxiv papers with hands-on implementation sections.
-5. REPO TOPICS + DESCRIPTIONS — MODERATE-HIGH. Topics like "reinforcement-learning-from-human-feedback", "llm-evaluation", "fine-tuning" indicate domain awareness. But topics are self-reported — verify against actual repo content.
-6. STARS/FORKS — MODERATE. High stars on ML repos indicate community validation. But stars can reflect novelty, not depth. Forks of popular repos without modifications are noise.
-7. BIO / PROFILE README — MODERATE. Self-reported claims. "ML researcher at X" is moderate signal. Verify against repo evidence.
-8. LANGUAGE DISTRIBUTION — LOW. Python-heavy is expected but not diagnostic. Rust/C++ in ML contexts (kernels, inference engines) is a mild positive.
+
+Tier 1 — HIGHEST:
+1. FRONTIER TOOLCHAIN USAGE — Repos that import, configure, or extend frontier frameworks (axolotl, trl, lm-eval-harness, swe-bench, vllm, megatron, deepspeed, nemo, alignment-handbook). The brief's capability areas define what counts. A repo with `from trl import DPOTrainer` and custom config is stronger signal than any number of stars.
+2. BIO + PROFILE README DESCRIBING PROFESSIONAL ML WORK — A bio saying "Computer Vision Engineer" or "ML Engineer" with a README listing specific frameworks (PyTorch, SageMaker, MLflow, DVC) and describing end-to-end ML pipeline work is STRONG evidence of hands-on depth — even if public repos are educational. This is the person's self-description of their professional identity. ~80% of professional ML work lives in private repos and company orgs; bio/README is often the best window into that invisible work.
+
+Tier 2 — HIGH:
+3. README CONTENT + REPO STRUCTURE — Architecture explanations, training procedure documentation, directory structures showing data pipelines, eval harness configs, and results tables. A well-documented training repo is equivalent to LinkedIn summary bullets describing the same work.
+4. FRONTIER REPO CONTRIBUTIONS — Merged PRs or substantive issues on huggingface/trl, EleutherAI/lm-evaluation-harness, vllm-project/vllm, etc. Drive-by typo fixes do not count.
+5. WEBSITE + PAPERS — Personal site with ML project writeups, arxiv papers with hands-on implementation sections.
+
+Tier 3 — MODERATE:
+6. REPO TOPICS + DESCRIPTIONS — Topics like "reinforcement-learning-from-human-feedback", "llm-evaluation", "fine-tuning" indicate domain awareness. But topics are self-reported — verify against actual repo content.
+7. STARS/FORKS — High stars on ML repos indicate community validation. But stars can reflect novelty, not depth. Forks of popular repos without modifications are noise.
+8. LANGUAGE DISTRIBUTION — Python-heavy is expected but not diagnostic. Rust/C++ in ML contexts (kernels, inference engines) is a mild positive.
 
 ═══════════════════════════════════════════════════════
 SPARSE PROFILE CHECK (run FIRST, before anything else)
@@ -141,7 +147,7 @@ If the profile HAS meaningful detail, proceed to Step 1.
 STEP 1 — CAPABILITY MAPPING (signal, NOT a gate)
 ═══════════════════════════════════════════════════════
 
-Try to map the candidate's ACTUAL WORK (as evidenced by repo contents, toolchain usage, and contributions) to one of the following capability areas. Areas are stack-ranked — higher-ranked matches increase confidence.
+Try to map the candidate's ACTUAL WORK (as evidenced by repo contents, toolchain usage, and contributions) to one of the following capability areas. Areas are stack-ranked. Within the same match level (DIRECT or ADJACENT), score toward the TOP of the confidence range for areas ranked 1-3 and toward the BOTTOM for areas ranked 4+. Example: ADJACENT to area #1 → 0.65-0.75; ADJACENT to area #6 → 0.60-0.65.
 
 {capability_area_block}
 
@@ -169,7 +175,12 @@ Key distinction — look at CODE EVIDENCE and REPO PATTERNS:
 
 "Fine-tuned" in a README is ambiguous — check for actual training code. A repo claiming "fine-tuned LLaMA" with actual LoRA configs, training scripts, and loss curves is BUILDER. A repo with the same claim but only inference code calling a hosted model is USER.
 
-A profile that lists ML topics but whose repos contain only application-layer code does not pass the depth test.
+CRITICAL — GITHUB ≠ LINKEDIN: Most ML practitioners' professional work lives in private repos and company organizations. A candidate whose bio/README describes professional ML work (specific frameworks, production systems, model training pipelines) but whose public repos are educational or personal projects is NOT a "USER." They are a professional whose real work is invisible on GitHub. In this case:
+- Bio/README describing specific ML toolchain (not just buzzwords) = BUILDER signal
+- "Specific" means naming production tools: SageMaker, MLflow, DVC, Kedro, Weights & Biases, specific model architectures (YOLO, Faster-RCNN), specific training frameworks (PyTorch, TensorFlow with custom training loops)
+- "Buzzwords" means generic terms only: "AI enthusiast", "passionate about machine learning" without any specific toolchain
+
+A profile that lists ML topics but whose repos contain only application-layer code AND whose bio/README lacks specific professional ML signals does not pass the depth test.
 
 ═══════════════════════════════════════════════════════
 STEP 3 — TRANSFERABILITY (only if Step 1 was ADJACENT or NONE)
@@ -211,14 +222,23 @@ CRITICAL — NON-FIT OVERRIDE RULE:
 
 DECISION MATRIX — weigh the evidence from Steps 1-3 together:
 
-DIRECT match + BUILDER depth = SAVE (high confidence, 0.75-0.95)
-ADJACENT match + BUILDER depth = SAVE (moderate confidence, 0.55-0.75)
-NONE match + BUILDER depth + TRANSFERABLE methodology = SAVE (moderate confidence, 0.45-0.65, flag as TRANSFERABLE_SAVE for recruiter awareness)
+DIRECT match + BUILDER depth = SAVE (high confidence, 0.80-0.95)
+ADJACENT match + BUILDER depth = SAVE (moderate confidence, 0.60-0.75)
+NONE match + BUILDER depth + TRANSFERABLE methodology = TRANSFERABLE_SAVE (moderate confidence, 0.45-0.55, for recruiter awareness)
 NONE match + BUILDER depth + NOT TRANSFERABLE = REJECT
-Any match level + USER depth = REJECT (application-layer work regardless of domain)
-Sparse profile meeting inferential conditions = INFERENTIAL_SAVE (0.4-0.6)
+Any match level + USER depth (with no professional bio/README signal) = REJECT (application-layer work regardless of domain)
+Any match level + USER public repos BUT professional ML bio/README = SIGNAL_SAVE (0.40-0.55) — bio/README describes professional ML work with specific toolchain, but public repos don't fully demonstrate that depth. The professional signals are specific enough that a LinkedIn cross-check is warranted. This is NOT the same as INFERENTIAL_SAVE (which is for sparse profiles with strong employer/credential priors). SIGNAL_SAVE is for profiles with genuine ML professional signals that can't be fully verified from GitHub alone.
+Sparse profile meeting inferential conditions = INFERENTIAL_SAVE (0.35-0.50)
+
+CONFIDENCE CALIBRATION (within each range):
+- Top of range: Multiple independent evidence sources. Example: bio + repos + frontier contributions all confirm ML depth.
+- Middle of range: One strong source, one ambiguous. Example: strong bio but sparse repos.
+- Bottom of range: Single weak source. Example: vague bio mention, no corroborating evidence.
+- Capability area stack rank also differentiates: areas ranked 1-3 should score toward the top of the applicable range; areas ranked 4+ toward the bottom.
 
 The decision standard: would the hiring manager agree this person has the hands-on ML depth and data quality instincts to learn the role? Not "already doing it at a frontier lab" — that's too high. Not "vaguely ML-adjacent" — that's too low. "Has done hands-on ML work with enough depth to grow into this role, even if their current domain is different."
+
+On GitHub, "hands-on ML work" can be evidenced by professional self-description (bio, README) describing specific ML toolchain and production systems, even when public repos don't demonstrate it. The recruiter will cross-check LinkedIn — the agent's job is to surface candidates worth that cross-check, not to fully validate depth from public repos alone.
 
 The guard against permissiveness is the DEPTH TEST, not the capability mapping. A person must demonstrate hands-on ML builder depth to be saved — no exceptions. What the capability mapping determines is confidence level, not the binary decision. Strong domain match + depth = high confidence save. No domain match + depth + transferable methodology = moderate confidence save. No depth = reject regardless of domain.
 
@@ -242,7 +262,7 @@ STEP_3_EVIDENCE: [what methodology transfers, or why the gap is too wide, 1-2 se
 CASE_FOR: [strongest argument for relevance, 1-2 sentences]
 CASE_AGAINST: [strongest argument against, 1-2 sentences]
 
-DECISION: SAVE or REJECT or INFERENTIAL_SAVE or TRANSFERABLE_SAVE
+DECISION: SAVE or REJECT or INFERENTIAL_SAVE or TRANSFERABLE_SAVE or SIGNAL_SAVE
 CONFIDENCE: [0.0 to 1.0 — use the decision matrix ranges above]
 SUMMARY: [one-line evaluation a hiring manager could act on]"""
 

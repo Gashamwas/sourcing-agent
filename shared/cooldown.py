@@ -70,15 +70,18 @@ def record_profile_open():
     _save_raw(data)
 
 
-def get_sessions_today() -> int:
+def get_sessions_today(session_type: Optional[str] = None) -> int:
     """Count sourcing sessions today that did actual work or are still running.
 
     Sessions with profile_opens == 0 and an end_ts (i.e., aborted launches)
-    don't count against the daily cap.
+    don't count against the daily cap. If session_type is provided, only
+    count sessions of that type.
     """
     data = _prune(_load_raw())
     count = 0
     for entry in data["sessions_today"]:
+        if session_type and entry.get("session_type") != session_type:
+            continue
         has_ended = "end_ts" in entry
         did_work = entry.get("profile_opens", 0) > 0
         still_running = not has_ended
@@ -87,7 +90,7 @@ def get_sessions_today() -> int:
     return count
 
 
-def record_session_start() -> int:
+def record_session_start(session_type: str = "linkedin_sourcing") -> int:
     """Record a new session start. Returns session number for today."""
     data = _prune(_load_raw())
     today = time.strftime("%Y-%m-%d")
@@ -95,6 +98,7 @@ def record_session_start() -> int:
     data["sessions_today"].append({
         "date": today,
         "session_num": session_num,
+        "session_type": session_type,
         "start_ts": time.time(),
     })
     _save_raw(data)
@@ -106,23 +110,25 @@ def record_session_end(session_num: int, profile_opens: int, reason: str, stats:
     # Update the daily_stats entry with completion info
     data = _load_raw()
     today = time.strftime("%Y-%m-%d")
+    session_entry = None
     for entry in data["sessions_today"]:
         if entry["session_num"] == session_num and entry.get("date") == today:
             entry["end_ts"] = time.time()
             entry["profile_opens"] = profile_opens
             entry["reason"] = reason
+            session_entry = entry
             break
     _save_raw(data)
 
     # Also append to sessions log for historical record
     _ensure_dir()
     log_entry = {
-        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "session_num": session_num,
-        "profile_opens_session": profile_opens,
-        "profile_opens_24h": get_profile_opens_24h(),
+        "session_type": session_entry.get("session_type", "unknown") if session_entry else "unknown",
+        "start_time": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(session_entry["start_ts"])) if session_entry and "start_ts" in session_entry else None,
+        "end_time": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "shutdown_reason": reason,
-        "stats": stats,
+        "profile_opens_count": profile_opens,
+        "saves_count": stats.get("saved", 0) if stats else 0,
     }
     with open(SESSIONS_LOG, "a") as f:
         f.write(json.dumps(log_entry) + "\n")

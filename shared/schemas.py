@@ -36,6 +36,12 @@ class ExecutionPlan:
     noise_predictions: list[dict] = field(default_factory=list)
     generated_strings: list[dict] = field(default_factory=list)
     coverage_gaps: list[dict] = field(default_factory=list)
+    # Search architecture
+    architecture: str = ""  # sniper|dragnet|titration|negative_space|company_first|title_first
+    architecture_rationale: str = ""
+    architecture_success_criteria: list[str] = field(default_factory=list)
+    architecture_pivot_triggers: list[str] = field(default_factory=list)
+    original_architecture: str = ""  # Set once at plan creation, never updated on pivot
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -50,6 +56,11 @@ class ExecutionPlan:
             noise_predictions=d.get("noise_predictions", []),
             generated_strings=d.get("generated_strings", []),
             coverage_gaps=d.get("coverage_gaps", []),
+            architecture=d.get("architecture", ""),
+            architecture_rationale=d.get("architecture_rationale", ""),
+            architecture_success_criteria=d.get("architecture_success_criteria", []),
+            architecture_pivot_triggers=d.get("architecture_pivot_triggers", []),
+            original_architecture=d.get("original_architecture", ""),
         )
 
 
@@ -68,6 +79,7 @@ class BlockReport:
     zero_save_string_ids: list[int] = field(default_factory=list)
     noise_patterns_observed: list[dict] = field(default_factory=list)
     new_signals: list[str] = field(default_factory=list)
+    string_details: list[dict] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -92,6 +104,15 @@ class BlockReport:
             lines.append(f"- Noise patterns observed: {noise}")
         if self.new_signals:
             lines.append(f"- New signal observed: {', '.join(self.new_signals)}")
+        if self.string_details:
+            lines.append("- Per-string breakdown:")
+            for sd in self.string_details:
+                status = f"{sd['saves']} saves" if sd['saves'] else "zero saves"
+                lines.append(f"  #{sd['string_id']} [{status}, {sd['pages_reviewed']}p, {sd['result_count']} results]: {sd['boolean'][:150]}")
+                if sd.get('notes'):
+                    lines.append(f"    Notes: {sd['notes']}")
+                if sd.get('save_names'):
+                    lines.append(f"    Saved: {', '.join(sd['save_names'])}")
         return "\n".join(lines)
 
 
@@ -105,6 +126,9 @@ class AdaptationResponse:
     skip_remaining: list[dict] = field(default_factory=list)
     reorder: list[dict] = field(default_factory=list)
     noise_updates: list[dict] = field(default_factory=list)
+    # Architecture pivot (optional — empty = no pivot)
+    pivot_to_architecture: str = ""
+    pivot_rationale: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -116,6 +140,8 @@ class AdaptationResponse:
             skip_remaining=d.get("skip_remaining", []),
             reorder=d.get("reorder", []),
             noise_updates=d.get("noise_updates", []),
+            pivot_to_architecture=d.get("pivot_to_architecture", ""),
+            pivot_rationale=d.get("pivot_rationale", ""),
         )
 
 
@@ -138,6 +164,7 @@ class CandidateSnippet:
     result_rank: int
     experience_entries: list[str] = field(default_factory=list)
     card_index: int = -1  # DOM position of <li> in ol.profile-list; -1 = unknown
+    already_saved: bool = False  # True if card shows "Change stage" instead of "Save to pipeline"
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -215,6 +242,7 @@ class OpusDecision:
     rationale: str
     candidate_name: str
     profile_url: str
+    post_save_modifier: str = "NONE"  # V4: which modifier fired, if any
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -225,6 +253,21 @@ class OpusDecision:
     @classmethod
     def from_dict(cls, d: dict) -> OpusDecision:
         return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+
+
+# ---------------------------------------------------------------------------
+# Glance assessment (page-level pre-filter)
+# ---------------------------------------------------------------------------
+
+@dataclass
+class GlanceResult:
+    action: str        # "proceed" | "reformulate"
+    summary: str       # Human-readable page description for _page_adapt
+    confidence: float  # 0.0 to 1.0
+    signals: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +287,9 @@ class SearchString:
     block: str = ""  # Kit block name, e.g. "Post-Training & RLHF"
     subblock: str = ""  # "Concepts", "Methods", or "Tools"
     string_type: str = ""  # "Recall" or "Precision"
+    # Facial triage stats (persisted for block-level aggregate computation)
+    facial_yes_count: int = 0
+    facial_no_count: int = 0
     # Two-phase adaptation fields
     phase: str = "scout"  # "scout" | "paginate"
     original_boolean: str = ""  # The original Boolean before any refinements
@@ -269,6 +315,7 @@ class Progress:
     candidates_rejected: int = 0
     current_string_id: Optional[int] = None
     current_page: int = 0
+    pivot_count: int = 0  # Architecture pivots used this run
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -286,6 +333,7 @@ class Progress:
             candidates_rejected=d.get("candidates_rejected", 0),
             current_string_id=d.get("current_string_id"),
             current_page=d.get("current_page", 0),
+            pivot_count=d.get("pivot_count", 0),
         )
 
     @classmethod

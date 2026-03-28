@@ -14,7 +14,7 @@ import shared.cooldown as cooldown
 # HARD LIMITS (do not make these configurable)
 # ──────────────────────────────────────────────────────────────────────
 
-MAX_SESSION_DURATION_SECONDS = 5 * 3600          # 5 hours wall clock
+MAX_SESSION_DURATION_SECONDS = random.randint(int(3.5 * 3600), int(4.5 * 3600))  # 3.5-4.5 hours wall clock
 MAX_PROFILE_OPENS_PER_SESSION = 200
 MAX_PROFILE_OPENS_PER_24H = 400
 TIME_OF_DAY_START_HOUR = 7                        # 7:00 AM local
@@ -54,7 +54,7 @@ class SessionGovernor:
 
     # ── Pre-session checks ──────────────────────────────────────────
 
-    def can_start_session(self) -> tuple[bool, str]:
+    def can_start_session(self, session_type: str = "linkedin_sourcing") -> tuple[bool, str]:
         """Check all preconditions before starting a session.
         Returns (ok, reason).
         """
@@ -62,10 +62,11 @@ class SessionGovernor:
         if not self._in_time_window():
             return False, f"Outside time-of-day window"
 
-        # Daily session cap
-        sessions_today = cooldown.get_sessions_today()
-        if sessions_today >= MAX_SESSIONS_PER_DAY:
-            return False, f"Daily session cap reached ({sessions_today}/{MAX_SESSIONS_PER_DAY})"
+        # Daily session cap (only for LinkedIn sourcing)
+        if session_type == "linkedin_sourcing":
+            sessions_today = cooldown.get_sessions_today(session_type="linkedin_sourcing")
+            if sessions_today >= MAX_SESSIONS_PER_DAY:
+                return False, f"Daily session cap reached ({sessions_today}/{MAX_SESSIONS_PER_DAY})"
 
         # 24h profile open cap
         opens_24h = cooldown.get_profile_opens_24h()

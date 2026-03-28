@@ -14,6 +14,7 @@ import csv
 import sys
 from pathlib import Path
 from shared.storage import read_jsonl
+from shared.judger import extract_priority_rank
 
 
 # Column order — Gem standard fields first, then GitHub-specific custom fields
@@ -41,11 +42,12 @@ CSV_COLUMNS = [
     "Website",
     "Outreach Subject",
     "Outreach Message",
+    "Priority Rank",
     "Source Query",
     "Source Channel",
 ]
 
-SAVE_DECISIONS = {"SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"}
+SAVE_DECISIONS = {"SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE", "SIGNAL_SAVE"}
 
 
 def _split_name(full_name: str, username: str = "") -> tuple[str, str]:
@@ -178,6 +180,9 @@ def export_saved_candidates_csv(
         if ":" in path:
             cap_area = path.split(":", 1)[1].split("|")[0]
 
+        # Priority rank from capability area path
+        priority_rank = extract_priority_rank(path)
+
         rows.append({
             "First Name": first_name,
             "Last Name": last_name,
@@ -200,6 +205,7 @@ def export_saved_candidates_csv(
             "Website": website,
             "Outreach Subject": outreach.get("subject_line", ""),
             "Outreach Message": outreach.get("message", ""),
+            "Priority Rank": str(priority_rank) if priority_rank else "",
             "Source Query": candidate.get("source_query", ""),
             "Source Channel": candidate.get("source_strategy", ""),
         })

@@ -43,9 +43,11 @@ MAX_COMMITS_FOR_EMAIL: int = 10
 MIN_REPOS_FOR_EVALUATION: int = 1
 
 # --- Session Limits (GitHub governor) ---
-MAX_SESSION_DURATION_SECONDS: int = 3 * 3600  # 3 hours
-MAX_ENRICHMENTS_PER_SESSION: int = 500  # Enrichment = multiple API calls per candidate
-MAX_SESSIONS_PER_DAY: int = 3
+# No anti-automation caps needed — pure API, no browser.
+# Only real constraint is GitHub's own rate limits (handled by client).
+MAX_SESSION_DURATION_SECONDS: int = 999 * 3600  # effectively uncapped
+MAX_ENRICHMENTS_PER_SESSION: int = 999_999  # effectively uncapped
+MAX_SESSIONS_PER_DAY: int = 999  # effectively uncapped
 
 # --- Paths ---
 PROJECT_ROOT: Path = Path(__file__).parent.parent
@@ -97,6 +99,10 @@ FRONTIER_REPO_CONTRIBUTION_CACHE_TTL: int = 3600  # seconds
 # --- Social Graph Expansion ---
 MAX_STARGAZERS_PER_REPO: int = 500
 MAX_FOLLOWERS_PER_SEED: int = 200
+# Minimum confidence to trigger graph expansion from a save.
+# Calibrated against post-Fix-2 score distribution where SIGNAL_SAVE = 0.40-0.55.
+# Target: top ~30% of SIGNAL_SAVE scores qualify for expansion.
+GRAPH_EXPANSION_MIN_CONFIDENCE: float = 0.50
 
 # --- Discriminating Repos (starring alone is a strong signal) ---
 DISCRIMINATING_REPOS: list[str] = [

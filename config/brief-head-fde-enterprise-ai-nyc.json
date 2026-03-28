@@ -1,0 +1,289 @@
+{
+  "brief_id": "head-fde-enterprise-ai-nyc",
+  "brief_version": "2.0",
+  "role_title": "Head of Forward Deployed Engineering",
+  "internal_title": "Head of AI Technology",
+  "company": "Turing",
+  "location": "New York City Metropolitan Area",
+  "location_non_negotiable": true,
+
+  "role_summary": "Leads Turing's forward-deployed engineering operation — the team that goes into Fortune 500 clients and builds/deploys GenAI systems on-site. Equal parts technical architect and delivery leader. Must be hands-on enough to drive architectural decisions and senior enough to hold the room with a CIO. Not a research role, not a pure management role, not a strategy role. Applied GenAI delivery across regulated verticals (BFSI priority, plus life sciences, retail/CPG). The person who turns Turing's AI capabilities into repeatable, deployed reality inside complex enterprises.",
+
+  "role_evolution_note": "This role has been in flux. Originally scoped as 'Head of Applied AI Lab' with a pure BFSI focus. Now repositioned as Head of Forward Deployed Engineering with multi-vertical scope. The JD still reflects the older framing. Evaluate candidates against THIS brief, not the posted JD.",
+
+  "capability_areas": [
+    {
+      "name": "Enterprise GenAI Delivery",
+      "description": "Has personally architected and deployed GenAI systems in production enterprise environments. Not demos, not POCs that died, not strategy decks — systems that went live and stayed live. RAG pipelines, agentic workflows, copilots, orchestration frameworks, evaluation systems.",
+      "key_terms": ["RAG", "agentic workflows", "LangGraph", "LlamaIndex", "LangChain", "copilot", "orchestration", "MCP", "A2A", "evaluation framework", "fine-tuning", "RLHF", "prompt engineering", "guardrails", "LLM deployment", "multi-agent", "DSPy", "Haystack", "CrewAI", "Temporal", "vector database", "embedding pipeline"],
+      "builder_signals": [
+        "Specific tools named: LangGraph, LlamaIndex, DSPy, Haystack, CrewAI, Temporal, etc.",
+        "Phrases: 'I architected', 'I built', 'I deployed to production', 'I designed the evaluation framework'",
+        "Production deployment evidence: uptime, scale, user counts, latency requirements",
+        "GitHub/open source contributions in GenAI tooling",
+        "Fine-tuned models, built RAG pipelines, designed agentic architectures THEMSELVES"
+      ],
+      "user_signals": [
+        "Led team that built (managed, not built personally)",
+        "Developed AI strategy (strategy without implementation)",
+        "Adopted GitHub Copilot / Devin / off-the-shelf AI tools",
+        "AI transformation officer / AI strategy lead framing"
+      ]
+    },
+    {
+      "name": "Forward-Deployed / Client-Facing Engineering Leadership",
+      "description": "Has led engineering teams that deploy directly into client environments — not building internal product, but delivering custom technical solutions on-site or embedded with external clients. Understands the operational mode: scoping with clients, adapting architecture to client constraints, managing delivery timelines against client expectations, building trust through technical credibility.",
+      "key_terms": ["forward-deployed", "client-facing engineering", "professional services", "solutions engineering", "technical delivery", "consulting engineering", "implementation", "customer engineering", "field engineering", "technical account management", "delivery engineering"],
+      "builder_signals": [
+        "Led engineering teams embedded at client sites",
+        "Personally scoped and delivered technical solutions for external clients",
+        "Managed multi-client delivery portfolio",
+        "Built repeatable delivery playbooks from client engagements",
+        "Experience at: enterprise AI startups, consulting firms with real engineering (not just strategy), or tech companies with professional services arms"
+      ],
+      "user_signals": [
+        "Pure pre-sales / solutions architecture (demos, not delivery)",
+        "Customer success (adoption, not engineering)",
+        "Internal product engineering only (never client-facing)",
+        "Consulting but only strategy/advisory (no build)"
+      ]
+    },
+    {
+      "name": "Vertical Domain Fluency",
+      "description": "Has built AI systems that operated within the constraints of regulated or complex enterprise environments. The signal is NOT 'worked at Goldman' — it's 'built systems that had to satisfy compliance, audit, data governance, and regulatory requirements in a vertical context.' BFSI is the priority vertical, but life sciences and retail/CPG experience also qualifies.",
+      "key_terms": ["capital markets", "credit risk", "trading systems", "regulatory", "compliance", "KYC", "AML", "underwriting", "actuarial", "clinical trials", "pharmacovigilance", "real-world evidence", "FDA", "HIPAA", "drug discovery", "supply chain", "demand forecasting", "pricing optimization", "PCI", "SOX", "audit trail", "data governance"],
+      "builder_signals": [
+        "Built AI for financial services clients (from outside: deployed INTO banks, not just worked AT banks)",
+        "Built AI under regulatory constraints: SOX, PCI-DSS, HIPAA, FDA, GDPR applied to sensitive data",
+        "Deployed AI in environments with audit trail / explainability requirements",
+        "Experience with data governance in regulated contexts (data residency, PII handling, model governance)",
+        "Worked at a tech company that SELLS INTO regulated verticals (Palantir, Dataiku, C3.ai, enterprise AI consultancies)"
+      ],
+      "user_signals": [
+        "Worked at a bank but in a non-technical capacity",
+        "Managed a data team at a pharma company (management, not building)",
+        "Vertical experience is entirely in unregulated tech (ad-tech, social media, gaming)"
+      ],
+      "vertical_priority": ["BFSI", "life sciences", "retail/CPG"],
+      "vertical_note": "BFSI is highest priority but not a hard gate. A candidate with deep life sciences + GenAI delivery experience is a strong fit. A candidate with zero regulated-vertical experience is a weak fit regardless of technical depth."
+    },
+    {
+      "name": "Delivery Infrastructure & Playbook Building",
+      "description": "Has built the systems and processes that make client delivery repeatable — not just doing it once, but creating the scaffolding so a team can do it at scale. Reusable architectures, delivery playbooks, quality standards, team scaling frameworks. This is what separates a senior IC who delivers well from a leader who builds a delivery organization.",
+      "key_terms": ["delivery playbook", "reusable architecture", "engineering standards", "quality management", "delivery framework", "client onboarding", "team scaling", "practice building", "center of excellence", "accelerator", "reference architecture"],
+      "builder_signals": [
+        "Built reusable GenAI reference architectures used across multiple clients",
+        "Created delivery playbooks / methodologies adopted by teams",
+        "Scaled an engineering delivery org from small to large",
+        "Established engineering standards and quality processes for client delivery",
+        "Built internal platforms/tools that accelerated client deployments"
+      ],
+      "user_signals": [
+        "Only ever delivered bespoke solutions (no repeatability)",
+        "Managed delivery but didn't build the operational infrastructure",
+        "Strategy consulting on 'how to build a practice' without actually building one"
+      ]
+    }
+  ],
+
+  "minimum_bar": {
+    "years_experience": 12,
+    "experience_note": "12yr floor. Must have substantial post-IC delivery leadership. A 12yr person who's been leading client-facing engineering teams for 4+ years qualifies. A 12yr IC with no delivery leadership doesn't.",
+    "title_sweet_spot": ["Director", "Senior Director", "Head of Engineering", "Head of AI", "Principal Engineer with delivery leadership", "VP at growth-stage company"],
+    "title_ceiling": "Executive Director at a major bank is the max. In tech terms: VP at a large company is context-dependent (okay if hands-on, skip if pure management). SVP, C-suite at large org, MD, Partner at Big4 = too senior.",
+    "title_floor": "Senior Engineering Manager, Principal Engineer (with client delivery evidence). Staff Engineer with no delivery leadership = too junior for the role.",
+    "technical_depth": "Must show direct, personal involvement in BUILDING GenAI systems. Not managing a team that builds, not selling it, not developing strategy around it. The test: could this person whiteboard a RAG architecture and defend their design choices?",
+    "genai_recency": "Post-2022 GenAI work required. Pre-LLM ML experience is valuable context but insufficient alone. Must show evidence of working with LLMs, not just classical ML.",
+    "location": "Must be NYC metro. No exceptions, no relocation candidates."
+  },
+
+  "employer_context_preference": {
+    "rule": "Prioritize candidates from tech companies that SERVE regulated verticals over candidates FROM regulated vertical institutions. This is a preference, not a gate.",
+    "tier_1_prefer": "Enterprise AI companies, AI consulting with real engineering, tech companies with professional services / forward-deployed teams, applied AI startups selling into regulated industries",
+    "tier_2_accept": "Regulated vertical institutions (banks, pharma, insurers) where the candidate was clearly a BUILDER — hands-on engineering leader, not just a manager or strategist. The test: did they build the system or manage the people who built it?",
+    "tier_3_weaker": "Regulated vertical institutions where the candidate's role was management/strategy layer over engineering. Not auto-skip, but needs very strong Gate 3 evidence to compensate.",
+    "tier_4_skip_unless_exceptional": "Cloud vendor solutions architects, Big4 consulting partners, large-org C-suite, pure internal product companies with no client-facing delivery"
+  },
+
+  "preview_scan_criteria": {
+    "rule": "Before opening any profile, triage from the preview snippet using these four signals. If two or more are failing, skip without opening.",
+    "signals": [
+      "TITLE — Must be Director, Senior Director, Head of, Principal (with leadership context), VP at growth-stage company, or Engineering Manager at a company known for strong EM scope. SVP/MD/Partner/CXO at large org = skip. Pure IC titles (Staff Engineer, Senior Engineer) without leadership context = skip.",
+      "COMPANY CONTEXT — Look for tech companies, AI companies, consulting firms with engineering practices, or enterprise software companies. Career spent entirely at one legacy bank/pharma/retailer with no tech-side experience = weaker signal. NOT a hard skip — but flag for careful Gate 3 review.",
+      "YEARS — Must show 12+ years visible experience. If LinkedIn preview shows <12yr total career, skip.",
+      "HEADER KEYWORDS — Builder language: GenAI, LLM, RAG, agentic, applied AI, ML engineering, AI delivery, forward-deployed, solutions engineering, technical delivery. Red flags that justify skip without opening: AI Strategy, AI Transformation, Product Manager, Customer Success, Pre-Sales, Solutions Architect at cloud vendor, Fractional CTO."
+    ]
+  },
+
+  "hard_skips": [
+    "Current location outside NYC metro",
+    "Fewer than 12 years visible experience",
+    "Zero post-2022 GenAI work evidence across entire profile",
+    "Pure researcher with no production deployment or client delivery experience",
+    "Fresh grad, bootcamp, or early-career profile",
+    "Annotation/data labeling worker (Scale AI, Outlier, Appen)",
+    "IT auditor, QA tester, project manager with no engineering crossover",
+    "Solo fractional executive / 1-person boutique consultant with no team leadership evidence"
+  ],
+
+  "clear_skips_from_review": [
+    {
+      "pattern": "Solutions Architect at cloud vendor (AWS, Azure, GCP)",
+      "reason": "Customer-facing pre-sales and demos, not production AI engineering delivery. They show products, they don't build systems."
+    },
+    {
+      "pattern": "Head of AI Products / VP AI Products / Product Manager of AI",
+      "reason": "Product management layer over engineering. Directs engineering, does not build. Even if at a regulated vertical firm."
+    },
+    {
+      "pattern": "AI Transformation Executive / Chief AI Officer at large org / AI Strategy Lead",
+      "reason": "Strategy and transformation framing without implementation evidence. The higher the title at a large org, the further from building."
+    },
+    {
+      "pattern": "C-suite at large org (CTO 400+ person eng org, CDAO, CIO, EVP, SVP, MD at major bank)",
+      "reason": "Too senior. Scope and comp ceiling mismatch. The role needs someone who still gets their hands dirty."
+    },
+    {
+      "pattern": "Partner at Big4 consulting (Deloitte, Accenture, McKinsey, EY, PwC, KPMG)",
+      "reason": "Too senior, wrong operational mode (advisory, not delivery engineering)."
+    },
+    {
+      "pattern": "AI experience = adopting tools, not building systems",
+      "reason": "Implementing GitHub Copilot, Devin, or off-the-shelf AI tools is not building AI systems. Rolling out an LLM vendor's API to internal users is not GenAI delivery."
+    },
+    {
+      "pattern": "Customer Success or Pre-Sales adjacent role",
+      "reason": "Client-facing adoption and demos, not engineering delivery."
+    },
+    {
+      "pattern": "Pure internal product engineer with zero client-facing delivery experience",
+      "reason": "The role requires client-facing delivery leadership. Brilliant engineers who've only built internal products will struggle with the client-facing dimension. Not a hard skip but a serious yellow flag."
+    },
+    {
+      "pattern": "Career entirely in unregulated tech verticals (ad-tech, social media, gaming, consumer SaaS)",
+      "reason": "No exposure to the regulatory/compliance/governance constraints that define delivery in BFSI, life sciences, or retail/CPG. Not auto-skip, but needs very compelling GenAI depth to compensate."
+    }
+  ],
+
+  "gate_evaluation_order": [
+    {
+      "gate": 1,
+      "name": "Diversity (first pass only)",
+      "rule": "Women OR non-Indian candidates only on diversity pass. South Asian males = skip without opening."
+    },
+    {
+      "gate": 2,
+      "name": "Seniority calibration",
+      "rule": "ED at major bank equivalent is the ceiling. In tech: Director to Senior Director sweet spot, VP at growth company okay, VP at large company context-dependent. Below: Senior EM or Principal with delivery leadership evidence. Above: SVP/MD/Partner/C-suite at large org = too senior."
+    },
+    {
+      "gate": 3,
+      "name": "Technical depth (hard filter)",
+      "rule": "The whiteboard test: could this person diagram a production GenAI architecture and defend their design choices? Look for builder evidence, not management evidence.",
+      "pass_signals": [
+        "Specific GenAI tools personally used: LangGraph, LlamaIndex, DSPy, Haystack, CrewAI, Temporal",
+        "Action verbs: 'I architected', 'I implemented', 'I built', 'I deployed to production'",
+        "Production deployment specifics: scale, latency, uptime, user counts",
+        "GitHub contributions, technical blog posts, conference talks with code",
+        "Fine-tuned models, built RAG pipelines, designed evaluation frameworks THEMSELVES"
+      ],
+      "fail_signals": [
+        "All evidence is management/strategy: 'led team of', 'drove strategy for', 'oversaw development of'",
+        "AI experience limited to tool adoption (Copilot, Devin rollout)",
+        "Solutions Architect at cloud vendor",
+        "Product Manager of AI teams",
+        "AI Transformation / AI Strategy titles without implementation evidence"
+      ]
+    },
+    {
+      "gate": 4,
+      "name": "Client-facing delivery experience",
+      "rule": "Must show evidence of leading engineering delivery FOR external clients — not internal product development. Professional services, consulting engineering, forward-deployed engineering, enterprise implementation, solutions delivery. Candidates who've only built internal products need extremely compelling evidence on all other gates to compensate.",
+      "pass_signals": [
+        "Led engineering teams embedded at client sites",
+        "Managed delivery against client timelines and requirements",
+        "Experience at consulting firms, professional services orgs, or enterprise AI companies with client delivery models",
+        "Built and sold technical solutions to enterprise clients"
+      ],
+      "soft_pass": [
+        "Internal engineering leader who worked closely with clients on integration/customization",
+        "Product engineering leader at a B2B company with deep customer engineering involvement"
+      ]
+    },
+    {
+      "gate": 5,
+      "name": "Vertical domain fluency",
+      "rule": "At least one regulated vertical: BFSI (priority), life sciences, or retail/CPG. The evidence can be from the TECH side (deployed AI into banks) or the VERTICAL side (built AI at a bank). No regulated vertical exposure at all = weak fit.",
+      "bfsi_signals": ["Banking AI", "capital markets", "credit/risk systems", "trading AI", "regulatory compliance AI", "KYC/AML automation", "insurance/actuarial AI"],
+      "life_sciences_signals": ["Clinical trial AI", "pharmacovigilance", "drug discovery AI", "medical NLP", "FDA/regulatory AI", "real-world evidence"],
+      "retail_cpg_signals": ["Demand forecasting AI", "pricing optimization", "supply chain AI", "recommendation systems at scale", "customer analytics AI"],
+      "note": "The signal is 'built AI that operated under vertical constraints' — not 'worked at a company in that vertical.'"
+    }
+  ],
+
+  "sweet_spot": {
+    "years": "12-20",
+    "titles": ["Director", "Senior Director", "Head of Engineering", "Head of AI", "VP Engineering (growth-stage)", "Principal Engineer/Architect (with delivery leadership)"],
+    "archetypes": [
+      "Director of AI/Engineering at an enterprise AI company (Palantir, Dataiku, C3.ai, Scale AI enterprise side, etc.) who's spent 5+ years deploying GenAI into BFSI or life sciences clients. Has both the technical depth and the client-facing muscle.",
+      "Head of Engineering at an applied AI startup (<200 people) building GenAI products for regulated industries. Personally architects solutions and leads client delivery. Previously held a senior technical role at a bank or pharma company where they built (not managed) AI systems.",
+      "Senior Director / Engineering Director at a consulting firm's AI engineering practice (not advisory — actual build/deploy) serving Fortune 500 clients. Deloitte/Accenture tech side (not partner level), boutique AI consulting firms, Big4 tech delivery arms.",
+      "VP or Head of AI at a fintech / health-tech / retail-tech company that sells into regulated enterprises. Leads a team of 15-50 engineers, still reviews PRs, personally drives architecture decisions for key clients."
+    ]
+  },
+
+  "non_fit_patterns": [
+    {
+      "pattern": "Career bank lifer — 20 years at one major bank, rose through management ranks",
+      "reason": "Likely too embedded in one institution's culture and processes. May struggle with the multi-client, startup-speed operational mode. Not auto-skip — but needs very strong builder and GenAI evidence."
+    },
+    {
+      "pattern": "Pure academic / research scientist",
+      "reason": "No delivery experience, no client-facing muscle. Even with strong GenAI depth, missing the operational dimension."
+    },
+    {
+      "pattern": "Enterprise sales / business development disguised as technical leadership",
+      "reason": "Titles like 'VP of Client Solutions' or 'Head of Strategic Partnerships' — client-facing but not engineering."
+    },
+    {
+      "pattern": "Large-org middle manager who's been 'overseeing AI initiatives'",
+      "reason": "Overseeing ≠ building. The verb choice matters. 'Oversaw the development of our AI platform' vs 'Built our RAG pipeline and deployed it to 3 production clients' — only the second one passes Gate 3."
+    }
+  ],
+
+  "diversity_mandate": {
+    "first_pass": "Women OR non-Indian candidates only",
+    "skip_rule": "South Asian males = skip without opening on first pass",
+    "note": "Finding 3-5 diverse candidates who meet this bar across a full search run is a successful diversity pass."
+  },
+
+  "market_density": "sparse",
+  "market_density_note": "The intersection of NYC + 12yr+ + GenAI builder + client-facing delivery + regulated vertical is narrow. Expect high noise-to-signal. Dragnet or titration architecture recommended — cast wide on GenAI delivery language, let the gates do the precision work.",
+
+  "search_kit_id": "10c0183e-f28b-49a0-b10f-680c73ab6fba",
+  "search_kit_note": "The existing Head of AI Lab kit was BFSI-anchored. Will likely need regeneration for the FDE framing. Use it if available but don't expect it to fully cover life sciences and retail/CPG vocabulary.",
+
+  "linkedin_project": "Head of Applied AI Lab",
+  "linkedin_project_id": "1982977802",
+  "linkedin_project_note": "Project name reflects the old role title. Do not rename — existing saves are in this project.",
+
+  "permanent_filters": {
+    "location": "New York City Metropolitan Area",
+    "company_filters": "NONE — do not anchor on company names",
+    "keywords": "Boolean strings from search kit, adapted for multi-vertical scope",
+    "seniority": ["Director", "VP", "Senior"],
+    "seniority_excluded": ["CXO", "Partner"],
+    "years_experience": "12-25"
+  },
+
+  "execution_notes": [
+    "This brief deliberately avoids company-name anchoring. Do NOT use company names as search filters — use capability signals.",
+    "Vertical filtering happens at evaluation time (Gate 5), not search time. Search strings should target GenAI delivery capability, not vertical-specific vocabulary.",
+    "Expect high noise on broad Recall strings — the five gates are the precision levers, not the search strings.",
+    "The employer_context_preference tiers should inform evaluation confidence, not search filtering. A Tier 1 candidate with moderate evidence > a Tier 3 candidate with strong evidence.",
+    "Never click Similar Profiles",
+    "Minimum 5 pages per string before marking complete",
+    "Checkpoint after every completed string",
+    "Do NOT remove any candidates already saved to the LinkedIn project"
+  ]
+}

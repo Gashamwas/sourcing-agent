@@ -25,8 +25,8 @@ from shared.brief_schema import Brief
 # Purpose: Filter out candidates where no reasonable full evaluation could
 # produce a save. This is a TRIAGE, not a judgment.
 # Expected pass-through: 25-60% depending on search/market density.
-# Parse failure default: YES (cost of false positive = one cheap extraction;
-# cost of false negative = a permanently missed candidate).
+# Parse failure default: SKIP (skip candidate rather than inflating YES rate
+# with unevaluated candidates).
 # ---------------------------------------------------------------------------
 
 FACIAL_TRIAGE_TEMPLATE = """You are triaging candidate snippets from LinkedIn Recruiter search results.
@@ -55,11 +55,20 @@ The career history is your highest-signal field. Read the FULL trajectory, not j
 TRAJECTORY PATTERNS THAT FAVOR YES:
 {trajectory_yes_patterns}
 
-TRAJECTORY PATTERNS THAT ARE AMBIGUOUS (default YES — let the full evaluation resolve):
+TRAJECTORY PATTERNS THAT ARE AMBIGUOUS (require additional positive signal to justify YES):
 {trajectory_ambiguous_patterns}
 
 TRAJECTORY PATTERNS THAT FAVOR NO (only if consistent across the ENTIRE history):
 {trajectory_no_patterns}
+
+═══════════════════════════════════════════════════════
+STEP 3 — NON-FIT CHECK
+═══════════════════════════════════════════════════════
+
+NON-FIT PATTERNS (automatic FACIAL_NO if detected):
+{non_fit_block}
+
+If ANY of the above non-fit patterns clearly match the candidate's visible trajectory, return FACIAL_NO immediately regardless of other signals.
 
 CAPABILITY AREAS for this role:
 {capability_area_names}
@@ -68,10 +77,12 @@ CAPABILITY AREAS for this role:
 DECISION
 ═══════════════════════════════════════════════════════
 
-You CANNOT distinguish domain relevance from a snippet in most cases. "ML Engineer at Nubank" could be fraud detection (reject) or model training infrastructure (save). Do NOT try to make domain calls at this stage.
+Ambiguity favors NO. A FACIAL_YES requires at least one STRONG positive signal — a title, company, or trajectory element that directly connects to a required capability area. Generic seniority + generic AI keywords is NOT sufficient for YES.
 
-- FACIAL_YES: Any position in the trajectory has a title, employer, or transition pattern that COULD connect to a capability area. Ambiguity favors YES.
-- FACIAL_NO: The ENTIRE trajectory clearly indicates work outside all capability areas. Every position points away from relevance. No single entry creates doubt.
+Do NOT open a profile just to "verify" or "assess depth" — if the snippet does not contain a clear positive signal, the answer is FACIAL_NO. The cost of opening a non-fit profile (60+ seconds of session budget, detection risk, wasted Opus tokens) exceeds the cost of missing an ambiguous candidate who can be found through other search strings.
+
+- FACIAL_YES: At least one position shows a title, employer, or transition that DIRECTLY connects to a capability area. The connection must be specific, not generic.
+- FACIAL_NO: No position shows a specific connection to any capability area, OR a non-fit pattern is detected.
 
 CANDIDATE SNIPPET:
 {candidate_snippet}
@@ -95,15 +106,17 @@ FAST EXITS — reject ONLY if the ENTIRE career trajectory clearly indicates:
 TRAJECTORY READ — the career history is your highest-signal field. Read the FULL trajectory:
 
 YES patterns: {trajectory_yes_patterns_compact}
-AMBIGUOUS (default YES): {trajectory_ambiguous_patterns_compact}
+AMBIGUOUS (require additional signal for YES): {trajectory_ambiguous_patterns_compact}
 NO patterns (only if entire history matches): {trajectory_no_patterns_compact}
+
+NON-FIT PATTERNS (automatic FACIAL_NO): {non_fit_compact}
 
 CAPABILITY AREAS: {capability_area_names_inline}
 
-You CANNOT distinguish domain relevance from snippets. "ML Engineer at Nubank" could be fraud or training infra. Do NOT make domain calls — let the full evaluation resolve.
+Ambiguity favors NO. A FACIAL_YES requires at least one STRONG positive signal — a title, company, or trajectory that DIRECTLY connects to a capability area. Generic seniority + AI keywords is NOT sufficient.
 
-- FACIAL_YES: Any position COULD connect to a capability area. Ambiguity favors YES.
-- FACIAL_NO: ENTIRE trajectory clearly outside scope. Every position points away.
+- FACIAL_YES: At least one position shows a title, employer, or transition that DIRECTLY connects to a capability area. The connection must be specific, not generic.
+- FACIAL_NO: No position shows a specific connection to any capability area, OR a non-fit pattern is detected.
 
 CANDIDATES:
 {candidate_snippets_numbered}
@@ -126,7 +139,7 @@ ROLE: {role_title} ({role_level})
 {role_summary}
 
 MINIMUM BAR: {minimum_years_experience}+ years hands-on. {minimum_bar_description}
-
+{instructions_block}
 WHAT YOU HAVE: A structured profile extracted from LinkedIn — name, headline, a list of EXPERIENCES (each with title, company, dates, and summary bullets describing their actual work), education, and a skills snippet.
 
 EVIDENCE HIERARCHY:
@@ -134,7 +147,7 @@ EVIDENCE HIERARCHY:
 2. Publications, team names, project names mentioned in bullets — HIGH value.
 3. Title + company combinations — MODERATE value. Indicates environment but not what they built.
 4. Skills list — LOWEST value for general skills. HOWEVER: highly specific technical skills ({discriminating_skills_examples} — terms only practitioners use) are meaningful signal, especially on sparse profiles. "PyTorch" tells you nothing. "QLoRA" tells you this person has fine-tuned models.
-
+{seniority_calibration_block}
 ═══════════════════════════════════════════════════════
 SPARSE PROFILE CHECK (run FIRST, before anything else)
 ═══════════════════════════════════════════════════════
@@ -145,7 +158,7 @@ A sparse profile is one with FEW OR NO summary bullets — just titles, companie
 
 ADDITIONAL SPARSE SIGNAL: If the profile is sparse BUT the skills list contains highly specific practitioner terms ({discriminating_skills_examples}), treat this as supporting evidence. These terms are too specific to list without hands-on experience. A sparse profile with PhD + ML title + QLoRA in skills is a stronger inferential save than PhD + ML title alone.
 
-If an inferential save condition is met, respond with DECISION: INFERENTIAL_SAVE, confidence 0.4–0.6. These go to the recruiter for manual review.
+If an inferential save condition is met, respond with DECISION: INFERENTIAL_SAVE, confidence 0.35–0.50. These go to the recruiter for manual review.
 
 If no inferential save applies AND the profile is sparse, respond REJECT — not enough signal.
 
@@ -155,7 +168,7 @@ If the profile HAS meaningful detail, proceed to Step 1.
 STEP 1 — CAPABILITY MAPPING (signal, NOT a gate)
 ═══════════════════════════════════════════════════════
 
-Try to map the candidate's ACTUAL WORK to one of the following capability areas. Areas are stack-ranked — higher-ranked matches increase confidence.
+Try to map the candidate's ACTUAL WORK to one of the following capability areas. {capability_area_stack_rank_guidance}
 
 {capability_area_block}
 
@@ -184,7 +197,7 @@ Key distinction — look at VERBS and OBJECTS in the summary bullets:
 "Fine-tuned" is a BUILDER verb — someone who fine-tuned an LLM with hands-on PyTorch/HuggingFace work is doing model training. "Fine-tuned via API" without code is using a service.
 
 A profile that lists relevant skills but whose bullets describe only application-layer work does not pass the depth test.
-
+{executive_builder_block}
 ═══════════════════════════════════════════════════════
 STEP 3 — TRANSFERABILITY (only if Step 1 was ADJACENT or NONE)
 ═══════════════════════════════════════════════════════
@@ -222,18 +235,10 @@ NON-FIT PATTERNS — work that is valuable but outside scope:
 CRITICAL — NON-FIT OVERRIDE RULE:
 {non_fit_override_rule}
 
-DECISION MATRIX — weigh the evidence from Steps 1-3 together:
-
-DIRECT match + BUILDER depth = SAVE (high confidence, 0.75-0.95)
-ADJACENT match + BUILDER depth = SAVE (moderate confidence, 0.55-0.75)
-NONE match + BUILDER depth + TRANSFERABLE methodology = SAVE (moderate confidence, 0.45-0.65, flag as TRANSFERABLE_SAVE for recruiter awareness)
-NONE match + BUILDER depth + NOT TRANSFERABLE = REJECT
-Any match level + USER depth = REJECT (application-layer work regardless of domain)
-Sparse profile meeting inferential conditions = INFERENTIAL_SAVE (0.4-0.6)
-
-The decision standard: would the hiring manager agree this person has the hands-on ML depth and data quality instincts to learn the FDL role? Not "already doing it at a frontier lab" — that's too high. Not "vaguely ML-adjacent" — that's too low. "Has done hands-on ML work with enough depth to grow into this role, even if their current domain is different."
-
-The guard against permissiveness is the DEPTH TEST, not the capability mapping. A person must demonstrate hands-on ML builder depth to be saved — no exceptions. What the capability mapping determines is confidence level, not the binary decision. Strong domain match + depth = high confidence save. No domain match + depth + transferable methodology = moderate confidence save. No depth = reject regardless of domain.
+{decision_matrix_block}
+{calibration_block}
+{post_evaluation_safety_net}
+{post_save_modifiers_block}
 
 CANDIDATE PROFILE:
 {candidate_profile}
@@ -257,6 +262,7 @@ CASE_AGAINST: [strongest argument against, 1-2 sentences]
 
 DECISION: SAVE or REJECT or INFERENTIAL_SAVE or TRANSFERABLE_SAVE
 CONFIDENCE: [0.0 to 1.0 — use the decision matrix ranges above]
+POST_SAVE_MODIFIER: [name of modifier that fired, or "NONE" if no modifier applies or decision is REJECT]
 SUMMARY: [one-line evaluation a hiring manager could act on]"""
 
 
@@ -277,6 +283,7 @@ def assemble_facial_prompt(brief: Brief, candidate_snippet: str) -> str:
         trajectory_yes_patterns=brief.trajectory_yes_block(),
         trajectory_ambiguous_patterns=brief.trajectory_ambiguous_block(),
         trajectory_no_patterns=brief.trajectory_no_block(),
+        non_fit_block=brief.non_fit_block(),
         capability_area_names="\n".join(f"  - {name}" for name in brief.capability_area_names()),
         candidate_snippet=candidate_snippet,
     )
@@ -295,6 +302,7 @@ def assemble_facial_prompt_batch(brief: Brief, candidate_snippets: list[str]) ->
         trajectory_yes_patterns_compact=brief.trajectory_yes_compact(),
         trajectory_ambiguous_patterns_compact=brief.trajectory_ambiguous_compact(),
         trajectory_no_patterns_compact=brief.trajectory_no_compact(),
+        non_fit_compact=brief.non_fit_compact(),
         capability_area_names_inline=brief.capability_area_names_inline(),
         candidate_snippets_numbered=numbered,
     )
@@ -315,6 +323,14 @@ def assemble_full_evaluation_prompt(brief: Brief, candidate_profile: str) -> str
         employer_signal_block=brief.employer_signal_block(),
         inferential_save_block=brief.inferential_save_block(),
         discriminating_skills_examples=brief.discriminating_skills_examples(),
+        seniority_calibration_block=brief.seniority_calibration_block(),
+        executive_builder_block=brief.executive_builder_block(),
+        decision_matrix_block=brief.decision_matrix_block(),
+        post_evaluation_safety_net=brief.post_evaluation_safety_net(),
+        post_save_modifiers_block=brief.post_save_modifiers_block(),
+        calibration_block=brief.calibration_block(),
+        instructions_block=brief.instructions_block(),
+        capability_area_stack_rank_guidance=brief.capability_area_stack_rank_guidance(),
         candidate_profile=candidate_profile,
     )
 
@@ -331,14 +347,14 @@ from typing import Optional
 
 @dataclass
 class FacialResult:
-    decision: str           # "FACIAL_YES" | "FACIAL_NO" | "PARSE_FAILURE"
+    decision: str           # "FACIAL_YES" | "FACIAL_NO" | "FACIAL_SKIP" | "PARSE_FAILURE"
     reason: str
     raw_response: str
 
 
 @dataclass
 class FullEvaluationResult:
-    decision: str               # "SAVE" | "REJECT" | "INFERENTIAL_SAVE" | "TRANSFERABLE_SAVE" | "PARSE_FAILURE"
+    decision: str               # "SAVE" | "REJECT" | "INFERENTIAL_SAVE" | "TRANSFERABLE_SAVE" | "SIGNAL_SAVE" | "PARSE_FAILURE"
     match_type: Optional[str]   # "DIRECT" | "ADJACENT" | "NONE" | None
     capability_area: Optional[str]
     capability_evidence: str
@@ -349,6 +365,7 @@ class FullEvaluationResult:
     case_for: str
     case_against: str
     confidence: float
+    post_save_modifier: str
     summary: str
     raw_response: str
 
@@ -356,7 +373,7 @@ class FullEvaluationResult:
 def parse_facial_response(raw: str) -> FacialResult:
     """
     Parse facial triage response.
-    Default on failure: FACIAL_YES (permissive at triage, strict at full eval).
+    Default on failure: FACIAL_SKIP (skip candidate rather than inflating YES rate).
     Flags the failure explicitly.
     """
     raw_stripped = raw.strip()
@@ -379,8 +396,8 @@ def parse_facial_response(raw: str) -> FacialResult:
     if "FACIAL_NO" in raw_stripped.upper():
         return FacialResult("FACIAL_NO", "parsed from raw", raw_stripped)
 
-    # Parse failure — default YES at facial stage (cost of FP = one extraction)
-    return FacialResult("FACIAL_YES", "PARSE_FAILURE: defaulting to YES", raw_stripped)
+    # Parse failure — skip candidate rather than inflating YES rate
+    return FacialResult("FACIAL_SKIP", "PARSE_FAILURE: skipping candidate", raw_stripped)
 
 
 def parse_full_evaluation_response(raw: str) -> FullEvaluationResult:
@@ -409,6 +426,7 @@ def parse_full_evaluation_response(raw: str) -> FullEvaluationResult:
         case_against = _extract_field(raw_stripped, "CASE_AGAINST:")
         decision_raw = _extract_field(raw_stripped, "DECISION:")
         confidence_raw = _extract_field(raw_stripped, "CONFIDENCE:")
+        post_save_modifier_raw = _extract_field(raw_stripped, "POST_SAVE_MODIFIER:")
         summary = _extract_field(raw_stripped, "SUMMARY:")
 
         # Parse match type
@@ -428,6 +446,8 @@ def parse_full_evaluation_response(raw: str) -> FullEvaluationResult:
             decision = "TRANSFERABLE_SAVE"
         elif "INFERENTIAL_SAVE" in decision_upper:
             decision = "INFERENTIAL_SAVE"
+        elif "SIGNAL_SAVE" in decision_upper:
+            decision = "SIGNAL_SAVE"
         elif "SAVE" in decision_upper:
             decision = "SAVE"
         elif "REJECT" in decision_upper:
@@ -457,6 +477,22 @@ def parse_full_evaluation_response(raw: str) -> FullEvaluationResult:
         except (ValueError, AttributeError):
             confidence = 0.5
 
+        # Evidence-density micro-adjustment to break score clustering
+        # DIRECT matches are exempt — boost is structurally unreachable (transferability=N/A)
+        # and penalty shouldn't fire on high-confidence decisions
+        if decision in ("SAVE", "SIGNAL_SAVE", "TRANSFERABLE_SAVE", "INFERENTIAL_SAVE") and match_type != "DIRECT":
+            evidence_density = sum(1 for e in [capability_evidence, depth_evidence, transferability_evidence]
+                                   if e and len(e) > 20 and e.upper() not in ("N/A",))
+            if evidence_density >= 3 and confidence < 0.60:
+                confidence = min(confidence + 0.05, 0.65)
+            elif evidence_density <= 1 and confidence > 0.50:
+                confidence = max(confidence - 0.05, 0.35)
+
+        # Parse post-save modifier
+        post_save_modifier = post_save_modifier_raw.strip() if post_save_modifier_raw.strip() else "NONE"
+        if post_save_modifier.upper() in ("NONE", "N/A", ""):
+            post_save_modifier = "NONE"
+
         # Parse capability area
         cap_area = capability_area.strip()
         if cap_area.upper() in ("NONE", "N/A", ""):
@@ -474,6 +510,7 @@ def parse_full_evaluation_response(raw: str) -> FullEvaluationResult:
             case_for=case_for,
             case_against=case_against,
             confidence=confidence,
+            post_save_modifier=post_save_modifier,
             summary=summary,
             raw_response=raw_stripped,
         )
@@ -491,6 +528,7 @@ def parse_full_evaluation_response(raw: str) -> FullEvaluationResult:
             case_for="",
             case_against="PARSE_FAILURE — could not extract structured response",
             confidence=0.0,
+            post_save_modifier="NONE",
             summary="PARSE_FAILURE",
             raw_response=raw_stripped,
         )
@@ -505,7 +543,7 @@ def _extract_field(text: str, field_name: str) -> str:
         "STEP_2_DEPTH", "STEP_2_EVIDENCE",
         "STEP_3_TRANSFERABILITY", "STEP_3_EVIDENCE",
         "CASE_FOR", "CASE_AGAINST",
-        "DECISION", "CONFIDENCE", "SUMMARY",
+        "DECISION", "CONFIDENCE", "POST_SAVE_MODIFIER", "SUMMARY",
     }
 
     lines = text.split("\n")

@@ -10,9 +10,20 @@ prompt builders below.
 
 from __future__ import annotations
 import json
+import re
 from shared.schemas import CandidateSnippet, CandidateProfileSummary, OpusDecision
 from shared.llm_clients import opus_llm
 from shared.brief_loader import Brief
+
+
+def extract_priority_rank(path: str) -> int:
+    """Extract capability area rank from a decision path.
+
+    Paths look like 'DIRECT:3. Agentic Systems...' or 'ADJACENT:1. RL Post-Training|TRANSFERABLE'.
+    Returns the numeric rank (1-based), or 0 if not found.
+    """
+    m = re.search(r':(\d+)\.', path)
+    return int(m.group(1)) if m else 0
 from linkedin.judgment_templates import (
     assemble_facial_prompt,
     assemble_full_evaluation_prompt,
@@ -318,7 +329,7 @@ def _profile_to_text(summary: CandidateProfileSummary) -> str:
 # Stage 2: Facial judgment
 # ---------------------------------------------------------------------------
 
-def facial_judge(snippet: CandidateSnippet, brief: Brief | None = None) -> OpusDecision:
+def facial_judge(snippet: CandidateSnippet, brief: Brief | None = None, prompt_prefix: str = "") -> OpusDecision:
     b = brief or _brief
     if not b:
         raise RuntimeError("Judger not initialized. Call init_judger(brief) or pass brief.")
@@ -327,13 +338,21 @@ def facial_judge(snippet: CandidateSnippet, brief: Brief | None = None) -> OpusD
     if b.has_v2_schema:
         snippet_text = _snippet_to_text(snippet)
         prompt = assemble_facial_prompt(b._new_brief, snippet_text)
+        if prompt_prefix:
+            prompt = prompt_prefix + prompt
         raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
         result = parse_facial_response(raw)
+        if result.decision == "FACIAL_SKIP":
+            confidence = 0.0
+        elif result.decision == "FACIAL_NO":
+            confidence = 1.0
+        else:
+            confidence = 1.0
         return OpusDecision(
             stage="facial",
             decision=result.decision,
             path="none",
-            confidence=1.0 if result.decision != "FACIAL_YES" or "PARSE_FAILURE" not in result.reason else 0.0,
+            confidence=confidence,
             rationale=result.reason,
             candidate_name=snippet.name,
             profile_url=snippet.profile_url,
@@ -403,6 +422,7 @@ def full_judge(summary: CandidateProfileSummary, brief: Brief | None = None) -> 
             rationale=result.summary or result.case_for or "[parse error]",
             candidate_name=summary.name,
             profile_url=summary.profile_url,
+            post_save_modifier=getattr(result, 'post_save_modifier', 'NONE'),
         )
 
     # --- Old path: original prompt builders ---

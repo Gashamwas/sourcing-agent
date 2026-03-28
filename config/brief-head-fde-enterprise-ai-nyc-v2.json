@@ -1,0 +1,336 @@
+{
+  "role_title": "Head of Forward Deployed Engineering",
+  "role_level": "L8-L9",
+  "role_summary": "Leads Turing's forward-deployed engineering operation — the team that goes into Fortune 500 clients and builds/deploys GenAI systems on-site. Technical architect who can also lead delivery. Must be hands-on enough to drive architectural decisions and senior enough to hold the room with a CIO. Not a research role, not a pure management role, not a strategy role. Applied GenAI delivery across regulated verticals (BFSI priority, plus life sciences, retail/CPG). The person who turns Turing's AI capabilities into repeatable, deployed reality inside complex enterprises. This role has been in flux — originally scoped as 'Head of Applied AI Lab' with pure BFSI focus, now repositioned as Head of Forward Deployed Engineering with multi-vertical scope. Evaluate candidates against this brief, not the posted JD.",
+  "geography": "New York City Metropolitan Area",
+  "linkedin_project": "Head of FDE",
+  "linkedin_project_id": "1982977802",
+
+  "instructions": [
+    "This brief deliberately avoids company-name anchoring. Do NOT use company names as search filters — use capability and delivery-context signals.",
+    "Vertical filtering happens at evaluation time, not search time. Search strings should target GenAI delivery capability and forward-deployed / client-facing engineering language, not vertical-specific vocabulary.",
+    "Prioritize candidates from tech companies that SERVE regulated verticals over candidates FROM regulated vertical institutions. This is a preference, not a gate — someone at Goldman who was clearly a hands-on builder still qualifies.",
+    "The seniority sweet spot is Executive Director at a major bank equivalent. In tech: Director to Senior Director. VP at a growth-stage company is fine. VP at a large company is context-dependent. SVP/MD/Partner/C-suite at large org = too senior.",
+    "The title 'Forward Deployed Engineer' is Palantir-specific vocabulary. Most target candidates will NOT have this phrase in their profile. Search on the underlying capabilities: client-facing engineering delivery, applied AI deployment, solutions engineering, consulting engineering.",
+    "Expect high noise on broad Recall strings — the five capability areas and depth distinction are the precision levers, not the search strings.",
+    "DIVERSITY: Prioritize women and non-Indian candidates when ordering results. Do NOT skip or reject any candidate based on demographics — evaluate everyone on capability."
+  ],
+
+  "diversity_mandate": {
+    "first_pass": "Prioritize women and non-Indian candidates in review order",
+    "note": "Diversity is a prioritization signal, not a gate. Evaluate every candidate on capability regardless of demographics."
+  },
+
+  "search_priorities": [
+    "Directors / Senior Directors of AI / Engineering at enterprise AI companies who deploy into regulated clients",
+    "Heads of Engineering at applied AI startups building GenAI for BFSI, life sciences, or retail/CPG",
+    "Engineering Directors at consulting firms' AI engineering practices (build/deploy, not advisory)",
+    "VPs or Heads of AI at fintech / health-tech / retail-tech companies selling into regulated enterprises",
+    "Principal Engineers / Architects with both GenAI depth and client-facing delivery leadership",
+    "Forward Deployed Engineering leaders at companies like Palantir, Anduril, or similar models"
+  ],
+
+  "intake_notes": "Role has been a moving target for weeks. Originally 'Head of Applied AI Lab' with pure BFSI focus. Now 'Head of Forward Deployed Engineering' with multi-vertical scope (BFSI priority, life sciences, retail/CPG also accepted). Leveling: Executive Director at a major bank equivalent — no higher. A bit lower is okay. The search kit (ID: 10c0183e-f28b-49a0-b10f-680c73ab6fba) was built for the old BFSI-anchored framing and may need regeneration for the FDE framing. Use it if available but don't expect it to fully cover life sciences and retail/CPG vocabulary.",
+
+  "capability_areas": [
+    {
+      "name": "1. Enterprise GenAI Delivery",
+      "description": "Has personally architected and deployed GenAI systems in production enterprise environments. Not demos, not POCs that died, not strategy decks — systems that went live and stayed live. RAG pipelines, agentic workflows, copilots, orchestration frameworks, evaluation systems. This is the hard technical gate.",
+      "builder_signals": [
+        "Specific GenAI tools personally used: LangGraph, LlamaIndex, DSPy, Haystack, CrewAI, Temporal, etc.",
+        "Action verbs with specificity: 'I architected a multi-agent system for...', 'I built the RAG pipeline that serves...', 'I deployed an evaluation framework across...'",
+        "Production deployment evidence: scale, latency requirements, uptime, user counts, throughput",
+        "Fine-tuned models, built RAG pipelines, designed agentic architectures, created evaluation frameworks THEMSELVES",
+        "GitHub contributions, technical blog posts, conference talks with architecture detail",
+        "Evidence of model selection, benchmarking, or evaluation design — not just using someone else's model",
+        "SENIOR LEADER SIGNALS (L8-L9): Led the AI function at a Fortune 500 or major financial institution",
+        "SENIOR LEADER SIGNALS (L8-L9): Directed $5M+ annual AI/R&D budgets",
+        "SENIOR LEADER SIGNALS (L8-L9): Built AI/R&D teams from scratch (domestic and/or global)",
+        "SENIOR LEADER SIGNALS (L8-L9): Translated R&D into products delivering measurable economic impact ($XM+)",
+        "SENIOR LEADER SIGNALS (L8-L9): Career arc from hands-on technical work (PhD, quant, engineering IC) into executive AI leadership",
+        "SENIOR LEADER SIGNALS (L8-L9): Pioneering or architecting next-generation AI paradigms (agentic AI, self-evolving systems, advanced optimization)"
+      ],
+      "user_signals": [
+        "Led team that built (managed builders, did not build personally)",
+        "Developed AI strategy (strategy without implementation evidence)",
+        "Adopted GitHub Copilot / Devin / off-the-shelf AI tools (tool adoption ≠ system building)",
+        "AI transformation officer / AI strategy lead framing without build evidence",
+        "Implemented vendor AI products (deployed Salesforce Einstein, not built custom AI)"
+      ],
+      "key_terms": ["RAG", "agentic workflows", "LangGraph", "LlamaIndex", "LangChain", "copilot", "orchestration", "MCP", "A2A", "evaluation framework", "fine-tuning", "RLHF", "guardrails", "LLM deployment", "multi-agent", "DSPy", "Haystack", "CrewAI", "Temporal", "vector database", "embedding pipeline", "prompt engineering"]
+    },
+    {
+      "name": "2. Forward-Deployed / Client-Facing Engineering Leadership (Bonus)",
+      "description": "Has led engineering teams that deploy directly into client environments. This is a BONUS signal — strong positive when present, but NOT required. Candidates with deep GenAI delivery experience in internal product environments are fully qualified. Do not penalize candidates for lacking client-facing experience.",
+      "builder_signals": [
+        "Led engineering teams embedded at client sites or working directly on client infrastructure",
+        "Personally scoped and delivered technical solutions for external enterprise clients",
+        "Managed multi-client delivery portfolio simultaneously",
+        "Built repeatable delivery playbooks from client engagements",
+        "Experience at enterprise AI companies with professional services / forward-deployed models (Palantir, Dataiku, C3.ai, ThoughtSpot, etc.)",
+        "Experience at consulting firms with real engineering delivery (not just advisory)",
+        "Managed delivery against client timelines, budgets, and requirements"
+      ],
+      "user_signals": [
+        "Pure pre-sales / solutions architecture (demos and proposals, not delivery)",
+        "Customer success (adoption coaching, not engineering)",
+        "Internal product engineering only with zero client-facing delivery experience",
+        "Consulting but only strategy/advisory (no build/deploy)"
+      ],
+      "key_terms": ["forward-deployed", "client-facing engineering", "professional services", "solutions engineering", "technical delivery", "consulting engineering", "implementation engineering", "customer engineering", "field engineering", "delivery engineering", "enterprise deployment", "client delivery"]
+    },
+    {
+      "name": "3. Vertical Domain Fluency",
+      "description": "Has built AI systems that operated within the constraints of regulated or complex enterprise environments. The signal is NOT 'worked at Goldman' — it's 'built systems that had to satisfy compliance, audit, data governance, and regulatory requirements in a vertical context.' BFSI is the priority vertical, but life sciences and retail/CPG experience also qualifies. The best signal is a tech company person who deployed INTO regulated verticals, not a vertical institution person who managed a tech team.",
+      "builder_signals": [
+        "Built AI for financial services clients FROM the tech side (deployed INTO banks, hedge funds, insurance companies)",
+        "Built AI under regulatory constraints: SOX, PCI-DSS, HIPAA, FDA, GDPR applied to sensitive data",
+        "Deployed AI in environments with audit trail / explainability requirements",
+        "Experience with data governance in regulated contexts (data residency, PII handling, model governance, model risk management)",
+        "Worked at a tech company that sells into regulated verticals (Palantir, Dataiku, C3.ai, enterprise AI consultancies)",
+        "Built AI for life sciences clients: clinical trials, pharmacovigilance, drug discovery, medical NLP, FDA-compliant systems",
+        "Built AI for retail/CPG clients: demand forecasting, pricing optimization, supply chain AI at enterprise scale"
+      ],
+      "user_signals": [
+        "Worked at a bank/pharma/retailer but in a non-technical capacity",
+        "Managed a data team at a vertical institution without personal technical depth",
+        "Vertical experience is entirely in unregulated tech (ad-tech, social media, gaming, consumer SaaS)"
+      ],
+      "key_terms": ["capital markets", "credit risk", "trading systems", "regulatory compliance", "KYC", "AML", "underwriting", "actuarial", "clinical trials", "pharmacovigilance", "real-world evidence", "FDA", "HIPAA", "drug discovery", "supply chain AI", "demand forecasting", "pricing optimization", "PCI", "SOX", "audit trail", "data governance", "model risk management"]
+    },
+    {
+      "name": "4. Delivery Infrastructure & Playbook Building",
+      "description": "Has built the systems and processes that make client delivery repeatable — not just doing it once, but creating the scaffolding so a team can do it at scale. Reusable architectures, delivery playbooks, quality standards, team scaling frameworks. This separates a senior IC who delivers well from a leader who builds a delivery organization. Lower priority than areas 1-3 but a strong differentiator between good and great candidates.",
+      "builder_signals": [
+        "Built reusable GenAI reference architectures used across multiple client engagements",
+        "Created delivery playbooks / methodologies adopted by teams",
+        "Scaled an engineering delivery org from small to large (e.g., 5 → 30 engineers)",
+        "Established engineering standards and quality processes specifically for client-facing AI delivery",
+        "Built internal platforms or accelerators that reduced time-to-deploy for client solutions",
+        "Created client onboarding processes for technical engagements"
+      ],
+      "user_signals": [
+        "Only ever delivered bespoke one-off solutions with no repeatability",
+        "Managed delivery operations but didn't build the operational infrastructure or technical standards",
+        "Strategy consulting on 'how to build a practice' without actually building one"
+      ],
+      "key_terms": ["delivery playbook", "reusable architecture", "engineering standards", "quality management", "delivery framework", "reference architecture", "center of excellence", "accelerator", "practice building", "team scaling"]
+    }
+  ],
+
+  "depth_distinction": {
+    "builder_definition": "Has personally architected and deployed GenAI systems for enterprise clients. 'Personally' means: made the architectural decisions, wrote or reviewed critical code, designed the evaluation framework, drove technical conversations with client engineering teams. The whiteboard test: could this person diagram a production RAG + agentic architecture, explain the tradeoffs they made, and defend their design choices against a skeptical client CTO? 'Deployed' means: the system went to production in a client environment, not a demo, not a POC that died, not an internal prototype. Evidence: specific tool names, production metrics, deployment context, client outcomes. FOR L8-L9 CANDIDATES: 'Builder' also means: built and led the AI function at an enterprise, directed multi-million-dollar AI R&D budgets, built AI teams from scratch, set technical direction at the architecture level, and drove R&D-to-production translation with measurable economic impact. At this seniority, the whiteboard test is met by career trajectory (PhD + quant/engineering IC + executive AI leadership) combined with scope evidence (budget authority, team building, production impact). Tool names and explicit 'I built' language are bonuses at L8-L9, not requirements.",
+    "user_definition": "Manages, directs, or strategizes about AI systems without personal technical involvement in their design or implementation. This includes: leading the team that built it without personal technical depth, developing AI strategy or transformation roadmaps, adopting vendor AI tools (GitHub Copilot, Devin, Salesforce Einstein), managing AI product portfolios, overseeing AI initiatives from a CXO/VP seat. The distinguishing question: if the engineering team disappeared tomorrow, could this person personally build a working GenAI system for a client? If not, they're a user.",
+    "edge_case_guidance": "STARTUP CTOs: CTO at a small company (<150 employees) who personally architects the system AND leads the team is a BUILDER — apply the Jon Dorando principle. CTO at a large company (400+ engineering org) is almost certainly a USER at this point — too far from the code. VP / HEAD OF at a mid-size company: context-dependent, look for evidence of recent hands-on work (PRs, architecture docs, technical blog posts). CONSULTING DIRECTORS: Directors at consulting firms can be either — some are delivery engineers who also manage, some are practice leaders who sell and staff. Look for builder signals in their project descriptions, not their title. CAREER ARC: Someone who was a builder 5 years ago but has been in pure management for the last 3 years is a judgment call. The role needs someone who is CURRENTLY hands-on, not someone who once was. Recency of builder evidence matters."
+  },
+
+  "inferential_save_rules": {
+    "description": "For profiles where evidence is sparse but priors are strong, the agent should SAVE with a flag rather than REJECT on insufficient evidence. These candidates get passed to the recruiter for manual review.",
+    "conditions": [
+      "Director/Head of AI or Engineering at a known enterprise AI company (Palantir, Dataiku, C3.ai, etc.) with GenAI keywords in headline — even without detailed summary bullets",
+      "Engineering leader at a company known for forward-deployed/client-facing delivery models with 12+ years experience — even if profile is sparse on specifics",
+      "Profile shows clear progression from hands-on engineering into delivery leadership with GenAI in the most recent role — even if client-facing evidence is thin",
+      "CTO/VP Engineering at a small AI startup (<150 employees) serving regulated verticals — even if profile lacks delivery portfolio detail",
+      "Head of AI / VP of AI / Chief AI Architect at a Fortune 500 or major financial institution with 15+ years experience and evidence of team-building and R&D-to-production translation — even without explicit GenAI tool names or client delivery language",
+      "PhD from a top-tier institution (MIT, Stanford, CMU, Berkeley, etc.) + executive AI leadership at multiple major employers + currently at a top-tier research organization (Amazon, Google, Meta, etc.) — trajectory alone justifies SAVE for L8-L9 roles"
+    ],
+    "save_tag": "INFERENTIAL_SAVE",
+    "confidence_range": [0.35, 0.55],
+    "note": "The intersection of GenAI builder + regulated vertical experience + NYC + 12yr+ is extremely narrow. Err on the side of saving ambiguous profiles that hit 3 of 4 capability areas. The recruiter would rather review 5 borderline candidates than miss 1 real one in a market this sparse."
+  },
+
+  "non_fit_patterns": [
+    {
+      "label": "Solutions Architect at cloud vendor",
+      "description": "Solutions Architects at AWS, Azure, or GCP who do customer-facing pre-sales demos and architecture reviews. They show products to clients, they don't build production systems for clients.",
+      "why_not": "Customer-facing pre-sales and demos, not production AI engineering delivery. The role requires someone who BUILDS the system inside the client's environment, not someone who demos the vendor's capabilities.",
+      "examples": ["Head of Customer Solutions / Sr. Leader Solutions Architecture @ AWS", "Principal Solutions Architect @ GCP", "AI/ML Solutions Architect @ Azure"]
+    },
+    {
+      "label": "Head of AI Products / VP AI Products / Product Manager of AI",
+      "description": "Product management layer over engineering. They define what to build, not how to build it. Even at regulated vertical firms, this is a fundamentally different skill set.",
+      "why_not": "Product managers direct engineering, they don't do engineering. The role needs someone who can personally drive architectural decisions, not someone who writes product requirements.",
+      "examples": ["Executive Director & Head of AI Products @ JPMorgan", "VP AI Products @ Goldman Sachs", "SVP Data & Analytics Product Manager @ Citi"]
+    },
+    {
+      "label": "AI Transformation Executive / AI Strategy Lead",
+      "description": "Strategy and transformation framing without implementation evidence. The higher the title at a large org, the further from building.",
+      "why_not": "Strategy without implementation is the opposite of what this role needs. The role delivers working systems, not transformation roadmaps.",
+      "examples": ["Chief AI Transformation Officer", "AI Strategy & Innovation Lead", "VP Digital Transformation & AI"]
+    },
+    {
+      "label": "C-suite / SVP / MD at large org",
+      "description": "CTO of a 400+ person engineering org, CDAO, CIO, EVP, SVP, MD at a major bank, Partner at Big4. Too senior for the scope and comp ceiling. The bigger the org they ran, the further from hands-on work.",
+      "why_not": "Scope and comp ceiling mismatch. The role needs someone who still gets their hands dirty with architecture and code. Someone running a 400-person engineering org hasn't reviewed a PR in years.",
+      "examples": ["CTO Investments & Capital Markets @ Freddie Mac (400-person org)", "EVP & CDAIO @ TIAA", "MD @ Barclays (1,100-person team)", "Partner @ Deloitte"]
+    },
+    {
+      "label": "AI experience = tool adoption, not system building",
+      "description": "AI involvement limited to rolling out vendor tools: GitHub Copilot adoption, Devin integration, Salesforce Einstein implementation, or similar off-the-shelf AI deployment. This is IT enablement, not AI engineering.",
+      "why_not": "Implementing vendor AI tools requires evaluation and rollout skills, not architecture and engineering skills. The role builds custom GenAI systems from scratch.",
+      "examples": ["CTO who 'implemented GitHub Copilot and Devin across engineering'", "VP who 'led AI transformation through vendor tool adoption'"]
+    },
+    {
+      "label": "Customer Success / Pre-Sales adjacent",
+      "description": "Client-facing roles focused on adoption, demos, and account management rather than engineering delivery. They help clients USE products, not build custom systems.",
+      "why_not": "Client-facing but not engineering. The role requires someone who architects and deploys, not someone who coaches and demos.",
+      "examples": ["Head of Customer Solutions", "Pre-Sales Solutions Architect", "Customer Success Director for AI products"]
+    },
+    {
+      "label": "Career entirely in unregulated tech verticals",
+      "description": "All experience is in ad-tech, social media, gaming, consumer SaaS, or other verticals with no regulatory, compliance, or data governance complexity.",
+      "why_not": "No exposure to the constraints that define delivery in BFSI, life sciences, or retail/CPG. Building AI without regulatory constraints is a fundamentally different discipline. Not auto-skip if GenAI depth and client delivery experience are exceptional, but a significant gap.",
+      "examples": ["Director of ML at a social media company", "Head of AI at a gaming studio", "VP Engineering at an ad-tech company"]
+    },
+    {
+      "label": "Solo boutique consultant / fractional executive",
+      "description": "Founder of a 1-person consulting shop or fractional CTO practice. May have deep knowledge but no evidence of building or leading a delivery organization at scale.",
+      "why_not": "The role leads a team and builds a practice. Solo consulting demonstrates individual expertise but not the team leadership and practice-building the role requires.",
+      "examples": ["Founder, Good Strategy Group (1-person consulting)", "Fractional CTO serving multiple startups", "Independent AI consultant"]
+    }
+  ],
+
+  "non_fit_override_rule": "A non-fit pattern is OVERRIDDEN if the candidate's profile shows specific evidence of work in a capability area at the builder level. The non-fit label describes default expectations for a title/company combination; actual evidence in summary bullets always wins. When evidence contradicts the non-fit pattern, note the conflict and evaluate on evidence. 'Career in unregulated verticals' is overridden if the candidate's GenAI depth and delivery leadership are exceptional enough to compensate for the vertical gap.",
+
+  "employer_signal_rules": [
+    {
+      "tier": "enterprise_ai_delivery",
+      "employer_patterns": ["Palantir", "Dataiku", "C3.ai", "Scale AI", "ThoughtSpot", "DataRobot", "H2O.ai", "Weights & Biases", "Cohere", "Writer", "Moveworks", "Observe.AI"],
+      "evidence_required": "Engineering leadership role (Director+) at an enterprise AI company that deploys into client environments. These companies' operating model IS forward-deployed engineering. Title + company is a strong signal. Verify GenAI depth (some of these companies predate the GenAI era — look for post-2022 GenAI work).",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "consulting_engineering",
+      "employer_patterns": ["Deloitte", "Accenture", "McKinsey", "BCG", "EY", "PwC", "KPMG", "Capgemini", "Cognizant", "Infosys", "Wipro", "TCS", "Thoughtworks", "Slalom"],
+      "evidence_required": "Engineering delivery role at a consulting firm — NOT advisory/strategy, NOT partner level. Titles like Technology Fellow, Director of AI Engineering, Lead Solutions Architect WITH build evidence. The key distinction: did they BUILD and DEPLOY, or did they ADVISE and STAFF? Many consulting profiles will look like fits but are actually strategy/advisory. Gate 3 (technical depth) is the critical filter. Partner-level at Big4 = too senior regardless.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "ai_startup_regulated",
+      "employer_patterns": [],
+      "evidence_required": "AI startups (<200 employees) serving BFSI, life sciences, or retail/CPG clients. This tier is not limited to a specific list — the signal is a small company doing applied AI for regulated enterprises. CTO or Head of Engineering at these companies is a strong signal IF they're hands-on (apply the <150 employee CTO rule). Client delivery evidence is a bonus signal.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "regulated_vertical_builder",
+      "employer_patterns": [],
+      "evidence_required": "Candidates FROM regulated vertical institutions (banks, pharma, insurers, retailers) who were clearly BUILDERS — hands-on engineering leaders, not managers or strategists. This tier is intentionally not name-limited. The test: did they build the AI system or manage the people who built it? Titles like Engineering Director, Head of AI Engineering, Principal Architect at a bank/pharma/retailer WITH builder evidence pass. Titles like CTO, CDAO, SVP, MD at these institutions are almost certainly too senior. VP is context-dependent.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "fintech_healthtech_retailtech",
+      "employer_patterns": [],
+      "evidence_required": "Tech companies focused on regulated verticals — fintechs, health-tech companies, retail-tech platforms. Not name-limited. Engineering leadership at these companies combines tech-side operating culture with vertical domain exposure. Verify GenAI depth (post-2022). Client delivery evidence is a bonus signal.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "neutral",
+      "employer_patterns": [],
+      "evidence_required": "Same standard as any candidate — all four capability areas evaluated on evidence. Candidates from companies not in the above tiers can absolutely be strong fits — the tiers are signal strength boosters, not gates.",
+      "save_on_employer_alone": false
+    }
+  ],
+
+  "minimum_years_experience": 12,
+  "minimum_bar_description": "12+ years total experience with GenAI builder depth, seniority, and NYC location. Delivery leadership is a strong plus but not a gate — the hard bar is hands-on GenAI architecture experience + organizational leadership + regulated vertical exposure. A 12-year IC with no leadership does not qualify — the role requires both technical depth and organizational leadership. The years floor exists to ensure the candidate has the seniority to hold credibility with Fortune 500 CIOs, not as an arbitrary gate. Post-2022 GenAI work is required — pre-LLM ML experience is valuable context but insufficient alone. NYC metro location is non-negotiable.",
+
+  "facial_calibration": {
+    "expected_yes_rate_low": 0.05,
+    "expected_yes_rate_high": 0.20,
+    "fast_exit_patterns": [
+      "ENTIRE career is IT support, helpdesk, or system administration with no AI/ML/engineering leadership signal",
+      "ENTIRE career is sales, business development, or account management",
+      "ENTIRE career is HR, recruiting, or people operations",
+      "ENTIRE career is marketing, content creation, or social media with no technical roles",
+      "ENTIRE career is project/program management with no engineering IC or leadership positions",
+      "ENTIRE career is manual QA/testing with no AI/ML crossover",
+      "ENTIRE career is annotation/data labeling (Scale AI, Outlier, Appen) with no engineering progression",
+      "Fresh graduate or bootcamp graduate — fewer than 12 years visible experience",
+      "Current location clearly outside NYC metro (e.g., San Francisco, London, Bangalore in current role)"
+    ],
+    "trajectory_yes_patterns": [
+      "Director / Senior Director / Head of AI or Engineering at a company with enterprise AI delivery model — with GenAI keywords in headline",
+      "VP Engineering at a growth-stage AI company (<500 employees) with GenAI keywords visible — client delivery language is a bonus, not required",
+      "Engineering leadership title + headline contains multiple GenAI terms (RAG, agentic, LLM, copilot, orchestration) + 12yr+ career visible",
+      "Title contains 'Forward Deployed', 'Solutions Engineering', 'Client Engineering', 'Delivery Engineering' at a tech company + GenAI keywords — client-facing context is a bonus signal",
+      "CTO or Head of Engineering at a small AI company (<150 employees) with regulated vertical clients visible",
+      "Principal Architect / Principal Engineer with GenAI keywords visible in headline or recent roles — client-facing context is a bonus, not required",
+      "Head of AI / VP AI / Director AI at a major financial institution (Goldman, JPMorgan, BofA, Morgan Stanley, Franklin Templeton, BlackRock, Citi, etc.) with 15+ years experience — positional evidence of AI leadership depth even without explicit GenAI tool names in headline"
+    ],
+    "trajectory_ambiguous_patterns": [
+      "Director / VP at a large bank or pharma company with 'AI' or 'GenAI' in title — could be builder or manager, CANNOT tell from snippet",
+      "Engineering Manager / Director at a consulting firm — could be build/deploy or advisory/staffing",
+      "Head of AI at an unknown company — company context needed to assess GenAI depth and seniority",
+      "'Solutions Architect' — could be pre-sales (skip) or hands-on deployment architect (pass), depends on employer",
+      "VP/Director title at a large tech company (Google, Amazon, Microsoft) — could be internal product or enterprise-facing, CANNOT tell from snippet",
+      "Startup CTO — could be <150 employees (pass) or scaled past 400+ engineering (too senior), CANNOT tell from snippet"
+    ],
+    "trajectory_no_patterns": [
+      "ENTIRE career is data analytics / BI / reporting with no engineering or AI leadership titles",
+      "ENTIRE career is individual contributor software engineering (Staff, Senior, etc.) with no delivery leadership and no AI/ML titles at any point",
+      "ENTIRE career is DevOps / SRE / infrastructure with no AI/ML pivot",
+      "ENTIRE career is non-technical roles (operations, finance, legal, HR) with no technical positions",
+      "ENTIRE career is pure academic research with no industry roles — professor, postdoc, researcher only",
+      "SVP / MD / EVP / CXO / Partner at a large org (500+ employees) as most recent title — too senior",
+      "AI Trainer / Data Annotator / RLHF Specialist at a BPO company — annotation, not engineering",
+      "Product Manager / Product Director titles across entire career — directs engineering, does not do engineering"
+    ]
+  },
+
+  "market_density": "sparse",
+  "employer_blacklist": ["Turing"],
+  "jd_path": "config/jd-head-fde-enterprise-ai-nyc.txt",
+
+  "bias_controls": {
+    "max_consecutive_saves": 5,
+    "max_consecutive_rejects": 20,
+    "parse_failure_alarm_rate": 0.03
+  },
+
+  "calibration_examples": {
+    "strong_saves": [
+      {
+        "name": "Jon Dorando",
+        "why": "Co-Founder & CTO Boosted.ai (~30-person startup), PhD Cornell, personally builds the system, institutional finance domain ($3T AUM), 15-20yr exp. CXO title at scrappy startup = applies."
+      },
+      {
+        "name": "Hungjen Wang",
+        "why": "MIT PhD, Head of AI at Franklin Templeton ($12-15M budget, built R&D teams from scratch, $10M+ monthly economic impact), VP JPMorgan, Director BofA (RL for portfolio optimization), currently Senior Research Scientist at Amazon pioneering Agentic AI. No explicit tool names — this is L8-L9 evidence: positional, scope-based, trajectory-based. STRONG SAVE via Tier 2/3 evidence."
+      },
+      {
+        "name": "Bojan Ciric",
+        "why": "Technology Fellow at Deloitte, 12.8yr, hands-on LangGraph/CrewAI/AWS Bedrock, builds agentic AI for Tier-1 banks."
+      },
+      {
+        "name": "Indu Kuppusamy",
+        "why": "VP at Goldman Sachs, 15yr+, personally builds Agentic AI, MCP Servers, Semantic Search. VP title with hands-on technical evidence. Female."
+      },
+      {
+        "name": "Alexander Zakharov",
+        "why": "Principal Architect at Icertis, MIT MEng, personally building agentic workflows with Temporal/MCP/A2A, deep fixed income/credit trading background."
+      }
+    ],
+    "incorrect_saves": [
+      {
+        "name": "Robert Babinski",
+        "why": "CTO at Freddie Mac, 400-person org, $130M budget. Large-org CTO = too senior, wrong scope."
+      },
+      {
+        "name": "Swatee Singh",
+        "why": "EVP/CDAIO at TIAA, MD Barclays (1,100-person team). Way above scope and comp ceiling."
+      },
+      {
+        "name": "Richa Kaul",
+        "why": "Customer success + pre-sales solutions architecture at AWS. Demos AI, not builds it."
+      },
+      {
+        "name": "Gerard Pento",
+        "why": "CTO/Global Head @ Citi, 300-person org. AI = GitHub Copilot + Devin adoption. Too senior + wrong depth."
+      }
+    ]
+  },
+
+  "version": "1.0",
+  "author": "Sam Vangelos",
+  "notes": "V1 brief for Head of Forward Deployed Engineering (formerly Head of Applied AI Lab). Key differences from the original BFSI-anchored brief: (1) multi-vertical scope — BFSI priority but life sciences and retail/CPG also accepted, (2) employer signal rules avoid company-name anchoring, organized by delivery model instead (enterprise AI delivery, consulting engineering, AI startups serving regulated verticals, etc.), (3) capability areas restructured around GenAI delivery + client-facing engineering + vertical fluency + playbook building instead of pure technical depth, (4) seniority recalibrated — ED at major bank is ceiling, 12yr floor (down from 15), (5) facial calibration set to 5-20% expected YES rate reflecting the extremely narrow intersection (NYC + 12yr+ + GenAI builder + client delivery + regulated vertical), (6) market_density set to sparse — recommend dragnet or titration architecture, (7) max_consecutive_saves lowered to 5 (this market is too sparse for streaks), max_consecutive_rejects raised to 20 (expect long reject runs). Search kit 10c0183e was built for the old BFSI framing — may need regeneration."
+}

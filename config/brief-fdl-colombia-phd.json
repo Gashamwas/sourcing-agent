@@ -3,8 +3,31 @@
   "role_level": "IC4",
   "role_summary": "Translates client specifications from frontier AI lab researchers into concrete data requirements, creates exemplar samples, writes quality scripts for automated assessment, performs independent QA on data batches, and tech-leads 1-2 engineers. Works cross-timezone with frontier lab clients (OpenAI, Anthropic, Google, Meta) and internal delivery teams. The core skill is data quality judgment — knowing what good training data looks like, how to measure it, and how to build systems that enforce it. This is a hands-on IC role with a data-centric ML focus, not a research role.",
   "geography": "Colombia",
-  "linkedin_project": "FDL Colombia (Agentó)",
-  "linkedin_project_id": "1974333250",
+  "linkedin_project": "FDL Colombia PhD",
+
+  "instructions": [
+    "This run specifically targets PhD holders and doctoral researchers in Colombia. Every search string MUST include PhD/doctoral vocabulary.",
+    "Target fields: any quantitative discipline with known transferability to ML/frontier data work — CS, AI/ML, NLP, physics, electrical engineering, mathematics, statistics, operations research, computational neuroscience, robotics, signal processing, control systems, computational biology, etc. The list is NOT exhaustive — use judgment about whether a field produces people with the analytical depth for data-centric ML work.",
+    "Use Spanish academic vocabulary alongside English: 'doctor', 'doctorado', 'tesis doctoral', 'investigador', 'posdoctorado', 'candidato doctoral'. Colombian LinkedIn profiles often mix both languages.",
+    "Target people at Colombian universities (public and private), research institutes, corporate R&D centers operating in Colombia, and Colombian AI-native startups with research functions. Key institutions include but are not limited to: Universidad de los Andes (Uniandes), Universidad Nacional de Colombia (UNAL), EAFIT, Pontificia Universidad Javeriana, Universidad de Antioquia (UdeA), Universidad del Valle, Universidad del Norte, Universidad de los Llanos, and their associated ML/AI labs (CINFONIA, MindLab, IMAGINE Lab, COLIVRI, i2t Lab, SIR Lab, EISC, SISTEMIC, BioInGeo).",
+    "Target people who reference Colombian academic funding (Colciencias/MinCiencias, Colfuturo, ICETEX research grants, etc.) — these terms appear on Colombian researcher profiles and are a strong PhD/postdoc signal.",
+    "Include strings targeting PhD alumni who have transitioned to industry — 'PhD' combined with company/industry vocabulary.",
+    "Colombia's ML/AI research community is smaller than Brazil's but concentrated at a few strong institutions. Expect lower volume but higher signal density from university-affiliated searches.",
+    "PhDs are the primary target but exceptional non-PhD candidates (e.g., Staff ML Engineer at a frontier lab) can still pass through evaluation.",
+    "Be aware of BPO noise — Colombia is LATAM's #2 BPO hub. Titles like 'AI Trainer' or 'RLHF Specialist' at outsourcing companies are annotation operations, not research. However, someone at a BPO who designed annotation methodology or quality systems IS relevant."
+  ],
+
+  "search_priorities": [
+    "PhD holders in quantitative fields currently in industry roles in Colombia",
+    "Active doctoral researchers at Colombian universities with ML/computational research",
+    "Postdocs in ML-adjacent fields based in Colombia",
+    "PhD alumni who have transitioned from academia to tech/AI companies",
+    "Researchers at Colombian university AI labs (CINFONIA, MindLab, IMAGINE Lab, i2t Lab, SIR Lab, SISTEMIC, etc.)",
+    "Colciencias/MinCiencias fellows and Colfuturo scholars doing ML-adjacent research",
+    "Colombian PhDs who studied or worked abroad and returned to Colombia"
+  ],
+
+  "intake_notes": "This is a PhD-focused supplementary run for Colombia. The regular Colombia run already covers general ML practitioners. This run specifically mines the academic/research pipeline — people with doctoral training in quantitative fields who have the analytical depth for frontier data work but may not use standard industry ML vocabulary in their profiles. Colombia's research ecosystem is smaller than Brazil's but has strong pockets at Uniandes, UNAL, EAFIT, Javeriana, and UdeA.",
 
   "capability_areas": [
     {
@@ -134,19 +157,20 @@
   "depth_distinction": {
     "builder_definition": "Has done hands-on ML work where data quality, model training, or evaluation methodology was a primary focus of their effort — in ANY context. This includes: fine-tuning LLMs at a corporate R&D lab, building evaluation suites for a product team's models, designing data curation pipelines, creating synthetic data generators, training models in an academic setting, or building RL environments as a side project. The key question is: did this person get their hands dirty with training data, model training, or evaluation design? 'Hands-on' means writing code, not managing a team that writes code.",
     "user_definition": "Uses ML models as components in applications without involvement in how those models are trained, evaluated, or improved through data. This includes: calling model APIs to build products, deploying pre-trained models without fine-tuning, building data pipelines for analytics/BI (not for training), managing ML teams without personal technical depth, using AutoML or no-code platforms. The distinguishing question: if you asked this person 'how would you improve model X through better training data?', would they have a substantive answer from experience?",
-    "edge_case_guidance": "CAREER TRANSITIONERS: Someone currently doing hands-on ML/data work (even for 6-12 months) after a career in adjacent fields (DevOps, SWE, data engineering) should be evaluated on CURRENT work, not career history length. If their current role involves building RLHF environments or fine-tuning LLMs, that matters more than 3 prior years of DevOps. Apply the 4-year bar to total ML-adjacent experience (including SWE with ML components), not to post-training experience specifically. SPARSE PROFILES: If a profile has PhD + strong title + strong employer but sparse bullets, use the INFERENTIAL_SAVE pathway (see below). The base rate for 'PhD in ML + Staff/Senior ML Engineer at a known company' being relevant is high enough to warrant recruiter review. CORPORATE R&D: Work at corporate research labs (Dell OCTO, Samsung AI Center, Microsoft Research) counts fully — 'not a frontier lab' is not a reason to reject if the work involves model training, evaluation, or data quality."
+    "edge_case_guidance": "ACADEMIC RESEARCHERS: For this PhD-focused run, academic research in quantitative fields counts as strong evidence of analytical depth, even if the research domain isn't directly ML. A physics PhD who built simulation frameworks or a statistics PhD who designed experimental methodologies has transferable skills. Evaluate whether their research involved computational work, data analysis at scale, or building systems — not just theoretical work. CAREER TRANSITIONERS: Someone currently doing hands-on ML/data work (even for 6-12 months) after a career in adjacent fields (DevOps, SWE, data engineering) should be evaluated on CURRENT work, not career history length. SPARSE PROFILES: If a profile has PhD + strong title + strong employer but sparse bullets, use the INFERENTIAL_SAVE pathway (see below). The base rate for 'PhD in ML + Staff/Senior ML Engineer at a known company' being relevant is high enough to warrant recruiter review. CORPORATE R&D: Work at corporate research labs counts fully — 'not a frontier lab' is not a reason to reject if the work involves model training, evaluation, or data quality."
   },
 
   "inferential_save_rules": {
     "description": "For profiles where evidence is sparse but priors are strong, the agent should SAVE with a flag rather than REJECT on insufficient evidence. These candidates get passed to the recruiter for manual review rather than being silently dropped.",
     "conditions": [
-      "PhD in ML/AI/CS + title indicating ML IC work (Research Scientist, ML Engineer, Applied Scientist, Staff/Senior ML) at any company — even without detailed summary bullets",
+      "PhD in any quantitative field (CS, AI/ML, physics, EE, math, statistics, etc.) + title indicating technical IC work at any company — even without detailed summary bullets",
       "Currently employed at a frontier lab or strong AI company in a technical role — even if profile lacks detail",
+      "PhD + postdoc or research position at any university or research institute — even if profile is sparse on industry experience",
       "Profile shows clear progression into ML from adjacent field (SWE → ML Engineer → current ML role) with most recent role being directly relevant — even if bullets are sparse"
     ],
     "save_tag": "INFERENTIAL_SAVE",
     "confidence_range": [0.4, 0.6],
-    "note": "These are not confident saves — they're 'too strong to reject on insufficient evidence, needs human review.' The recruiter should prioritize reviewing these."
+    "note": "These are not confident saves — they're 'too strong to reject on insufficient evidence, needs human review.' The recruiter should prioritize reviewing these. For this PhD-focused run, err on the side of saving PhD holders with ambiguous profiles."
   },
 
   "non_fit_patterns": [
@@ -181,20 +205,20 @@
       "examples": ["AI trainer at Scale AI or Turing doing annotation tasks", "Annotation QA specialist following existing rubrics", "Labeling team lead focused on throughput and headcount"]
     },
     {
+      "label": "BPO annotation work",
+      "description": "Colombia is Latin America's #2 BPO hub. Titles like 'AI Trainer', 'RLHF Specialist', 'Data Quality Analyst' at outsourcing companies (Teleperformance, Concentrix, TTEC, TaskUs, Alorica, TELUS International) are annotation operations roles — performing labels at scale, not designing methodology or building systems. Expect significant volume from this pattern.",
+      "why_not": "Following annotation rubrics at a BPO is operational execution, not the methodology design, quality system building, or evaluation framework engineering this role requires. However, someone at a BPO who designed the rubrics, built quality metrics systems, or created evaluation pipelines IS relevant — the override rule applies.",
+      "examples": ["AI Trainer at Teleperformance", "RLHF Specialist at TELUS International doing preference labeling", "Data annotator at Concentrix"]
+    },
+    {
       "label": "Project / program management without technical IC work",
       "description": "Managers, PMs, and scrum masters who coordinate ML teams but don't personally write code, train models, or design data systems. The role is a hands-on IC position.",
       "why_not": "The role requires writing quality scripts, creating exemplar samples, and doing independent QA — all hands-on IC work. A manager who coordinates this work but doesn't do it personally doesn't have the right skill set.",
       "examples": ["Technical program manager for an ML team", "Product manager for an AI product", "Scrum master for a data science team"]
-    },
-    {
-      "label": "BPO / outsourcing annotation work",
-      "description": "People at BPO companies (Teleperformance, Concentrix, TTEC, TaskUs, Alorica, TELUS International) with 'AI Trainer', 'RLHF Specialist', or 'Data Annotation' titles who perform annotation following rubrics rather than designing ML systems. Colombia is Latin America's #2 BPO hub — this is the single highest-volume noise pattern for this market. Calibration: the Brazil run rejected Douglas Iacovelli (0.92 confidence) for managing SWE-Bench labeling operations at Revelo, not building evaluation systems. Colombia will produce 5-10x more of this pattern.",
-      "why_not": "Title contains ML keywords (RLHF, AI) but the actual work is following annotation rubrics at scale, not designing training pipelines, reward models, or evaluation infrastructure. The key tell: no engineering titles in career history, no publications, no technical project descriptions beyond annotation throughput.",
-      "examples": ["AI Trainer at Teleperformance doing RLHF annotation", "RLHF Specialist at Concentrix rating model outputs", "Data Annotation Lead at TaskUs managing annotation queues", "AI Data Specialist at TELUS International following labeling rubrics"]
     }
   ],
 
-  "non_fit_override_rule": "A non-fit pattern is OVERRIDDEN if the candidate's summary bullets show specific evidence of work in a capability area at the builder level. Someone at a BPO company who designed the annotation methodology, built quality metrics systems, or created evaluation pipelines is NOT 'annotation work' — they're doing hands-on data quality engineering. The non-fit label describes default expectations for a company/title combination; the actual evidence in summary bullets always wins. When evidence contradicts the non-fit pattern, note the conflict and evaluate on evidence.",
+  "non_fit_override_rule": "A non-fit pattern is OVERRIDDEN if the candidate's summary bullets show specific evidence of work in a capability area at the builder level. Someone at a BPO company who designed the annotation methodology, built quality metrics systems, or created evaluation pipelines is NOT 'annotation work' — they're doing hands-on data quality engineering. The non-fit label describes default expectations for a company/title combination; the actual evidence in summary bullets always wins. When evidence contradicts the non-fit pattern, note the conflict and evaluate on evidence. For PhD holders: a non-fit pattern based on current employer is especially weak — a PhD physicist working at a bank may have deep computational skills that their current title obscures.",
 
   "employer_signal_rules": [
     {
@@ -210,15 +234,21 @@
       "save_on_employer_alone": false
     },
     {
-      "tier": "research_lab",
-      "employer_patterns": ["Universidad de los Andes", "Uniandes", "CINFONIA", "IMAGINE Lab", "COLIVRI", "Universidad Nacional de Colombia", "UNAL", "MindLab", "BioInGeo", "EAFIT", "i2t Lab", "Pontificia Universidad Javeriana", "Javeriana", "SIR Lab", "Universidad del Valle", "EISC", "Universidad de Antioquia", "SISTEMIC", "IBM Research", "Samsung AI Center"],
-      "evidence_required": "Research output or hands-on model work at a Colombian university AI lab or corporate research lab. Need evidence of publications, model training, or evaluation system design — title alone at a university isn't sufficient because these institutions also have teaching-only and administrative roles. A PhD candidate with RL/ML research at Uniandes CINFONIA is a strong signal; a lecturer teaching intro CS is not.",
+      "tier": "research_institution",
+      "employer_patterns": ["Universidad de los Andes", "Uniandes", "CINFONIA", "IMAGINE Lab", "COLIVRI", "Universidad Nacional de Colombia", "UNAL", "MindLab", "BioInGeo", "EAFIT", "i2t Lab", "Pontificia Universidad Javeriana", "Javeriana", "SIR Lab", "Universidad del Valle", "EISC", "Universidad de Antioquia", "UdeA", "SISTEMIC", "Universidad del Norte", "IBM Research", "Samsung AI Center"],
+      "evidence_required": "Colombian universities, research institutes, and government labs. PhD or postdoc at any Colombian research institution in a quantitative field is a strong signal. SAVE if research area touches any capability area, even tangentially. Academic titles (profesor, investigador, postdoc) at any recognized institution qualify. Note: this tier is not exhaustive — Colombia has additional universities and research centers beyond those listed.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "corporate_rd",
+      "employer_patterns": [],
+      "evidence_required": "Corporate R&D centers operating in Colombia — international tech companies' Colombia offices and Colombian technology institutes. Need evidence of research output or hands-on model work — title alone at a corporate lab isn't sufficient because these labs also have pure engineering roles.",
       "save_on_employer_alone": false
     },
     {
       "tier": "colombian_tech",
       "employer_patterns": ["Rappi", "MercadoLibre", "Mercado Libre", "Globant", "Bancolombia", "Nubank", "EPAM", "Habi", "Addi", "Truora", "Frubana", "LaHaus"],
-      "evidence_required": "ML roles at these companies span from applied (fraud, recommendations, pricing) to training-adjacent (fine-tuning, evaluation, data quality). CANNOT reject on company alone — need to see summary bullets to distinguish. At facial stage, any ML title at these companies is AMBIGUOUS and defaults to YES. At full stage, evaluate based on actual work in bullets. Calibration from Brazil: Andre Paim Lemos at Mercado Livre was saved (0.52) because of large-scale model fine-tuning on hundreds of millions of face images, despite applied CV context. Someone doing LLM fine-tuning or evaluation design at Rappi is just as relevant as the same work at a startup.",
+      "evidence_required": "ML roles at these companies span from applied (fraud, recommendations, pricing) to training-adjacent (fine-tuning, evaluation, data quality). CANNOT reject on company alone — need to see summary bullets to distinguish. At facial stage, any ML title at these companies is AMBIGUOUS and defaults to YES. At full stage, evaluate based on actual work in bullets.",
       "save_on_employer_alone": false
     },
     {
@@ -230,11 +260,11 @@
   ],
 
   "minimum_years_experience": 4,
-  "minimum_bar_description": "4+ years of total ML-adjacent experience — which includes software engineering roles where ML was a component, data science with model building, ML research, or ML engineering. Does NOT require 4 years specifically in post-training, RLHF, or evaluation work. A software engineer with 6 years total and 1.5 years of direct LLM fine-tuning experience meets the bar. A career transitioner with 3 years of DevOps and 1 year of hands-on RLHF environment building ALSO meets the bar if the current work is directly relevant — evaluate the trajectory, not the arithmetic. The minimum bar exists to filter out junior developers and career-starters, not to penalize people who arrived at ML through a non-linear path.",
+  "minimum_bar_description": "PhD or equivalent doctoral research experience is the primary qualification for this run. The 4-year experience bar can be partially or fully met by doctoral research — a PhD program in a quantitative field typically represents 4-6 years of deep technical work. A recent PhD graduate with strong research in an ML-adjacent field meets the bar even without industry experience. For non-PhD candidates who pass through (exceptional cases), apply the standard 4+ years of ML-adjacent experience.",
 
   "facial_calibration": {
-    "expected_yes_rate_low": 0.25,
-    "expected_yes_rate_high": 0.50,
+    "expected_yes_rate_low": 0.12,
+    "expected_yes_rate_high": 0.30,
     "fast_exit_patterns": [
       "ENTIRE career is IT support, helpdesk, or system administration with no ML/AI/data science signal at any position",
       "ENTIRE career is sales, business development, or account management",
@@ -243,37 +273,38 @@
       "ENTIRE career is project/program management with no technical IC positions",
       "ENTIRE career is web/mobile frontend development with no ML/data signal across all roles",
       "ENTIRE career is manual QA/testing with no ML automation or data science",
-      "ENTIRE career is BPO annotation/labeling (AI Trainer, Data Annotator) at outsourcing companies with no engineering roles"
+      "ENTIRE career is BPO annotation/labeling (AI Trainer, Data Annotator) at outsourcing companies with no engineering roles or PhD"
     ],
     "trajectory_yes_patterns": [
+      "PhD in any quantitative field (CS, AI/ML, NLP, physics, EE, mathematics, statistics, operations research, computational neuroscience, robotics, signal processing, control systems, computational biology, or similar) — this is the PRIMARY signal for this run",
       "Any position at a frontier AI lab or strong AI company in a technical role",
-      "Career includes Research Scientist / Research Engineer / Applied Scientist titles at any company",
-      "PhD in ML, AI, CS, EE, or related field visible in education — regardless of current employer",
+      "Career includes Research Scientist / Research Engineer / Applied Scientist / Investigador titles at any company or institution",
+      "Postdoc or research fellowship (including Colciencias/MinCiencias, Colfuturo references) at any institution",
       "Title contains 'LLM', 'NLP', 'RL', 'reinforcement learning', 'fine-tuning', 'training data', 'data quality', or 'evaluation' at any position",
-      "Progression from SWE/data roles INTO ML-specific roles (Data Scientist → ML Engineer, or SWE → AI Engineer) — trajectory toward ML",
-      "Current position involves 'AI Research', 'R&D', 'AI Lab', or 'Machine Learning' in the team/company name",
-      "Academic roles (professor, postdoc, researcher) at Colombian universities with ML/AI affiliations (Uniandes, UNAL, EAFIT, Javeriana, UdeA)"
+      "Academic roles (profesor, postdoc, investigador) at any university or research institute",
+      "Progression from academic research INTO industry ML roles — PhD → ML Engineer / Research Scientist / Applied Scientist",
+      "Research at Colombian university AI labs (CINFONIA, MindLab, IMAGINE Lab, i2t Lab, SIR Lab, SISTEMIC, etc.)"
     ],
     "trajectory_ambiguous_patterns": [
-      "ML Engineer / Data Scientist / AI Engineer at a Colombian tech company — could be applied ML or training-relevant work, CANNOT tell from snippet",
+      "ML Engineer / Data Scientist / AI Engineer at a Colombian tech company without visible PhD — could be applied ML or training-relevant work, CANNOT tell from snippet",
       "Software Engineer at any company with 'AI' or 'ML' mentioned in headline — might be ML-adjacent SWE or genuine ML work",
       "'Data Scientist' title at a non-tech company — could range from SQL analytics to genuine model training",
       "Mix of technical roles across different domains — trajectory direction unclear without bullets",
-      "Career change visible (non-ML roles → recent ML role) — current relevance unclear from titles alone",
-      "Title says 'Senior' or 'Lead' but company is unknown — seniority without domain context",
+      "MSc in a quantitative field with ML research but no PhD — may still have sufficient depth",
       "'AI Trainer' or 'RLHF Specialist' at a company that could be BPO or could be a genuine AI lab — need context to distinguish"
     ],
     "trajectory_no_patterns": [
+      "No PhD or doctoral education visible AND no Research Scientist/postdoc title AND no frontier lab employment — for this PhD-focused run, this is a soft NO (exceptional industry candidates can still override at full evaluation)",
       "ENTIRE career is data analytics / BI / reporting across all positions with no ML engineering titles",
       "ENTIRE career is traditional software engineering (backend/frontend/mobile) with zero ML/AI/research signal across ALL positions",
       "ENTIRE career is data engineering / ETL with no ML model training or research positions at any point",
-      "ENTIRE career is DevOps / SRE / infrastructure with no recent pivot to ML (note: if most recent role IS ML, this becomes trajectory_yes, not trajectory_no)",
+      "ENTIRE career is DevOps / SRE / infrastructure with no recent pivot to ML",
       "ENTIRE career is non-technical roles (operations, finance, legal) with no technical positions",
-      "ENTIRE career is BPO annotation work at outsourcing companies (Teleperformance, Concentrix, TTEC, TaskUs, Alorica, TELUS International) with no engineering transition"
+      "ENTIRE career is BPO annotation work at outsourcing companies (Teleperformance, Concentrix, TTEC, TaskUs, Alorica, TELUS International) with no engineering transition and no PhD"
     ]
   },
 
-  "market_density": "moderate",
+  "market_density": "low",
   "employer_blacklist": ["Turing"],
   "jd_path": "/Users/sam.vangelos/Downloads/Frontier Data Lead (Generic).md",
 
@@ -283,7 +314,7 @@
     "parse_failure_alarm_rate": 0.03
   },
 
-  "version": "3.0",
+  "version": "3.0-phd",
   "author": "Sam Vangelos",
-  "notes": "Colombia analog of Brazil FDL v3, calibrated against the most recent successful Brazil run (March 13, 2026: 59/115 saves, 51.3% save rate). Same role and capability areas. Key Colombia-specific changes: (1) colombian_tech employer tier replaces brazilian_tech with Rappi, MercadoLibre, Globant, Bancolombia, etc., (2) research_lab tier added for Colombian university AI labs (Uniandes CINFONIA, UNAL MindLab, EAFIT i2t, Javeriana SIR, UdeA SISTEMIC), (3) BPO annotation non-fit pattern added — Colombia is LATAM's #2 BPO hub, expect 5-10x the annotation noise vs Brazil, (4) market_density set to moderate (smaller pool, favor paginating), (5) facial YES rate lowered to 0.25-0.50 (Brazil's actual was 7.1%, lower than the 35-60% expected range), (6) employer blacklist kept minimal (Turing only) — BPO companies handled via non-fit pattern with override rule, (7) noise patterns: LLM orchestration/RAG is the top rejection pattern from Brazil runs (LoRA for product features ≠ post-training infrastructure), BPO AI Trainer titles, RPA 'automatización', consultancy 'AI transformation'. Known high-volume noise archetypes from Brazil calibration: LLM orchestration/RAG engineers, applied CV without training depth, annotation operations managers."
+  "notes": "PhD-focused supplementary run for Colombia. Based on brief-fdl-brazil-phd.json adapted with Colombia-specific fields from brief-fdl-colombia-v3.json. Key adaptations: (1) Spanish academic vocabulary (doctor, doctorado, investigador, tesis doctoral, posdoctorado) replaces Portuguese, (2) Colombian funding bodies (Colciencias/MinCiencias, Colfuturo, ICETEX) replace Brazilian (CNPq, FAPESP, CAPES), (3) research_institution tier lists Colombian university AI labs from Colombia v3, (4) colombian_tech tier from Colombia v3, (5) BPO annotation non-fit pattern added — Colombia is LATAM's #2 BPO hub, (6) facial YES rate lowered to 0.12-0.30 (Colombia PhD pool is smaller than Brazil's), (7) market_density set to low (smaller research ecosystem), (8) fast exit and trajectory NO patterns updated for BPO + PhD interaction."
 }

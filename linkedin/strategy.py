@@ -46,6 +46,9 @@ def form_strategy(
     try:
         result = opus_llm(system, user_prompt, expect_json=True, max_tokens=16384)
         plan = ExecutionPlan.from_dict(result)
+        plan.original_architecture = plan.architecture  # Set once, never updated on pivot
+        if plan.architecture:
+            print(f"  Architecture: {plan.architecture} — {plan.architecture_rationale[:120]}")
         print("  Strategy complete.")
         return plan
     except Exception as e:
@@ -69,6 +72,16 @@ def _build_strategy_system(brief: Brief, has_kit: bool = True) -> str:
     if brief.known_noise_patterns:
         known_noise_section = f"\n## Known Noise Patterns\n{json.dumps(brief.known_noise_patterns, indent=2)}"
 
+    key_terms_section = ""
+    if brief.key_terms_by_area:
+        kt_lines = ["\n## Discriminating Vocabulary by Capability Area"]
+        for area, terms in brief.key_terms_by_area.items():
+            kt_lines.append(f"- {area}: {', '.join(terms)}")
+        kt_lines.append("\nUse these terms as anchors for Type B precision strings. They are the specific technical vocabulary that distinguishes qualified candidates in each area.")
+        key_terms_section = "\n".join(kt_lines)
+
+    market_hint = f" Brief specifies: **{brief.market_density}**." if brief.market_density else ""
+
     return f"""You are a senior sourcing strategist planning a Boolean search execution for LinkedIn Recruiter.
 
 Role: {brief.role_title}
@@ -81,9 +94,42 @@ Role: {brief.role_title}
 {json.dumps(brief.archetypes, indent=2)}
 {noise_section}
 {known_noise_section}
+{key_terms_section}
 
 ## Permanent Filters
 {json.dumps(brief.permanent_filters, indent=2)}
+
+## Stage 0: Select Search Architecture
+
+Before generating any strings, analyze the role and market to select a search ARCHITECTURE. This governs your entire approach — how many strings, what ratio of recall to precision, and how aggressively to filter.
+
+Consider:
+1. **Title distinctiveness:** Is the role title specific and reliably used, or ambiguous/variable?
+2. **Market vocabulary consistency:** Do practitioners describe themselves consistently, or in many different ways?
+3. **Market density:** Large pool (thousands in this geo) or sparse (dozens)?{market_hint}
+4. **Company concentration:** Talent concentrated in known companies, or widely distributed?
+5. **Noise landscape:** Easier to define what you want, or what you don't want?
+6. **Your familiarity:** Strong kit vocabulary for this role, or general JD terms?
+
+Available architectures:
+
+1. **sniper** — Distinctive titles, large market. 15-20 tight strings, 60%+ precision (Type B). Low noise tolerance. Best when: the role title is specific, the market is large enough for exact matches, and false positives are expensive.
+
+2. **dragnet** — Ambiguous titles, inconsistent vocabulary. 10-15 fat OR-group strings, 70%+ recall (Type A). High noise tolerance (up to 70% facial_no acceptable). Best when: practitioners lack standard titles, vocabulary is fragmented, over-include rather than miss people.
+
+3. **titration** — Unknown market. 5-8 broad recon strings first, then 15-20 targeted strings generated at the first block adaptation (after recon data comes back). First block is data collection, not candidate collection. Best when: vocabulary is uncertain, role is novel, or geography is unfamiliar.
+
+4. **negative_space** — Broad pool, easier to define what you DON'T want. 10-15 strings using NOT operators derived from noise_archetypes. Best when: the base pool is huge but contains a large, predictable non-fit population excludable by title/keyword.
+
+5. **company_first** — Talent concentrated in known companies. 10-20 strings organized by company cluster AND skill. Best when: the brief identifies specific employer targets and the employer signal is the key differentiator.
+
+6. **title_first** — Distinctive job title that practitioners actually use. 5-10 strings anchored to exact title phrases. Best when: there IS a standard title specific enough to be a strong filter.
+
+Select ONE architecture and explain your reasoning. Include in your JSON output:
+- "architecture": one of "sniper", "dragnet", "titration", "negative_space", "company_first", "title_first"
+- "architecture_rationale": Why this architecture fits this role/market (2-3 sentences)
+- "architecture_success_criteria": Array of 2-4 measurable criteria (e.g., "save rate > 5% across first block")
+- "architecture_pivot_triggers": Array of 2-3 signals that would indicate this architecture is wrong (e.g., ">50% of strings return <20 results")
 
 ## Your Task
 {"You are given a Search Kit — a library of Boolean search terms organized by competency domain. These kit strings are YOUR VOCABULARY — raw building blocks, NOT executable queries. Do NOT include kit strings directly in the execution queue." if has_kit else "No pre-built search kit is available. You will generate compound Boolean strings directly from the role description, archetypes, JD context, and any sourcing instructions provided."}
@@ -120,6 +166,16 @@ Place strings anchored primarily to RL/RLHF/post-training vocabulary in the SECO
 - RL practitioners also appear in non-RL strings (someone building RL environments shows up on "simulation" or "agent" strings too — and that incidental RL signal is often stronger than the boilerplate RLHF keyword match)
 - By the time RL strings execute, the adaptation loop will have learned from earlier strings' signal/noise patterns, producing more strategic RL searches than the obvious keyword combinations
 This is NOT deprioritization — all RL strings still execute. It is sequencing for maximum marginal yield.
+
+### Architecture-Specific Modifiers
+
+Apply the constraints for your selected architecture. These override ALL default string counts above — both the total count (15-30) and the per-type counts (Type A: 10-15, Type B: 5-15). The ratio below supersedes those base counts:
+- **sniper**: 15-20 strings, 60%+ Type B. Tight AND-gates, 20-500 results each.
+- **dragnet**: 10-15 strings, 70%+ Type A. Fat OR groups (7+ variants). 500-5000 results. Noise expected.
+- **titration**: Only 5-8 broad recon strings for this first block. Hold remaining budget for post-block-1 adaptation when you'll have real data.
+- **negative_space**: 10-15 strings with NOT operators from noise_archetypes. Structure: (skills) AND (domain) NOT (noise_title OR noise_keyword).
+- **company_first**: 10-20 strings by company cluster, not skill cluster. Company names as primary AND constraints.
+- **title_first**: 5-10 strings with exact quoted title phrases. Minimal skill keywords.
 
 Guidelines for all strings:
 - {"Pull skill terms from the kit's high-value clusters" if has_kit else "Pull skill terms from the JD's capability areas and technical requirements"}
@@ -224,6 +280,10 @@ That's good. The evaluator downstream judges every candidate against ALL archety
 Your strings are search tools, not archetype filters. Label them descriptively but do NOT treat them as archetype-scoped.
 
 Return JSON with this structure:
+- "architecture": Your selected architecture (string — one of the six listed above)
+- "architecture_rationale": Why this architecture fits (string)
+- "architecture_success_criteria": Array of 2-4 measurable success criteria (array of strings)
+- "architecture_pivot_triggers": Array of 2-3 pivot trigger signals (array of strings)
 - "strategy_rationale": Overall strategy explanation (string)
 - "generated_strings": Array of compound strings to execute, in priority order. Each object:
   - "boolean": The full Boolean string (string)
@@ -275,8 +335,18 @@ the role description, archetypes, and JD context below. Apply all LinkedIn Boole
     if prior_run_data:
         prompt += f"\n## Prior Run Data\n{json.dumps(prior_run_data, indent=2)}\n"
 
+        if prior_run_data.get("noise_discoveries"):
+            noise_text = "\n## Noise Patterns Discovered in Prior Sessions\n"
+            for nd in prior_run_data["noise_discoveries"]:
+                noise_text += f"- {nd['term']}: [{nd['status']}] {nd.get('note', '')}\n"
+            noise_text += "\nAvoid generating strings that primarily target confirmed_noise patterns.\n"
+            prompt += noise_text
+
     if brief.search_priorities:
         prompt += f"\n## User Hints\nSearch priorities: {', '.join(brief.search_priorities)}\n"
+
+    if brief.additional_search_terms:
+        prompt += f"\n## Additional Search Terms\nThese terms should be used for search string generation but are NOT evaluation criteria:\n{', '.join(brief.additional_search_terms)}\n"
 
     if brief.instructions:
         prompt += f"\n## Sourcing Instructions\n" + "\n".join(f"- {i}" for i in brief.instructions) + "\n"
@@ -329,6 +399,9 @@ def adapt_after_block(
     block_report: BlockReport,
     remaining_strings: list[SearchString],
     kit_vocabulary: list[KitString] | None = None,
+    execution_plan: ExecutionPlan | None = None,
+    pivot_count: int = 0,
+    block_aggregate: str = "",
 ) -> AdaptationResponse:
     """Ask Opus to adapt after a block completes — generate new strings from vocabulary.
 
@@ -337,9 +410,11 @@ def adapt_after_block(
         block_report: Summary of the completed block's performance.
         remaining_strings: SearchStrings not yet executed (generated compounds still queued).
         kit_vocabulary: Full kit vocabulary available for synthesizing new strings.
+        execution_plan: Current execution plan (for architecture context).
+        pivot_count: Number of architecture pivots already used this run.
 
     Returns:
-        AdaptationResponse with new strings, skips, reorders, noise updates.
+        AdaptationResponse with new strings, skips, reorders, noise updates, optional pivot.
     """
     # Build vocabulary section if available
     vocab_section = ""
@@ -353,6 +428,36 @@ def adapt_after_block(
             for ks in strings:
                 vocab_lines.append(f"  [{ks.subblock} / {ks.string_type}]: {ks.boolean}")
         vocab_section = "\n".join(vocab_lines)
+
+    # Build architecture review section
+    arch_review = ""
+    if execution_plan and execution_plan.architecture:
+        max_pivots = 2 if execution_plan.original_architecture == "titration" else 1
+        pivots_remaining = max(0, max_pivots - pivot_count)
+        criteria_text = "\n".join(f"  - {c}" for c in execution_plan.architecture_success_criteria) or "  (none set)"
+        triggers_text = "\n".join(f"  - {t}" for t in execution_plan.architecture_pivot_triggers) or "  (none set)"
+        pivot_note = f"\nNOTE: No pivots remaining. You cannot recommend an architecture change." if pivots_remaining == 0 else ""
+        arch_review = f"""
+
+## Architecture Review
+
+Current architecture: {execution_plan.architecture}
+Rationale: {execution_plan.architecture_rationale}
+
+Success criteria:
+{criteria_text}
+
+Pivot triggers:
+{triggers_text}
+
+Pivots remaining this run: {pivots_remaining}
+
+Based on the block report, evaluate whether the current architecture is meeting its success criteria.
+If any pivot triggers are firing, you MAY recommend switching architectures by including:
+- "pivot_to_architecture": the new architecture name (one of: sniper, dragnet, titration, negative_space, company_first, title_first)
+- "pivot_rationale": detailed explanation of why the current approach failed and why the new one will work
+
+A pivot clears remaining queued strings and replaces them with your new_strings (generated under the new architecture). Only recommend when evidence is clear.{pivot_note}"""
 
     system = f"""You are a sourcing strategist adapting a search plan mid-run.
 
@@ -380,18 +485,22 @@ Include BOTH broad recall strings AND narrow precision "sniper" strings that use
 - Bare ambiguous terms MUST be qualified: "agent" → "AI agent"
 - Abbreviations with non-domain meanings must include spelled-out form
 - Tool/library names are proper nouns — do not fabricate compound expansions
+{block_aggregate}
+{arch_review}
 
 Return JSON with this structure:
 - "new_strings": Array of objects with "boolean" (string), "rationale" (string)
 - "skip_remaining": Array of objects with "string_id" (int), "reason" (string)
 - "reorder": Array of objects with "string_id" (int), "move_to" ("next" | "last"), "reason" (string)
 - "noise_updates": Array of objects with "term" (string), "status" ("confirmed_signal" | "confirmed_noise" | "mixed"), "note" (string)
+- "pivot_to_architecture": (optional) New architecture name if recommending a pivot (string)
+- "pivot_rationale": (optional) Why the current architecture failed and why the new one will work (string)
 
 Return valid JSON only."""
 
     remaining_text = ""
     for ss in remaining_strings:
-        remaining_text += f"  #{ss.id}: {ss.boolean[:100]}\n"
+        remaining_text += f"  #{ss.id}: {ss.boolean[:200]}\n"
 
     user_prompt = f"""{block_report.to_summary_text()}
 

@@ -57,6 +57,8 @@ def cheap_llm(system_prompt: str, user_prompt: str, expect_json: bool = True) ->
     """
     if config.CHEAP_MODEL_PROVIDER == "openai":
         return _call_openai(system_prompt, user_prompt, expect_json)
+    elif config.CHEAP_MODEL_PROVIDER == "anthropic":
+        return _call_anthropic_cheap(system_prompt, user_prompt, expect_json)
     elif config.CHEAP_MODEL_PROVIDER == "google":
         return _call_google(system_prompt, user_prompt, expect_json)
     else:
@@ -90,6 +92,27 @@ def opus_llm(system_prompt: str, user_prompt: str, expect_json: bool = True, max
 # ---------------------------------------------------------------------------
 # Provider implementations
 # ---------------------------------------------------------------------------
+
+def _call_anthropic_cheap(system_prompt: str, user_prompt: str, expect_json: bool) -> str | dict | list:
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=120.0)
+
+    def _call():
+        message = client.messages.create(
+            model=config.CHEAP_MODEL_NAME,
+            max_tokens=8192,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        return message.content[0].text.strip()
+
+    text = _retry_with_backoff(_call, label="Anthropic-cheap")
+
+    if expect_json:
+        return _parse_json_response(text)
+    return text
+
 
 def _call_openai(system_prompt: str, user_prompt: str, expect_json: bool) -> str | dict | list:
     from openai import OpenAI

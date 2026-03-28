@@ -164,6 +164,42 @@ class GitHubEnricher:
         self._brief = brief
         self._frontier_contributor_cache: dict[str, set[str]] = {}  # repo -> set of contributor logins
 
+    async def light_enrich(
+        self,
+        username: str,
+        source_strategy: str = "",
+        source_query: str = "",
+    ) -> Optional[GitHubCandidate]:
+        """Fetch ONLY the user profile (1 API call) for pre-enrichment geo gating.
+
+        Returns a GitHubCandidate with just the user profile populated.
+        Call full_enrich() on the result to complete enrichment if the
+        candidate passes the geo check.
+        """
+        user_data = await self._client.get_user(username)
+        if not user_data:
+            return None
+
+        user = GitHubUser.from_api(user_data)
+        return GitHubCandidate(
+            user=user,
+            source_strategy=source_strategy,
+            source_query=source_query,
+        )
+
+    async def full_enrich(
+        self,
+        candidate: GitHubCandidate,
+        skip_synthesis: bool = False,
+    ) -> GitHubCandidate:
+        """Complete enrichment on a light-enriched candidate.
+
+        Performs steps 2-8 (repos, languages, READMEs, contacts, synthesis)
+        on a candidate that already has its user profile fetched.
+        """
+        username = candidate.user.username
+        return await self._enrich_remaining(candidate, username, skip_synthesis)
+
     async def enrich(
         self,
         username: str,
@@ -188,6 +224,16 @@ class GitHubEnricher:
             source_strategy=source_strategy,
             source_query=source_query,
         )
+
+        return await self._enrich_remaining(candidate, username, skip_synthesis)
+
+    async def _enrich_remaining(
+        self,
+        candidate: GitHubCandidate,
+        username: str,
+        skip_synthesis: bool = False,
+    ) -> GitHubCandidate:
+        """Steps 2-8 of enrichment (everything after user profile fetch)."""
 
         # Step 2: Fetch repositories
         repos_data = await self._client.get_user_repos(username, max_repos=gc.MAX_REPOS_PER_USER)

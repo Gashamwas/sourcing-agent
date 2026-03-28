@@ -47,6 +47,7 @@ class LinkedInBrowser:
         self._context: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
         self._cursor = None  # GhostCursor for human-like mouse movement
+        self._project_id: Optional[str] = None  # Auto-detected from browser URL
 
     async def connect(self) -> None:
         from rebrowser_playwright.async_api import async_playwright
@@ -62,6 +63,10 @@ class LinkedInBrowser:
                 if "linkedin.com/talent" in page.url:
                     self._context = ctx
                     self._page = page
+                    # Auto-detect project ID from URL
+                    m = re.search(r'/talent/hire/(\d+)', page.url)
+                    if m:
+                        self._project_id = m.group(1)
                     # Initialize ghost-cursor for human-like mouse trajectories
                     try:
                         from python_ghost_cursor.playwright_async import create_cursor
@@ -203,7 +208,32 @@ class LinkedInBrowser:
 
     async def navigate_to_search(self, project_url: str) -> None:
         await self.page.goto(project_url, wait_until="domcontentloaded", timeout=30000)
-        await self.page.wait_for_timeout(2000)
+        # Wait for sidebar filters to render. LinkedIn's SPA can take 8-15s
+        # to hydrate the sidebar after DOM content loads.
+        await self.page.wait_for_timeout(4000)  # minimum wait for initial render
+        # Poll for sidebar keyword controls or results summary
+        sidebar_selectors = [
+            'textarea[id*="free-text-single-value-input"]',
+            'button[aria-label*="Profile keywords"]',
+            'button[aria-label*="Edit Keywords"]',
+            'button[aria-label*="keywords" i]',
+            '.search-query-summary__title',
+        ]
+        for _ in range(12):  # up to ~12 more seconds
+            for sel in sidebar_selectors:
+                try:
+                    if await self.page.locator(sel).first.is_visible(timeout=500):
+                        return  # sidebar rendered
+                except Exception:
+                    continue
+            await self.page.wait_for_timeout(500)
+
+        # If we get here, sidebar never appeared
+        final_url = self.page.url
+        raise RuntimeError(
+            f"navigate_to_search failed: sidebar elements not found after 16s. "
+            f"Page URL: {final_url[:120]}"
+        )
 
     # ------------------------------------------------------------------
     # Search: enter Boolean into Keywords field
@@ -221,24 +251,62 @@ class LinkedInBrowser:
         await self.go_back_to_results()
 
         async def _do():
-            # Step 1: Clear existing keywords if the Clear Keywords button is visible
-            clear_btn = self.page.locator('button[aria-label="Clear Keywords"]').first
-            try:
-                if await clear_btn.is_visible(timeout=2000):
-                    await clear_btn.click()
-                    await self.page.wait_for_timeout(1000)
-            except Exception:
-                pass  # Field is already empty
+            # Step 1: Reveal the textarea.
+            # The sidebar Keywords section can be in several states:
+            #   - Collapsed with "Profile keywords" button (field empty)
+            #   - Expanded with textarea visible (field empty or being edited)
+            #   - Showing applied keywords with edit/clear buttons
+            textarea = self.page.locator('textarea[id*="free-text-single-value-input"]').first
 
-            # Step 2: Click the edit/add button to reveal the textarea
-            edit_btn = self.page.locator('button[aria-label*="Profile keywords"]').first
-            await edit_btn.wait_for(state="visible", timeout=10000)
-            await edit_btn.click()
-            await self.page.wait_for_timeout(1000)
+            if not await textarea.is_visible(timeout=1000):
+                # Textarea not visible — try to expand the Keywords section.
+                # Search the sidebar for any button related to keywords.
+                expanded = False
+                sidebar_keyword_selectors = [
+                    'button[aria-label*="Edit Profile keywords"]',
+                    'button[aria-label*="Profile keywords"]',
+                    'button[aria-label*="Edit Keywords"]',
+                    'button[aria-label*="keywords or boolean" i]',
+                    'button:has-text("Profile keywords")',
+                ]
+                for selector in sidebar_keyword_selectors:
+                    try:
+                        btn = self.page.locator(selector).first
+                        if await btn.is_visible(timeout=1500):
+                            await btn.click()
+                            await self.page.wait_for_timeout(1500)
+                            if await textarea.is_visible(timeout=1500):
+                                expanded = True
+                                break
+                    except Exception:
+                        continue
+
+                if not expanded:
+                    # Last resort: dump sidebar DOM for debugging
+                    try:
+                        title = await self.page.title()
+                        url = self.page.url
+                        print(f"    [DOM-DEBUG] Page: {title} | URL: {url[:100]}")
+                        sidebar = self.page.locator('.keywords-facet, [data-test-facet-keywords]').first
+                        sidebar_html = await sidebar.inner_html(timeout=3000)
+                        import re as _re
+                        buttons = _re.findall(r'<button[^>]*aria-label="([^"]*)"[^>]*>', sidebar_html)
+                        print(f"    [DOM-DEBUG] Sidebar buttons: {buttons[:15]}")
+                    except Exception:
+                        try:
+                            all_btns = await self.page.locator('button[aria-label]').all()
+                            labels = []
+                            for b in all_btns[:20]:
+                                try:
+                                    labels.append(await b.get_attribute('aria-label', timeout=1000))
+                                except Exception:
+                                    pass
+                            print(f"    [DOM-DEBUG] All page button labels: {labels[:20]}")
+                        except Exception as dbg_err:
+                            print(f"    [DOM-DEBUG] Could not read page: {dbg_err}")
 
             # Step 3: Fill the sidebar textarea (the ONLY correct target)
-            textarea = self.page.locator('textarea[id*="free-text-single-value-input"]').first
-            await textarea.wait_for(state="visible", timeout=5000)
+            await textarea.wait_for(state="visible", timeout=10000)
             await textarea.fill(boolean)
 
             # Step 4: Submit
@@ -364,39 +432,47 @@ class LinkedInBrowser:
         return ""
 
     async def scroll_to_load_all_results(self) -> int:
-        """Scroll the results list container to trigger LinkedIn's lazy loading.
+        """Scroll the results list to trigger LinkedIn's lazy loading.
 
-        The results list lives inside a scrollable parent container (not the main window).
-        Each <li> in ol.profile-list is always present, but the <article> inside only
-        renders when the <li> is scrolled into the container's viewport.
-
-        Strategy: scroll through results with human-like chunked scrolling to force
-        all articles to render. Returns the final rendered article count.
+        Scrolls in human-like increments, counting rendered article cards
+        after each step. Stops when no new cards appear for 3 consecutive
+        scrolls (the page bottom has been reached).
         """
         cards_selector = "ol.profile-list article.profile-list-item"
-        li_selector = "ol.profile-list > li"
 
-        li_count = await self.page.locator(li_selector).count()
-        if li_count == 0:
+        if await self.page.locator("ol.profile-list").count() == 0:
             return 0
 
-        # Scroll down through results in human-like chunks
+        SCROLL_STEP = 400       # ~4-5 card heights per increment
+        MAX_SCROLLS = 50        # safety cap (50×400 = 20,000px, well beyond 26 cards)
+        STABLE_ROUNDS = 3       # stop after 3 scrolls with no new cards
+
         total_scrolled = 0
-        for i in range(li_count):
-            li = self.page.locator(li_selector).nth(i)
-            try:
-                box = await li.bounding_box(timeout=3000)
-                if box and box["y"] > 0:
-                    scroll_amount = int(box["y"] * 0.8)
-                    await human_scroll(self.page, scroll_amount)
-                    total_scrolled += scroll_amount
-            except Exception:
-                pass
-            # Brief dwell every few items to simulate scanning
-            if (i + 1) % 5 == 0:
+        prev_count = await self.page.locator(cards_selector).count()
+        stable = 0
+
+        for scroll_num in range(1, MAX_SCROLLS + 1):
+            if stable >= STABLE_ROUNDS:
+                break
+
+            await human_scroll(self.page, SCROLL_STEP)
+            total_scrolled += SCROLL_STEP
+
+            # Dwell every 5 scrolls to simulate scanning
+            if scroll_num % 5 == 0:
                 await asyncio.sleep(human_delay_correlated(0.4))
 
-        # Final wait for any remaining renders
+            # Let DOM update after scroll
+            await self.page.wait_for_timeout(300)
+
+            current_count = await self.page.locator(cards_selector).count()
+            if current_count > prev_count:
+                prev_count = current_count
+                stable = 0
+            else:
+                stable += 1
+
+        # Final wait for remaining renders
         await self.page.wait_for_timeout(800)
 
         # Scroll back to top
@@ -404,8 +480,7 @@ class LinkedInBrowser:
             await human_scroll(self.page, -total_scrolled)
         await asyncio.sleep(human_delay_correlated(0.3))
 
-        final_count = await self.page.locator(cards_selector).count()
-        return final_count
+        return await self.page.locator(cards_selector).count()
 
     async def get_card_name_url_pairs(self) -> list[dict]:
         """Extract name + profile URL atomically from each rendered article card.
@@ -439,14 +514,21 @@ class LinkedInBrowser:
         return await _retry(_do)
 
     async def get_results_list_innertext(self) -> str:
-        """Get innerText of ol.profile-list (the results container)."""
-        # Fast guard: don't burn 75s retrying if the list doesn't exist
+        """Get innerText of result list items that have rendered article cards."""
         if await self.page.locator("ol.profile-list").count() == 0:
             return ""
         async def _do():
-            el = self.page.locator("ol.profile-list").first
-            await el.wait_for(state="attached", timeout=5000)
-            return await el.inner_text(timeout=10000)
+            # Only include <li> elements that have a rendered <article> child
+            rendered_li = self.page.locator(
+                "ol.profile-list > li:has(article.profile-list-item)"
+            )
+            count = await rendered_li.count()
+            if count == 0:
+                return ""
+            texts = []
+            for i in range(count):
+                texts.append(await rendered_li.nth(i).inner_text(timeout=5000))
+            return "\n".join(texts)
         return await _retry(_do)
 
     async def get_card_innertext(self, card_index: int) -> str:
@@ -457,6 +539,30 @@ class LinkedInBrowser:
             if card_index >= count:
                 raise IndexError(f"Card index {card_index} out of range ({count} cards)")
             return await cards.nth(card_index).inner_text(timeout=10000)
+        return await _retry(_do)
+
+    async def get_card_saved_status(self) -> list[bool]:
+        """Check each rendered card for already-saved indicators.
+
+        Saved candidates show 'Change stage' button instead of
+        'Save to pipeline'. Returns list of bools in DOM order.
+        """
+        async def _do():
+            cards = self.page.locator("ol.profile-list article.profile-list-item")
+            count = await cards.count()
+            statuses = []
+            for i in range(count):
+                card = cards.nth(i)
+                try:
+                    change_btn = card.locator(
+                        ':is(button:has-text("Change stage"), '
+                        'button[data-test-change-stage-button])'
+                    ).first
+                    is_saved = await change_btn.is_visible(timeout=500)
+                except Exception:
+                    is_saved = False
+                statuses.append(is_saved)
+            return statuses
         return await _retry(_do)
 
     async def get_card_count(self) -> int:
@@ -652,10 +758,27 @@ class LinkedInBrowser:
             await self.page.wait_for_timeout(1500)
         await _retry(_do)
 
+    # ── Profile reading patterns ────────────────────────────────────
+
+    _CHUNK_SIZE = 400  # ~4-5 card heights
+
+    _PATTERN_WEIGHTS = {
+        "short":  [0.55, 0.05, 0.30, 0.10],
+        "medium": [0.40, 0.25, 0.20, 0.15],
+        "long":   [0.25, 0.30, 0.15, 0.30],
+    }
+    _PATTERN_NAMES = ["focused_reader", "skipper", "skimmer", "section_hopper"]
+
+    # Base dwell values
+    _BASE_SHORT_DWELL = 3.0
+    _BASE_CHUNK_DWELL_LOW = 1.5
+    _BASE_CHUNK_DWELL_HIGH = 4.0
+
     async def simulate_profile_read(self) -> None:
         """Scroll through profile panel to simulate a recruiter reading before extraction.
 
-        Produces 8-20s of visible scrolling/dwelling depending on profile length.
+        Selects from 4 reading patterns (focused, skipper, skimmer, hopper)
+        weighted by profile length. Produces realistic, varied scroll behavior.
         """
         container = self.page.locator("div.profile__main-container").first
         try:
@@ -667,25 +790,184 @@ class LinkedInBrowser:
             height = await container.evaluate("el => el.scrollHeight")
             viewport_h = await container.evaluate("el => el.clientHeight")
         except Exception:
-            await asyncio.sleep(human_delay_correlated(3.0))
+            await asyncio.sleep(human_delay_correlated(self._BASE_SHORT_DWELL))
             return
 
         if height <= viewport_h:
             # Profile fits in viewport, just dwell
-            await asyncio.sleep(human_delay_correlated(3.0))
+            await asyncio.sleep(human_delay_correlated(self._BASE_SHORT_DWELL))
             return
 
-        # Scroll down in sections, pausing to "read"
-        scrolled = 0
-        while scrolled < height - viewport_h:
-            chunk = random.randint(200, 400)  # ~1-2 section heights
-            await human_scroll(self.page, chunk)
-            scrolled += chunk
-            await asyncio.sleep(human_delay_correlated(random.uniform(1.5, 4.0)))
+        scrollable = height - viewport_h
+        chunk_count = max(1, scrollable // self._CHUNK_SIZE)
 
-        # Scroll back to top for text extraction
+        if chunk_count <= 2:
+            length_cat = "short"
+        elif chunk_count <= 5:
+            length_cat = "medium"
+        else:
+            length_cat = "long"
+
+        pattern = random.choices(self._PATTERN_NAMES, weights=self._PATTERN_WEIGHTS[length_cat])[0]
+        print(f"    [profile-read] {length_cat.title()} profile ({chunk_count} chunks) → Pattern: {pattern}")
+
+        if pattern == "focused_reader":
+            await self._read_focused(scrollable)
+        elif pattern == "skipper":
+            await self._read_skipper(scrollable)
+        elif pattern == "skimmer":
+            await self._read_skimmer(scrollable)
+        else:
+            await self._read_section_hopper(scrollable)
+
+    async def _read_focused(self, scrollable: int) -> None:
+        """Pattern A — Focused reader: top to bottom with careful/skim per chunk."""
+        chunk_size = random.randint(300, 500)
+        chunks = max(1, scrollable // chunk_size)
+        reread_chunk = random.randint(0, chunks - 1)
+        scrolled = 0
+
+        for i in range(chunks):
+            px = min(chunk_size, scrollable - scrolled)
+            await human_scroll(self.page, px)
+            scrolled += px
+
+            if random.random() < 0.4:
+                # Careful read: 2-4x base dwell
+                base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
+                dwell = base * random.uniform(2.0, 4.0)
+            else:
+                # Skim: 0.3-0.5x base dwell
+                base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
+                dwell = base * random.uniform(0.3, 0.5)
+
+            await asyncio.sleep(human_delay_correlated(dwell))
+
+            if i == reread_chunk:
+                # Re-read pause
+                await asyncio.sleep(human_delay_correlated(random.uniform(2.0, 8.0)))
+
+        # Scroll back to top
         await human_scroll(self.page, -scrolled)
         await asyncio.sleep(human_delay_correlated(0.5))
+
+    async def _read_skipper(self, scrollable: int) -> None:
+        """Pattern B — Skipper: jump to bottom section, back up, then finish."""
+        chunk_size = random.randint(300, 500)
+
+        # 1. Fast scroll to ~60-70% height
+        target_1 = int(scrollable * random.uniform(0.6, 0.7))
+        chunks_down_1 = max(1, target_1 // chunk_size)
+        scrolled = 0
+        for _ in range(chunks_down_1):
+            px = min(chunk_size, target_1 - scrolled)
+            await human_scroll(self.page, px)
+            scrolled += px
+            base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
+            await asyncio.sleep(human_delay_correlated(base * 0.3))
+
+        # 2. Pause
+        await asyncio.sleep(human_delay_correlated(random.uniform(3.0, 8.0)))
+
+        # 3. Scroll back up to ~20-30%
+        target_2 = int(scrollable * random.uniform(0.2, 0.3))
+        scroll_up = scrolled - target_2
+        if scroll_up > 0:
+            chunks_up = max(1, scroll_up // chunk_size)
+            for _ in range(chunks_up):
+                px = min(chunk_size, scroll_up)
+                await human_scroll(self.page, -px)
+                scrolled -= px
+                scroll_up -= px
+                base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
+                await asyncio.sleep(human_delay_correlated(base * 0.5))
+
+        # 4. Pause
+        await asyncio.sleep(human_delay_correlated(random.uniform(2.0, 5.0)))
+
+        # 5. Scroll to bottom
+        remaining = scrollable - scrolled
+        if remaining > 0:
+            chunks_rest = max(1, remaining // chunk_size)
+            for _ in range(chunks_rest):
+                px = min(chunk_size, remaining)
+                await human_scroll(self.page, px)
+                scrolled += px
+                remaining -= px
+                base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
+                await asyncio.sleep(human_delay_correlated(base))
+
+        # Scroll back to top
+        await human_scroll(self.page, -scrolled)
+        await asyncio.sleep(human_delay_correlated(0.5))
+
+    async def _read_skimmer(self, scrollable: int) -> None:
+        """Pattern C — Skimmer: fast down, slow back up."""
+        chunk_size = random.randint(300, 500)
+        chunks = max(1, scrollable // chunk_size)
+        scrolled = 0
+
+        # 1. Fast scroll down
+        for _ in range(chunks):
+            px = min(chunk_size, scrollable - scrolled)
+            await human_scroll(self.page, px)
+            scrolled += px
+            base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
+            await asyncio.sleep(human_delay_correlated(base * random.uniform(0.3, 0.8)))
+
+        # 2. Bottom pause
+        await asyncio.sleep(human_delay_correlated(random.uniform(1.0, 3.0)))
+
+        # 3. Slow scroll back up
+        scroll_remaining = scrolled
+        while scroll_remaining > 0:
+            px = min(chunk_size, scroll_remaining)
+            await human_scroll(self.page, -px)
+            scroll_remaining -= px
+            base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
+            await asyncio.sleep(human_delay_correlated(base * random.uniform(1.5, 3.0)))
+
+        await asyncio.sleep(human_delay_correlated(0.5))
+
+    async def _read_section_hopper(self, scrollable: int) -> None:
+        """Pattern D — Section hopper: top to bottom with 1-2 backtracks."""
+        chunk_size = random.randint(300, 500)
+        chunks = max(1, scrollable // chunk_size)
+        backtrack_points = sorted(random.sample(range(1, max(2, chunks)), min(random.randint(1, 2), chunks - 1)))
+        scrolled = 0
+
+        for i in range(chunks):
+            px = min(chunk_size, scrollable - scrolled)
+            await human_scroll(self.page, px)
+            scrolled += px
+            base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
+            await asyncio.sleep(human_delay_correlated(base))
+
+            if i in backtrack_points:
+                # Backtrack: scroll UP 1 chunk, pause, then resume
+                backtrack_px = min(chunk_size, scrolled)
+                await human_scroll(self.page, -backtrack_px)
+                scrolled -= backtrack_px
+                await asyncio.sleep(human_delay_correlated(random.uniform(2.0, 4.0)))
+                # Resume forward
+                await human_scroll(self.page, backtrack_px)
+                scrolled += backtrack_px
+
+        # Scroll back to top
+        await human_scroll(self.page, -scrolled)
+        await asyncio.sleep(human_delay_correlated(0.5))
+
+    # ── Scroll helpers for post-evaluation dwell ─────────────────
+
+    async def scroll_for_linger(self, chunks_back: int) -> int:
+        """Scroll back up N chunks for re-reading, return actual pixels scrolled."""
+        px = chunks_back * random.randint(300, 500)
+        await human_scroll(self.page, -px)
+        return px
+
+    async def scroll_restore(self, px: int):
+        """Scroll back down to restore position."""
+        await human_scroll(self.page, px)
 
     async def get_profile_innertext(self) -> str:
         """Get trimmed innerText from div.profile__main-container.
@@ -854,8 +1136,8 @@ class LinkedInBrowser:
         """
         try:
             change_stage = self.page.locator(
-                'button:has-text("Change stage"), '
-                'button[data-test-change-stage-button]'
+                'div.profile-slidein__container :is(button:has-text("Change stage"), '
+                'button[data-test-change-stage-button])'
             ).first
             return await change_stage.is_visible(timeout=2000)
         except Exception:
@@ -866,16 +1148,21 @@ class LinkedInBrowser:
 
         Uses JS click to bypass artdeco-modal-outlet overlay elements
         that intercept pointer events inside the profile slide-in.
+        After clicking, verifies the save persisted by checking that the
+        button changed from 'Save to pipeline' to 'Change stage'.
         """
         async def _do():
-            selector = "button.save-to-pipeline__button"
+            selector = "div.profile-slidein__container button.save-to-pipeline__button"
             save_btn = self.page.locator(selector).first
             await save_btn.wait_for(state="visible", timeout=5000)
             # Ghost-cursor first (generates mouse trajectory), JS click as fallback
             if not await self._ghost_click(selector):
                 await save_btn.evaluate("el => el.click()")
             await self.page.wait_for_timeout(2000)
-            return True
+            # Verify: button should now show "Change stage" instead of "Save to pipeline"
+            if await self.is_already_saved():
+                return True
+            raise Exception("Save click did not persist — button still shows 'Save to pipeline'")
         try:
             return await _retry(_do)
         except Exception as e:

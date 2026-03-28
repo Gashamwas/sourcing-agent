@@ -13,6 +13,7 @@ import json
 import random
 import signal
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
 
@@ -21,7 +22,7 @@ from shared.human_timing import human_delay, human_delay_correlated
 from shared.schemas import (
     CandidateSnippet, CandidateProfileSummary, OpusDecision,
     SearchString, Progress, KitString, BlockReport, AdaptationResponse,
-    ExecutionPlan,
+    ExecutionPlan, GlanceResult,
 )
 from linkedin.browser import LinkedInBrowser
 from shared.extractors import extract_snippets_from_list_dom, extract_profile_from_dom
@@ -30,6 +31,40 @@ from shared.storage import append_jsonl, read_jsonl, read_jsonl_set, log_event, 
 from shared.brief_loader import load_brief, Brief
 from shared.bias_controls import BiasMonitor, DecisionRecord
 from shared import config
+from shared.governor import GovernorLimitReached, SessionExpired
+
+import re as _re
+
+# --- Glance assessment: title normalization ---
+
+_SENIORITY_PREFIXES = _re.compile(
+    r'^(senior|sr\.?|lead|principal|staff|junior|jr\.?|associate|chief|head of|director of|vp of)\s+',
+    _re.IGNORECASE,
+)
+_TRAILING_LEVELS = _re.compile(r'\s+(i{1,4}|iv|[1-6])$', _re.IGNORECASE)
+
+_TITLE_SYNONYMS: dict[str, str] = {
+    "software developer": "software engineer",
+    "swe": "software engineer",
+    "ml engineer": "machine learning engineer",
+    "ai engineer": "machine learning engineer",
+    "dev ops": "devops engineer",
+    "data science": "data scientist",
+    "programme manager": "program manager",
+}
+
+
+def _normalize_title_family(title: str) -> str:
+    """Collapse a job title to a canonical family for clustering."""
+    t = title.strip().lower()
+    t = _SENIORITY_PREFIXES.sub('', t)
+    t = _TRAILING_LEVELS.sub('', t)
+    t = t.strip()
+    for pattern, canonical in _TITLE_SYNONYMS.items():
+        if t == pattern:
+            t = canonical
+            break
+    return t
 
 
 class Pipeline:
@@ -66,8 +101,23 @@ class Pipeline:
         # Browser
         self.browser = LinkedInBrowser()
 
+        # Brief identifier for cross-session file scoping
+        self._brief_id = self.brief_obj.linkedin_project_id or Path(brief_path).stem
+
+        # Cross-session candidate history (brief-scoped, never archived)
+        self.history_path = self.output_dir / f"candidate_history-{self._brief_id}.jsonl"
+
+        # Cross-session noise discoveries (brief-scoped, never archived)
+        self.noise_path = self.output_dir / f"noise_discoveries-{self._brief_id}.jsonl"
+
         # Dedup cache (loaded once, updated in memory — avoids O(n^2) file reads)
         self._seen_urls: set[str] = set()
+
+        # Prior session outcomes — URL → most recent outcome (for skip-on-prior-reject)
+        self._prior_outcomes: dict[str, str] = {}
+
+        # Save dedup — tracks profile URLs already saved in this session
+        self._saved_urls: set[str] = set()
 
         # Stats
         self.stats = {
@@ -75,6 +125,7 @@ class Pipeline:
             "facial_yes": 0,
             "facial_no": 0,
             "saved": 0,
+            "save_attempts": 0,
             "rejected": 0,
         }
 
@@ -87,15 +138,44 @@ class Pipeline:
 
         # Bias monitor (V2 briefs only — uses brief's BiasControls + FacialCalibration)
         self._bias_monitor: Optional[BiasMonitor] = None
-        self.bias_checkpoint_path = self.output_dir / "bias_monitor.json"
         if self.brief_obj.has_v2_schema:
-            self._bias_monitor = BiasMonitor.from_brief(self.brief_obj._new_brief)
+            # Brief-scoped bias checkpoint (survives across sessions)
+            self.bias_checkpoint_path = self.output_dir / f"bias_monitor-{self._brief_id}.json"
+            if self.bias_checkpoint_path.exists():
+                self._bias_monitor = BiasMonitor.from_brief(self.brief_obj._new_brief)
+                self._bias_monitor.load_checkpoint(str(self.bias_checkpoint_path))
+                print(f"  [bias] Loaded bias monitor from prior session ({len(self._bias_monitor._decisions)} decisions)")
+            else:
+                self._bias_monitor = BiasMonitor.from_brief(self.brief_obj._new_brief)
+        else:
+            self.bias_checkpoint_path = self.output_dir / f"bias_monitor-{self._brief_id}.json"
 
         # Cadence pause — anti-detection idle breaks
         self._last_pause_time: float = time.time()
 
         # URL snapshot — last known good URL for recovery fallback
         self._last_good_url: str = ""
+
+    # ------------------------------------------------------------------
+    # Cross-session history
+    # ------------------------------------------------------------------
+
+    def _load_candidate_history(self) -> None:
+        """Load cross-session candidate history into dedup set and prior outcomes dict.
+
+        Called after per-session dedup loading in all three init paths.
+        Additive — merges history URLs into _seen_urls alongside current-session files.
+        """
+        if not self.history_path.exists():
+            return
+        for entry in read_jsonl(self.history_path):
+            url = entry.get("profile_url", "")
+            if url:
+                self._seen_urls.add(url)
+                self._prior_outcomes[url] = entry.get("outcome", "")
+        saves = sum(1 for o in self._prior_outcomes.values() if o in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"))
+        rejects = sum(1 for o in self._prior_outcomes.values() if o == "REJECT")
+        print(f"  [dedup] Cross-session history: {len(self._prior_outcomes)} candidates ({saves} saves, {rejects} rejects)")
 
     # ------------------------------------------------------------------
     # Main entry points
@@ -113,6 +193,10 @@ class Pipeline:
 
         # Load dedup cache once
         self._seen_urls = read_jsonl_set(self.snippets_path)
+        if self.facial_path.exists():
+            facial_urls = read_jsonl_set(self.facial_path)
+            self._seen_urls.update(facial_urls)
+        self._load_candidate_history()
 
         progress = self._load_or_create_progress()
         self._progress = progress
@@ -255,18 +339,32 @@ class Pipeline:
         await self.browser.connect()
         log_event(self.log_path, "pipeline_start", mode="full_run_resume" if resume else "full_run")
 
-        # Navigate to the project search page if we're not already there
+        # Navigate to the project search page if we're not already there.
+        # Must be on a search page (not a profile page) for the Keywords sidebar.
+        current_url = self.browser.page.url
         project_url = self._get_project_url()
-        if project_url and "/talent/hire/" not in self.browser.page.url:
+        on_search_page = "/discover/" in current_url or "/talent/search" in current_url
+        if project_url and not on_search_page:
             print(f"  Navigating to project search page...")
             await self.browser.navigate_to_search(project_url)
-        elif "linkedin.com/talent" not in self.browser.page.url:
-            print(f"  Navigating to LinkedIn Recruiter...")
+        elif not on_search_page:
+            print(f"  Navigating to LinkedIn Recruiter search...")
             await self.browser.navigate_to_search("https://www.linkedin.com/talent/search")
 
-        # Start with empty dedup set — only dedup within this run, not across runs.
-        # Prior runs may have different evaluation criteria or candidates may have updated profiles.
+        # Capture initial good URL for error recovery
+        try:
+            self._last_good_url = self.browser.page.url
+        except Exception:
+            pass
+
+        # Start with dedup from prior facial judgments in this output dir
         self._seen_urls = set()
+        if self.facial_path.exists():
+            facial_urls = read_jsonl_set(self.facial_path)
+            self._seen_urls.update(facial_urls)
+            if facial_urls:
+                print(f"  [dedup] Loaded {len(facial_urls)} previously-evaluated candidates from facial_judgments.jsonl")
+        self._load_candidate_history()
 
         # Ctrl+C handler — only install if not running under session_orchestrator
         def _sigint_handler(sig, frame):
@@ -285,14 +383,27 @@ class Pipeline:
                 progress = Progress.from_file(str(self.progress_path))
                 self._progress = progress
 
+                # Ensure strings are in correct execution order (by ID)
+                progress.strings.sort(key=lambda s: s.id)
+
                 # If restarting a specific string, reset it and clean up its output
                 if restart_string_id is not None:
                     self._restart_string(progress, restart_string_id)
 
-                # Rebuild dedup set from this run's snippets so we don't re-evaluate
+                # Rebuild dedup set AFTER restart (restart removes snippets from file)
                 if self.snippets_path.exists():
                     self._seen_urls = read_jsonl_set(self.snippets_path)
-                    print(f"  Loaded {len(self._seen_urls)} URLs into dedup set from current run")
+                    print(f"  Loaded {len(self._seen_urls)} URLs into dedup set from snippets")
+                else:
+                    self._seen_urls = set()
+                if self.facial_path.exists():
+                    facial_urls = read_jsonl_set(self.facial_path)
+                    pre = len(self._seen_urls)
+                    self._seen_urls.update(facial_urls)
+                    added = len(self._seen_urls) - pre
+                    if added:
+                        print(f"  [dedup] Added {added} URLs from facial_judgments.jsonl")
+                self._load_candidate_history()
 
                 # Load kit strings for adaptation vocabulary
                 kit_path = self.output_dir / "kit_strings.json"
@@ -345,6 +456,14 @@ class Pipeline:
                 if self.progress_path.exists():
                     prior_data = read_json(str(self.progress_path))
 
+                # Load noise discoveries from prior sessions
+                if self.noise_path.exists():
+                    noise_entries = read_jsonl(self.noise_path)
+                    if noise_entries:
+                        if prior_data is None:
+                            prior_data = {}
+                        prior_data["noise_discoveries"] = noise_entries
+
                 self._execution_plan = form_strategy(self.brief_obj, self._kit_strings, prior_data)
                 write_json(self.output_dir / "execution_plan.json", self._execution_plan.to_dict())
                 print(f"  Strategy: {self._execution_plan.strategy_rationale[:120]}...")
@@ -372,22 +491,13 @@ class Pipeline:
             current_block = ""
             block_strings: list[SearchString] = []
 
-            # On resume, prioritize any in_progress string (it was interrupted mid-run)
+            # On resume, reset any in_progress strings back to queued
+            # (they'll be processed in their original order)
             if resume:
-                in_progress = [s for s in progress.strings if s.status == "in_progress"]
-                if in_progress:
-                    for ip_string in in_progress:
-                        # Move to front of iteration by resetting to queued
-                        # (it will be picked up first in the loop below)
-                        print(f"\n  Resuming interrupted string #{ip_string.id}: {ip_string.name[:60]}")
-                        ip_string.status = "queued"
-                        # Move it to right after the last done string
-                        progress.strings.remove(ip_string)
-                        insert_idx = 0
-                        for i, s in enumerate(progress.strings):
-                            if s.status == "done":
-                                insert_idx = i + 1
-                        progress.strings.insert(insert_idx, ip_string)
+                for s in progress.strings:
+                    if s.status == "in_progress":
+                        print(f"\n  Resuming interrupted string #{s.id}: {s.name[:60]}")
+                        s.status = "queued"
 
             for search_string in progress.strings:
                 if search_string.status == "done":
@@ -416,6 +526,10 @@ class Pipeline:
 
                 try:
                     await self._process_string(search_string, progress)
+                except GovernorLimitReached as e:
+                    print(f"\n  [GOVERNOR] Session limit reached: {e.reason}")
+                    progress.save(str(self.progress_path))
+                    raise
                 except Exception as e:
                     err_msg = str(e).lower()
                     if "target crashed" in err_msg or "connection closed" in err_msg or "broken pipe" in err_msg:
@@ -435,7 +549,13 @@ class Pipeline:
                             print(f"  [!] Reconnect failed. Saving progress and exiting.")
                             raise
                     else:
-                        raise
+                        # Non-crash error: mark string as failed, save, continue to next
+                        print(f"\n  [!] String #{search_string.id} failed: {e}")
+                        search_string.status = "done"
+                        search_string.notes = (search_string.notes or "") + f" Error: {e}"
+                        progress.save(str(self.progress_path))
+                        log_event(self.log_path, "string_error", string_id=search_string.id, error=str(e))
+                        continue
 
                 search_string.status = "done"
                 block_strings.append(search_string)
@@ -499,6 +619,10 @@ class Pipeline:
     # ------------------------------------------------------------------
 
     async def _process_string(self, search_string: SearchString, progress: Progress) -> None:
+        # Reset triage tightening state per string
+        self._triage_tightened = False
+        self._tightening_prefix = ""
+
         # Initialize refinement tracking
         if not search_string.original_boolean:
             search_string.original_boolean = search_string.boolean
@@ -507,21 +631,65 @@ class Pipeline:
         await self._ensure_browser_healthy()
 
         current_boolean = search_string.boolean
-        print(f"  Entering Boolean: {current_boolean[:80]}...")
-        await self.browser.enter_search_string(current_boolean)
+        resuming = search_string.pages_reviewed > 0
 
-        # Snapshot URL after search entry — known good state for recovery
-        try:
-            self._last_good_url = self.browser.page.url
-        except Exception:
-            pass
+        if resuming:
+            print(f"  Resuming string (interrupted on page {search_string.pages_reviewed})")
 
-        result_count_text = await self.browser.get_results_count_text()
-        result_count = await self.browser.get_results_count()
-        search_string.result_count = result_count
-        print(f"  Results: {result_count_text or 'unknown'} (parsed: {result_count})")
-        log_event(self.log_path, "string_results", string_id=search_string.id,
-                  result_count=result_count, result_count_text=result_count_text)
+            # Dismiss any open profile panel
+            try:
+                await self.browser.go_back_to_results()
+            except Exception:
+                pass
+
+            # Ensure we're on a search page
+            current_page_url = self.browser.page.url
+            if "/manage/" in current_page_url or "/talent/hire/" not in current_page_url:
+                project_url = self._get_project_url()
+                if project_url:
+                    print(f"  Wrong page ({current_page_url[:60]}...). Navigating to search...")
+                    await self.browser.navigate_to_search(project_url)
+                else:
+                    print(f"  Wrong page and no project URL. Reloading...")
+                    await self.browser.page.reload(wait_until="domcontentloaded", timeout=30000)
+                    await self.browser.page.wait_for_timeout(4000)
+
+            # Always re-enter keywords — browser state is not trustworthy on resume
+            print(f"  Re-entering Boolean: {current_boolean[:80]}...")
+            await self.browser.enter_search_string(current_boolean)
+            result_count_text = await self.browser.get_results_count_text()
+            result_count = await self.browser.get_results_count()
+            search_string.result_count = result_count
+            print(f"  Results: {result_count_text or 'unknown'}")
+
+            log_event(self.log_path, "string_resumed", string_id=search_string.id,
+                      pages_done=search_string.pages_reviewed,
+                      result_count=result_count, result_count_text=result_count_text)
+        else:
+            # Fresh string — enter the boolean
+            print(f"  Entering Boolean: {current_boolean[:80]}...")
+            await self.browser.enter_search_string(current_boolean)
+
+            # Snapshot URL after search entry — known good state for recovery
+            try:
+                self._last_good_url = self.browser.page.url
+            except Exception:
+                pass
+
+            result_count_text = await self.browser.get_results_count_text()
+            result_count = await self.browser.get_results_count()
+            search_string.result_count = result_count
+            print(f"  Results: {result_count_text or 'unknown'} (parsed: {result_count})")
+            log_event(self.log_path, "string_results", string_id=search_string.id,
+                      result_count=result_count, result_count_text=result_count_text)
+
+        # Guard: don't proceed with invalid result count
+        if result_count <= 0:
+            print(f"  No results detected (result_count={result_count}). Skipping string.")
+            search_string.status = "skipped"
+            search_string.notes = (search_string.notes or "") + " Skipped: no results on entry."
+            progress.save(str(self.progress_path))
+            return
 
         # Determine starting phase
         # If resuming with an existing refinement stack, go straight to paginate
@@ -541,6 +709,19 @@ class Pipeline:
 
         page_num = 1
         max_pages = config.MAX_PAGES_PER_STRING or 999
+
+        # On resume, skip to the interrupted page (re-process it; dupe filter handles already-seen)
+        if resuming and search_string.pages_reviewed > 1:
+            target_page = search_string.pages_reviewed
+            print(f"  Advancing to page {target_page}...")
+            for _ in range(target_page - 1):
+                has_next = await self.browser.go_to_next_page()
+                if not has_next:
+                    print("  No more pages after resume point.")
+                    search_string.status = "done"
+                    progress.save(str(self.progress_path))
+                    return
+            page_num = target_page
 
         while page_num <= max_pages:
             # Emergency recovery check before each page
@@ -579,16 +760,20 @@ class Pipeline:
                 print("  No candidates found on this page. Moving on.")
                 break
 
-            # Get name+URL pairs atomically from DOM (innerText strips hrefs)
+            # Get name+URL pairs and saved status atomically from DOM
             card_pairs = await self.browser.get_card_name_url_pairs()
+            card_saved = await self.browser.get_card_saved_status()
             url_by_name: dict[str, str] = {}
             index_by_name: dict[str, int] = {}
+            saved_by_name: dict[str, bool] = {}
             for i, pair in enumerate(card_pairs):
                 key = pair["name"].strip().lower() if pair["name"] else ""
                 if key and pair["url"]:
                     url_by_name[key] = pair["url"]
                 if key:
                     index_by_name[key] = i
+                    if i < len(card_saved):
+                        saved_by_name[key] = card_saved[i]
             matched = 0
             for snippet in snippets:
                 key = snippet.name.strip().lower()
@@ -597,6 +782,8 @@ class Pipeline:
                     matched += 1
                 if key in index_by_name:
                     snippet.card_index = index_by_name[key]
+                if saved_by_name.get(key, False):
+                    snippet.already_saved = True
             if matched < len(snippets):
                 print(f"  [warn] URL match: {matched}/{len(snippets)} snippets matched to DOM cards")
 
@@ -607,84 +794,154 @@ class Pipeline:
                 result_count=result_count,
             )
 
-            consecutive_api_errors = 0
-            for snippet in snippets:
-                if snippet.profile_url and snippet.profile_url in self._seen_urls:
-                    print(f"    [dup] {snippet.name} — already processed")
-                    page_report.add_skip_preview(snippet.name, "duplicate")
-                    string_stats["duplicates"] += 1
-                    continue
+            # --- Glance assessment ---
+            glance_result = None
+            skip_evaluation = False
 
-                # Circuit breaker: pause on sustained API failures
-                if consecutive_api_errors >= 5:
-                    print(f"    [CIRCUIT BREAKER] {consecutive_api_errors} consecutive API failures — pausing 60s")
-                    log_event(self.log_path, "circuit_breaker", consecutive_errors=consecutive_api_errors)
-                    await asyncio.sleep(60)
-                    consecutive_api_errors = 0
+            if len(snippets) >= config.GLANCE_MIN_SNIPPETS:
+                glance_result = self._glance_assess(snippets)
+                log_event(self.log_path, "glance_assess",
+                          string_id=search_string.id, page=page_num,
+                          action=glance_result.action,
+                          confidence=glance_result.confidence,
+                          signals=glance_result.signals)
+                print(f"  [glance] {glance_result.action} ({glance_result.confidence:.2f}): "
+                      f"{glance_result.summary}")
 
-                if snippet.profile_url:
-                    self._seen_urls.add(snippet.profile_url)
-                append_jsonl(self.snippets_path, snippet.to_dict())
-                self.stats["snippets_extracted"] += 1
-                string_stats["candidates"] += 1
+                if glance_result.action == "reformulate":
+                    # Record snippets as seen (dedup) but do NOT count in string_stats
+                    for snippet in snippets:
+                        if snippet.profile_url:
+                            self._seen_urls.add(snippet.profile_url)
+                        append_jsonl(self.snippets_path, snippet.to_dict())
+                    self.stats["snippets_extracted"] += len(snippets)
+                    skip_evaluation = True
 
-                decision = await self._evaluate_snippet(snippet, page_report)
+            if not skip_evaluation:
+                consecutive_api_errors = 0
+                page_evaluated = 0
+                page_facial_no = 0
+                for snippet in snippets:
+                    if snippet.profile_url and snippet.profile_url in self._seen_urls:
+                        prior = self._prior_outcomes.get(snippet.profile_url, "")
+                        if prior in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"):
+                            print(f"    [dup] {snippet.name} — saved in prior session")
+                        elif prior == "REJECT":
+                            print(f"    [dup] {snippet.name} — rejected in prior session")
+                        elif prior in ("FACIAL_NO", "FACIAL_SKIP"):
+                            print(f"    [dup] {snippet.name} — facial NO/skip in prior session")
+                        elif prior == "FACIAL_YES":
+                            # Passed facial before but session ended before full eval — re-evaluate
+                            print(f"    [re-eval] {snippet.name} — facial YES in prior session, completing evaluation")
+                            self._seen_urls.discard(snippet.profile_url)
+                        else:
+                            print(f"    [dup] {snippet.name} — already processed")
+                        if snippet.profile_url in self._seen_urls:
+                            page_report.add_skip_preview(snippet.name, "duplicate")
+                            string_stats["duplicates"] += 1
+                            continue
 
-                # Track API error fallbacks for circuit breaker
-                if decision and hasattr(decision, 'rationale') and '[API error fallback' in (decision.rationale or ''):
-                    consecutive_api_errors += 1
-                else:
-                    consecutive_api_errors = 0
+                    if getattr(snippet, 'already_saved', False):
+                        print(f"    [skip] {snippet.name} — already saved in LinkedIn pipeline")
+                        page_report.add_skip_preview(snippet.name, "already_saved")
+                        string_stats.setdefault("already_saved_skips", 0)
+                        string_stats["already_saved_skips"] += 1
+                        continue
 
-                # If go_back_to_results failed, panel is still open — skip remaining candidates on this page
-                if decision and getattr(decision, '_panel_stuck', False):
-                    print(f"    [ERROR] Panel stuck after {snippet.name} — skipping remaining candidates on this page")
-                    log_event(self.log_path, "panel_stuck", name=snippet.name, page=page_num)
-                    break
+                    # Circuit breaker: pause on sustained API failures
+                    if consecutive_api_errors >= 5:
+                        print(f"    [CIRCUIT BREAKER] {consecutive_api_errors} consecutive API failures — pausing 60s")
+                        log_event(self.log_path, "circuit_breaker", consecutive_errors=consecutive_api_errors)
+                        await asyncio.sleep(60)
+                        consecutive_api_errors = 0
 
-                outcome = "error"
-                if decision:
-                    if decision.stage == "facial" and decision.decision == "FACIAL_NO":
-                        outcome = "facial_no"
-                        string_stats["facial_no"] += 1
-                    elif decision.decision == "SAVE":
-                        outcome = "save"
-                        string_stats["facial_yes"] += 1
-                        string_stats["saves"] += 1
-                        search_string.saves.append(snippet.name)
-                    elif decision.decision == "REJECT":
-                        outcome = "reject"
-                        string_stats["facial_yes"] += 1
-                        string_stats["rejects"] += 1
-                    elif decision.stage == "facial" and decision.decision == "FACIAL_YES":
-                        outcome = "facial_yes"
-                        string_stats["facial_yes"] += 1
+                    if snippet.profile_url:
+                        self._seen_urls.add(snippet.profile_url)
+                    append_jsonl(self.snippets_path, snippet.to_dict())
+                    self.stats["snippets_extracted"] += 1
+                    string_stats["candidates"] += 1
 
-                all_candidates.append({
-                    "name": snippet.name,
-                    "title": snippet.current_title,
-                    "company": snippet.current_company,
-                    "headline": snippet.headline,
-                    "outcome": outcome,
-                    "rationale": decision.rationale if decision else "",
-                    "page": page_num,
-                })
+                    decision = await self._evaluate_snippet(snippet, page_report)
 
-                # Cooperative session expiry check.
-                # If session_orchestrator's duration timer has fired, exit gracefully
-                # at this safe checkpoint instead of being hard-cancelled mid-operation.
-                if hasattr(self, '_session_expired') and self._session_expired.is_set():
-                    progress.save(str(self.progress_path))
-                    from shared.governor import SessionExpired
-                    raise SessionExpired("session_duration_cap")
+                    # Track API error fallbacks for circuit breaker
+                    if decision and hasattr(decision, 'rationale') and '[API error' in (decision.rationale or ''):
+                        consecutive_api_errors += 1
+                    else:
+                        consecutive_api_errors = 0
 
-                # Cooperative yield point for decoy interleaving.
-                # If session_orchestrator has set _pause_requested, we pause here
-                # (between candidates, after evaluation is complete and results are safe).
-                if hasattr(self, '_pause_requested') and self._pause_requested.is_set():
-                    self._pause_requested.clear()  # Acknowledge the pause
-                    progress.save(str(self.progress_path))
-                    await self._resume_event.wait()  # Block until decoy burst completes
+                    # If go_back_to_results failed, panel is still open — skip remaining candidates on this page
+                    if decision and getattr(decision, '_panel_stuck', False):
+                        print(f"    [ERROR] Panel stuck after {snippet.name} — skipping remaining candidates on this page")
+                        log_event(self.log_path, "panel_stuck", name=snippet.name, page=page_num)
+                        break
+
+                    outcome = "error"
+                    if decision:
+                        if decision.stage == "facial" and decision.decision == "FACIAL_NO":
+                            outcome = "facial_no"
+                            string_stats["facial_no"] += 1
+                        elif decision.stage == "facial" and decision.decision == "FACIAL_SKIP":
+                            outcome = "facial_skip"
+                            string_stats.setdefault("facial_skip", 0)
+                            string_stats["facial_skip"] += 1
+                        elif decision.decision == "SAVE":
+                            outcome = "save"
+                            string_stats["facial_yes"] += 1
+                            string_stats["saves"] += 1
+                            search_string.saves.append(snippet.name)
+                        elif decision.decision == "REJECT":
+                            outcome = "reject"
+                            string_stats["facial_yes"] += 1
+                            string_stats["rejects"] += 1
+                        elif decision.stage == "facial" and decision.decision == "FACIAL_YES":
+                            outcome = "facial_yes"
+                            string_stats["facial_yes"] += 1
+
+                    all_candidates.append({
+                        "name": snippet.name,
+                        "title": snippet.current_title,
+                        "company": snippet.current_company,
+                        "headline": snippet.headline,
+                        "outcome": outcome,
+                        "rationale": decision.rationale if decision else "",
+                        "page": page_num,
+                    })
+
+                    # Mid-page early exit
+                    if outcome == "facial_no":
+                        page_facial_no += 1
+                    if outcome in ("facial_no", "save", "reject", "facial_yes"):
+                        page_evaluated += 1
+
+                    if page_evaluated >= config.EARLY_EXIT_MIN_CANDIDATES:
+                        page_no_rate = page_facial_no / page_evaluated
+                        if page_no_rate >= self._get_early_exit_rate():
+                            print(f"    [early-exit] {page_facial_no}/{page_evaluated} "
+                                  f"facial_no ({page_no_rate:.0%}) — breaking page")
+                            log_event(self.log_path, "early_exit",
+                                      string_id=search_string.id, page=page_num,
+                                      evaluated=page_evaluated, facial_no=page_facial_no,
+                                      rate=round(page_no_rate, 2))
+                            break
+
+                    # Cooperative session expiry check.
+                    # If session_orchestrator's duration timer has fired, exit gracefully
+                    # at this safe checkpoint instead of being hard-cancelled mid-operation.
+                    if hasattr(self, '_session_expired') and self._session_expired.is_set():
+                        progress.save(str(self.progress_path))
+                        raise SessionExpired("session_duration_cap")
+
+                    # Cooperative yield point for decoy interleaving.
+                    # If session_orchestrator has set _pause_requested, we pause here
+                    # (between candidates, after evaluation is complete and results are safe).
+                    if hasattr(self, '_pause_requested') and self._pause_requested.is_set():
+                        self._pause_requested.clear()  # Acknowledge the pause
+                        progress.save(str(self.progress_path))
+                        try:
+                            await asyncio.wait_for(self._resume_event.wait(), timeout=300)
+                        except asyncio.TimeoutError:
+                            print("  [!] Resume timeout (5 min) — continuing without decoy burst.")
+                            self._resume_event.set()
 
             string_stats["pages"] = page_num
             search_string.pages_reviewed = page_num
@@ -695,14 +952,27 @@ class Pipeline:
             adapt_action = await self._page_adapt(
                 search_string, current_boolean, result_count_text,
                 all_candidates, string_stats,
+                glance_summary=(glance_result.summary
+                                if glance_result and glance_result.action == "reformulate"
+                                else None),
+                architecture=(self._execution_plan.architecture
+                              if self._execution_plan else ""),
             )
 
-            # Enforce minimum pagination depth — override premature stop/abandon
+            # Enforce minimum pagination depth — attempt narrow instead of blind continue
             if adapt_action in ("abandon", "stop"):
                 min_pages = self._get_min_pages(result_count)
                 if page_num < min_pages:
-                    print(f"  [pagination] Opus wants to {adapt_action}, but page {page_num} < min {min_pages} for {result_count} results. Continuing.")
-                    adapt_action = "continue"
+                    print(f"  [pagination] Opus wants to {adapt_action}, but page {page_num} < min {min_pages} for {result_count} results. Attempting narrow...")
+                    narrow_result = await self._force_narrow_adapt(
+                        search_string, current_boolean, result_count_text,
+                        all_candidates, string_stats,
+                    )
+                    if narrow_result:
+                        adapt_action = narrow_result  # "narrow:<boolean>"
+                    else:
+                        # Opus couldn't narrow — honor the original abandon/stop
+                        print(f"  [pagination] Narrow attempt failed. Honoring {adapt_action}.")
 
             if adapt_action == "abandon":
                 print(f"  [adapt] Opus says ABANDON this string entirely.")
@@ -788,13 +1058,47 @@ class Pipeline:
             else:
                 break
 
-    @staticmethod
-    def _get_min_pages(result_count: int) -> int:
+        # Persist transient facial stats onto SearchString for block-level aggregation
+        search_string.facial_yes_count = string_stats["facial_yes"]
+        search_string.facial_no_count = string_stats["facial_no"]
+
+    def _get_min_pages(self, result_count: int) -> int:
         """Get minimum pages to review before allowing stop/abandon."""
-        for threshold, min_pages in config.MIN_PAGES_BY_RESULT_COUNT:
+        overrides = {}
+        if self._execution_plan and self._execution_plan.architecture:
+            overrides = config.ARCHITECTURE_OVERRIDES.get(self._execution_plan.architecture, {})
+        thresholds = overrides.get("min_pages_by_result_count", config.MIN_PAGES_BY_RESULT_COUNT)
+        for threshold, min_pages in thresholds:
             if result_count >= threshold:
                 return min_pages
         return 1
+
+    def _get_early_exit_rate(self) -> float:
+        """Get facial_no rate threshold for mid-page early exit.
+
+        Derives from brief's facial_calibration when available:
+        formula: 1.0 - (expected_yes_rate_low * 0.5)
+        Meaning: exit when NO rate is so extreme that even the most pessimistic
+        expected YES rate is halved. Architecture overrides can only tighten (raise)
+        this floor, never loosen it.
+        """
+        # Brief-derived threshold
+        brief_rate = None
+        if (self.brief_obj and self.brief_obj.has_v2_schema
+                and self.brief_obj._new_brief.facial_calibration):
+            fc = self.brief_obj._new_brief.facial_calibration
+            brief_rate = 1.0 - (fc.expected_yes_rate_low * 0.5)
+
+        # Architecture override from config
+        arch_rate = config.EARLY_EXIT_FACIAL_NO_RATE
+        if self._execution_plan and self._execution_plan.architecture:
+            overrides = config.ARCHITECTURE_OVERRIDES.get(self._execution_plan.architecture, {})
+            arch_rate = overrides.get("early_exit_facial_no_rate", config.EARLY_EXIT_FACIAL_NO_RATE)
+
+        if brief_rate is not None:
+            # Architecture can tighten (raise) but not loosen (lower) beyond brief floor
+            return max(arch_rate, brief_rate)
+        return arch_rate
 
     async def _ensure_browser_healthy(self) -> None:
         """Check for error states, attempt recovery, and enforce cadence pauses."""
@@ -804,7 +1108,7 @@ class Pipeline:
         # --- Snapshot current URL as known-good before checking for errors ---
         try:
             current_url = self.browser.page.url
-            if "linkedin.com/talent" in current_url and "/login" not in current_url:
+            if "linkedin.com/talent" in current_url and "/login" not in current_url and "/manage/" not in current_url:
                 self._last_good_url = current_url
         except Exception:
             pass
@@ -813,7 +1117,7 @@ class Pipeline:
         recovered = await self.browser.check_and_recover()
         if recovered:
             # Try project URL first, then last known good URL
-            recovery_url = self._get_project_url() or self._last_good_url
+            recovery_url = self._last_good_url or self._get_project_url()
             if recovery_url:
                 print(f"  [recovery] Re-navigating to: {recovery_url[:60]}...")
                 await self.browser.navigate_to_search(recovery_url)
@@ -821,10 +1125,12 @@ class Pipeline:
                 print("  [recovery] No recovery URL available — continuing from current page.")
 
     def _get_project_url(self) -> str:
-        """Construct LinkedIn Recruiter project URL from brief fields."""
+        """Construct LinkedIn Recruiter project URL from brief or auto-detected browser URL."""
         pid = self.brief_obj.linkedin_project_id
+        if not pid and hasattr(self.browser, '_project_id'):
+            pid = self.browser._project_id
         if pid:
-            return f"https://www.linkedin.com/talent/hire/{pid}"
+            return f"https://www.linkedin.com/talent/hire/{pid}/discover/recruiterSearch"
         return ""
 
     async def _maybe_cadence_pause(self) -> None:
@@ -860,6 +1166,240 @@ class Pipeline:
             self._last_pause_time = time.time()
             print(f"  [cadence] Resuming.")
 
+    # ------------------------------------------------------------------
+    # Glance assessment — page-level pre-filter
+    # ------------------------------------------------------------------
+
+    def _get_glance_key_terms(self) -> list[str]:
+        """Extract key terms from the brief for glance keyword scanning."""
+        nb = self.brief_obj._new_brief
+        if nb is not None:
+            # V2 brief: collect key_terms from all capability_areas
+            terms = []
+            for ca in nb.capability_areas:
+                terms.extend(t.lower() for t in ca.key_terms)
+            return terms
+        # Old brief: extract from archetypes save_signals
+        terms = []
+        for arch in self.brief_obj.archetypes:
+            for sig in arch.get("save_signals", []):
+                # Each save_signal is a short phrase — use as-is
+                terms.append(sig.lower())
+        return terms
+
+    def _glance_assess(self, snippets: list[CandidateSnippet]) -> GlanceResult:
+        """Fast page-level assessment from snippet metadata. No per-candidate LLM calls."""
+        signals = {}
+        noise_count = 0
+
+        # --- Signal 1: Title clustering ---
+        title_families: dict[str, int] = {}
+        for s in snippets:
+            family = _normalize_title_family(s.current_title) if s.current_title else ""
+            if family:
+                title_families[family] = title_families.get(family, 0) + 1
+
+        if title_families:
+            top_family = max(title_families, key=title_families.get)
+            top_ratio = title_families[top_family] / len(snippets)
+            signals["title_cluster"] = {
+                "top_family": top_family,
+                "ratio": round(top_ratio, 2),
+            }
+            if top_ratio >= config.GLANCE_NOISE_TITLE_THRESHOLD:
+                # Check if top family matches a known non-fit pattern
+                is_noise_title = False
+                nb = self.brief_obj._new_brief
+                if nb is not None:
+                    for nf in nb.non_fit_patterns:
+                        nf_lower = [ex.lower() for ex in nf.examples]
+                        if any(top_family in ex or ex in top_family for ex in nf_lower):
+                            is_noise_title = True
+                            break
+                        if top_family in nf.label.lower() or top_family in nf.description.lower():
+                            is_noise_title = True
+                            break
+                else:
+                    for na in self.brief_obj.noise_archetypes:
+                        na_name = na.get("name", "").lower()
+                        na_desc = na.get("description", "").lower()
+                        na_signals = [s.lower() for s in na.get("signals", [])]
+                        if (top_family in na_name or top_family in na_desc
+                                or any(top_family in sig or sig in top_family for sig in na_signals)):
+                            is_noise_title = True
+                            break
+                if is_noise_title:
+                    signals["title_cluster"]["noise"] = True
+                    noise_count += 1
+
+        # --- Signal 2: Keyword scan ---
+        key_terms = self._get_glance_key_terms()
+        if key_terms:
+            hits = 0
+            for s in snippets:
+                text = " ".join([
+                    s.headline or "",
+                    s.current_title or "",
+                    " ".join(s.experience_entries),
+                ]).lower()
+                if any(term in text for term in key_terms):
+                    hits += 1
+            signals["keyword_scan"] = {"hits": hits, "total": len(snippets)}
+            if hits <= config.GLANCE_KEYWORD_MISS_THRESHOLD:
+                signals["keyword_scan"]["noise"] = True
+                noise_count += 1
+
+        # --- Signal 3: Non-fit pattern scan ---
+        nb = self.brief_obj._new_brief
+        nf_examples: list[str] = []
+        if nb is not None:
+            for nf in nb.non_fit_patterns:
+                nf_examples.extend(ex.lower() for ex in nf.examples)
+        else:
+            for na in self.brief_obj.noise_archetypes:
+                nf_examples.extend(s.lower() for s in na.get("signals", []))
+
+        if nf_examples:
+            nf_matches = 0
+            for s in snippets:
+                text = " ".join([
+                    s.headline or "",
+                    s.current_title or "",
+                    " ".join(s.experience_entries),
+                ]).lower()
+                if any(ex in text for ex in nf_examples):
+                    nf_matches += 1
+            nf_ratio = nf_matches / len(snippets) if snippets else 0
+            signals["non_fit_scan"] = {
+                "matches": nf_matches,
+                "total": len(snippets),
+                "ratio": round(nf_ratio, 2),
+            }
+            if nf_ratio > 0.5:
+                signals["non_fit_scan"]["noise"] = True
+                noise_count += 1
+
+        # --- Decision ---
+        if noise_count >= 3:
+            titles_summary = ", ".join(
+                f"{f} ({c})" for f, c in sorted(title_families.items(), key=lambda x: -x[1])[:5]
+            )
+            return GlanceResult(
+                action="reformulate",
+                summary=f"3/3 noise signals. Top titles: {titles_summary}. "
+                        f"0/{len(snippets)} keyword hits." if key_terms else f"3/3 noise signals. Top titles: {titles_summary}.",
+                confidence=0.9,
+                signals=signals,
+            )
+        elif noise_count == 0:
+            return GlanceResult(
+                action="proceed",
+                summary="No noise signals detected.",
+                confidence=0.95,
+                signals=signals,
+            )
+        else:
+            # 1-2 signals: use cheap LLM to disambiguate
+            llm_verdict = self._glance_llm_check(snippets, signals)
+            if llm_verdict == "noise":
+                titles_summary = ", ".join(
+                    f"{f} ({c})" for f, c in sorted(title_families.items(), key=lambda x: -x[1])[:5]
+                )
+                return GlanceResult(
+                    action="reformulate",
+                    summary=f"{noise_count}/3 noise signals + LLM confirms noise. Top titles: {titles_summary}.",
+                    confidence=0.7,
+                    signals=signals,
+                )
+            else:
+                return GlanceResult(
+                    action="proceed",
+                    summary=f"{noise_count}/3 noise signals but LLM says proceed.",
+                    confidence=0.6,
+                    signals=signals,
+                )
+
+    def _glance_llm_check(self, snippets: list[CandidateSnippet], signal_details: dict) -> str:
+        """Cheap LLM call to disambiguate ambiguous glance signals. Returns 'noise' or 'proceed'."""
+        from shared.llm_clients import cheap_llm
+
+        # Format first 10 snippets
+        snippet_lines = []
+        for s in snippets[:10]:
+            company = f" at {s.current_company}" if s.current_company else ""
+            snippet_lines.append(f"- {s.name} | {s.current_title}{company} | {s.headline}")
+        snippets_text = "\n".join(snippet_lines)
+
+        # Format signal details
+        signal_lines = []
+        for name, details in signal_details.items():
+            if details.get("noise"):
+                signal_lines.append(f"  {name}: NOISE — {details}")
+            else:
+                signal_lines.append(f"  {name}: OK — {details}")
+        signals_text = "\n".join(signal_lines)
+
+        system = f"""You are a sourcing quality checker. Decide whether a LinkedIn search results page is hitting the right population or is noise.
+
+Role: {self.brief_obj.role_title}
+{self.brief_obj.role_description}
+
+Minimum bar: {self.brief_obj.minimum_bar}
+
+Respond with ONLY the word "noise" or "proceed". Nothing else."""
+
+        user = f"""Here are the first {len(snippets[:10])} search result snippets from this page:
+{snippets_text}
+
+Automated signal analysis:
+{signals_text}
+
+Is this page mostly noise (wrong population) or does it have plausible candidates? Reply "noise" or "proceed"."""
+
+        try:
+            result = cheap_llm(system, user, expect_json=False)
+            verdict = result.strip().lower() if isinstance(result, str) else str(result).strip().lower()
+            return "noise" if "noise" in verdict else "proceed"
+        except Exception as e:
+            print(f"    [glance-llm] Error: {e} — defaulting to proceed")
+            return "proceed"
+
+    def _format_arch_context(self, architecture: str) -> str:
+        """Format architecture context for injection into _page_adapt system prompt."""
+        if not architecture:
+            return ""
+
+        # Derive expected NO range from brief calibration
+        fc = None
+        if (self.brief_obj and self.brief_obj.has_v2_schema
+                and self.brief_obj._new_brief.facial_calibration):
+            fc = self.brief_obj._new_brief.facial_calibration
+
+        if fc:
+            expected_no_low = 1.0 - fc.expected_yes_rate_high   # normal floor
+            expected_no_high = 1.0 - fc.expected_yes_rate_low    # normal ceiling
+        else:
+            expected_no_low = 0.45
+            expected_no_high = 0.75
+
+        noise_map = {
+            "sniper": "low", "dragnet": "high", "titration": "high",
+            "negative_space": "medium", "company_first": "medium", "title_first": "low",
+        }
+        noise_tol = noise_map.get(architecture, "medium")
+        if noise_tol == "high":
+            return f"""
+## Architecture: {architecture}
+High noise tolerance. Facial NO rates up to {expected_no_high:.0%} are expected and acceptable for this brief. Only abandon if there is ZERO signal (no saves AND no facial_yes across multiple pages). Paginate through noise."""
+        elif noise_tol == "low":
+            return f"""
+## Architecture: {architecture}
+Low noise tolerance. Facial NO rates above {expected_no_high:.0%} suggest the string needs narrowing. Be aggressive about stopping unproductive strings."""
+        else:
+            return f"""
+## Architecture: {architecture}
+Medium noise tolerance. Facial NO rates between {expected_no_low:.0%} and {expected_no_high:.0%} are normal for this brief."""
+
     async def _page_adapt(
         self,
         search_string: SearchString,
@@ -867,6 +1407,8 @@ class Pipeline:
         result_count_text: str,
         all_candidates: list[dict],
         string_stats: dict,
+        glance_summary: str | None = None,
+        architecture: str = "",
     ) -> str:
         """Two-phase adaptation: scout (page 1 of broad strings) or paginate (ongoing).
 
@@ -900,9 +1442,23 @@ class Pipeline:
         is_scout = search_string.phase == "scout"
         can_broaden = len(search_string.refinement_stack) > 0
 
+        # Derive expected NO range from brief calibration for triage awareness notes
+        fc = None
+        if (self.brief_obj and self.brief_obj.has_v2_schema
+                and self.brief_obj._new_brief.facial_calibration):
+            fc = self.brief_obj._new_brief.facial_calibration
+        if fc:
+            expected_no_low = 1.0 - fc.expected_yes_rate_high
+            expected_no_high = 1.0 - fc.expected_yes_rate_low
+        else:
+            expected_no_low = 0.45
+            expected_no_high = 0.75
+
+        triage_note = f"- IMPORTANT: Facial triage is intentionally strict — ambiguity defaults to NO. A high facial NO rate ({expected_no_low:.0%}-{expected_no_high:.0%}) is EXPECTED and normal for this brief. Only consider a string unproductive when SAVES dry up, not when facial NO is high. High facial NO + occasional saves = healthy string under strict triage."
+
         # Phase-specific action menu
         if is_scout:
-            actions_section = """Choose ONE action:
+            actions_section = f"""Choose ONE action:
 
 1. "paginate" — Page 1 shows good signal. Commit to paginating this Boolean deeper.
 2. "narrow" — Too broad/noisy. Add AND clauses to focus the search. Provide a modified Boolean that narrows from the current one.
@@ -914,7 +1470,8 @@ class Pipeline:
 - If you see 1-2 saves or strong facial YES candidates on page 1, the string has promise — paginate.
 - If page 1 is dominated by wrong-domain, wrong-seniority, or irrelevant profiles, narrow or abandon.
 - When narrowing, add AND terms to exclude the dominant noise pattern. Be specific about which terms you're adding and why.
-- Abandon is for strings where the core concept is wrong, not just noisy. Prefer narrow when the signal exists but is buried."""
+- Abandon is for strings where the core concept is wrong, not just noisy. Prefer narrow when the signal exists but is buried.
+{triage_note}"""
         else:
             broaden_text = ""
             if can_broaden:
@@ -935,7 +1492,8 @@ class Pipeline:
 - When saves or strong Facial YES appeared recently (last 1-2 pages), keep going. When both dry up for 2+ pages, stop or narrow.
 - When narrowing, prefer adding AND terms to the current Boolean rather than rewriting.
 - Broaden ONLY when a recent narrowing clearly went too far (e.g., zero results, or cut off a category of good candidates).
-- Duplicates are expected and not a problem unless >30%."""
+- Duplicates are expected and not a problem unless >30%.
+{triage_note}"""
 
         system = f"""You are a senior sourcing strategist monitoring a live LinkedIn Recruiter search.
 
@@ -951,7 +1509,7 @@ A string built from post-training vocabulary might surface a STEM reasoning engi
 Judge string productivity by total saves and facial YES rates across ALL archetypes, not just one.
 
 ## Current Phase: {"SCOUT (page 1 exploration)" if is_scout else "PAGINATE (deep pagination)"}
-
+{self._format_arch_context(architecture)}
 {actions_section}
 
 ## LinkedIn Boolean Rules (MANDATORY when writing refined Booleans)
@@ -973,13 +1531,22 @@ Return JSON only:
 ## Result Count
 {result_count_text}
 {refinement_history}
-## Accumulated Stats (across {string_stats['pages']} page(s))
+{f"""## Glance Assessment (page was NOT individually evaluated)
+This page was assessed via fast glance and found to be likely noise.
+Candidates were NOT individually evaluated — the signals are from search result snippets only.
+Glance summary: {glance_summary}
+
+Because this page was glance-skipped, the stats below reflect only previously-evaluated pages.
+This is strong evidence the current Boolean is hitting the wrong population.
+
+""" if glance_summary else ""}## Accumulated Stats (across {string_stats['pages']} page(s))
 - Candidates evaluated: {string_stats['candidates']}
 - Duplicates skipped: {string_stats['duplicates']}
 - SAVES: {string_stats['saves']}
 - REJECTS (opened profile, then rejected): {string_stats['rejects']}
 - Facial YES (opened for full review): {string_stats['facial_yes']}
 - Facial NO (skipped from preview): {string_stats['facial_no']}
+- Facial SKIP (API/parse errors): {string_stats.get('facial_skip', 0)}
 - Save rate: {string_stats['saves'] / max(string_stats['candidates'], 1) * 100:.1f}%
 
 ## All Candidates So Far
@@ -1020,6 +1587,82 @@ What next?"""
             print(f"  [adapt] Adaptation call failed ({e}) — continuing.")
             return "continue" if not is_scout else "paginate"
 
+    async def _force_narrow_adapt(
+        self,
+        search_string: SearchString,
+        current_boolean: str,
+        result_count_text: str,
+        all_candidates: list[dict],
+        string_stats: dict,
+    ) -> str | None:
+        """Called when abandon/stop is blocked by min-pages. Forces Opus to attempt a narrow.
+
+        Returns:
+            "narrow:<boolean>" if Opus provides a narrowed Boolean, None if it can't.
+        """
+        from shared.llm_clients import opus_llm
+
+        candidate_lines = []
+        for c in all_candidates:
+            candidate_lines.append(
+                f"  p{c['page']} | {c['outcome']:10s} | {c['name']} | {c['title']} at {c['company']} | {c['rationale'][:80]}"
+            )
+        candidates_text = "\n".join(candidate_lines)
+
+        system = f"""You are a senior sourcing strategist. Your previous recommendation to abandon this search was blocked because minimum pagination requirements haven't been met.
+
+Role: {self.brief_obj.role_title}
+{self.brief_obj.role_description}
+
+## Minimum Bar
+{self.brief_obj.minimum_bar}
+
+## Your task
+Instead of abandoning, you MUST provide a narrowed Boolean that filters out the dominant noise pattern. The current string has {result_count_text} results — there may be signal buried under noise if you add the right AND clauses.
+
+Analyze the candidate outcomes below and identify the dominant noise pattern (wrong domain? wrong seniority? wrong function?). Then add AND terms to exclude that noise.
+
+## LinkedIn Boolean Rules (MANDATORY)
+- LinkedIn does NOT stem: "model" ≠ "models" — include all morphological variants
+- LinkedIn IS substring-embedded: "reward model" matches "reward model development"
+- LinkedIn IS case-insensitive
+- Bare ambiguous terms MUST be qualified
+
+Return JSON:
+- "action": must be "narrow"
+- "rationale": What noise pattern you identified and what AND terms you're adding to exclude it
+- "refined_boolean": The narrowed Boolean string"""
+
+        user_prompt = f"""## Current Boolean
+{current_boolean}
+
+## Result Count
+{result_count_text}
+
+## Stats ({string_stats['pages']} pages)
+- Candidates: {string_stats['candidates']} | Saves: {string_stats['saves']} | Facial YES: {string_stats['facial_yes']} | Facial NO: {string_stats['facial_no']}
+
+## Candidates
+{candidates_text}
+
+Provide a narrowed Boolean."""
+
+        try:
+            result = opus_llm(system, user_prompt, expect_json=True)
+            new_boolean = result.get("refined_boolean", "")
+            rationale = result.get("rationale", "")
+            if new_boolean:
+                print(f"  [adapt] Forced narrow: {rationale}")
+                log_event(self.log_path, "forced_narrow", string_id=search_string.id,
+                          rationale=rationale, new_boolean=new_boolean[:100])
+                return f"narrow:{new_boolean}"
+            else:
+                print(f"  [adapt] Forced narrow returned no Boolean — honoring abandon.")
+                return None
+        except Exception as e:
+            print(f"  [adapt] Forced narrow failed ({e}) — honoring abandon.")
+            return None
+
     async def _evaluate_snippet(
         self, snippet: CandidateSnippet, page_report: _PageReport | None = None,
     ) -> Optional[OpusDecision]:
@@ -1044,18 +1687,26 @@ What next?"""
         # --- Facial judgment (Opus) ---
         print(f"    Facial judgment (Opus)...")
         try:
-            facial = facial_judge(snippet, self.brief_obj)
+            facial = facial_judge(snippet, self.brief_obj, prompt_prefix=self._tightening_prefix)
         except Exception as e:
             print(f"    [ERROR] Facial judgment failed: {e}")
             log_event(self.log_path, "facial_error", name=snippet.name, error=str(e))
-            # Fallback: default to FACIAL_YES so candidate isn't permanently lost
             facial = OpusDecision(
-                stage="facial", decision="FACIAL_YES", path="none", confidence=0.0,
-                rationale=f"[API error fallback — defaulting to YES] {str(e)[:100]}",
+                stage="facial", decision="FACIAL_SKIP", path="none", confidence=0.0,
+                rationale=f"[API error — skipping candidate] {str(e)[:100]}",
                 candidate_name=snippet.name, profile_url=snippet.profile_url,
             )
 
         append_jsonl(self.facial_path, facial.to_dict())
+
+        # Append to cross-session history
+        append_jsonl(self.history_path, {
+            "profile_url": snippet.profile_url,
+            "candidate_name": snippet.name,
+            "outcome": facial.decision,
+            "confidence": facial.confidence,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
 
         # Record facial decision for bias monitoring
         if self._bias_monitor:
@@ -1067,12 +1718,33 @@ What next?"""
                 confidence=facial.confidence,
                 capability_area=None,
             ))
+            # Check if triage should be tightened for this string
+            if not self._triage_tightened:
+                tightening = self._bias_monitor.get_tightening_status(str(snippet.source_string_id))
+                if tightening:
+                    self._triage_tightened = True
+                    self._tightening_prefix = (
+                        f"⚠ TRIAGE TIGHTENING ACTIVE: The facial YES rate on this search string is running "
+                        f"{tightening['actual_rate']:.0%}, which is {tightening['multiplier']:.1f}x above the expected "
+                        f"maximum of {tightening['expected_high']:.0%}. Apply stricter filtering: require TWO strong "
+                        f"positive signals for FACIAL_YES instead of one. Generic seniority + AI keywords is insufficient. "
+                        f"Example of insufficient: 'VP of Digital Transformation at Accenture' — senior title + consulting firm "
+                        f"mentioning AI, but no specific ML/data work visible. Example of sufficient: 'ML Engineer at DeepMind' "
+                        f"+ 'Research Scientist at Google Brain' — two positions with direct capability area connections.\n\n"
+                    )
+                    print(f"    [bias] Tightening facial criteria for remaining candidates on this string "
+                          f"(YES rate: {tightening['actual_rate']:.0%}, expected max: {tightening['expected_high']:.0%})")
 
-        if facial.decision == "FACIAL_NO":
-            print(f"    [FACIAL_NO] {facial.rationale}")
-            self.stats["facial_no"] += 1
+        if facial.decision in ("FACIAL_NO", "FACIAL_SKIP"):
+            tag = "FACIAL_NO" if facial.decision == "FACIAL_NO" else "FACIAL_SKIP"
+            print(f"    [{tag}] {facial.rationale}")
+            if facial.decision == "FACIAL_NO":
+                self.stats["facial_no"] += 1
+            else:
+                self.stats.setdefault("facial_skip", 0)
+                self.stats["facial_skip"] += 1
             if page_report:
-                page_report.add_skip_preview(snippet.name, f"FACIAL_NO: {facial.rationale}")
+                page_report.add_skip_preview(snippet.name, f"{tag}: {facial.rationale}")
             return facial
 
         print(f"    [FACIAL_YES] {facial.rationale}")
@@ -1097,6 +1769,8 @@ What next?"""
                 try:
                     await self.browser.open_profile_by_url(snippet.profile_url)
                     opened = True
+                except GovernorLimitReached:
+                    raise
                 except Exception as url_err:
                     print(f"    [warn] URL-based open failed ({url_err}), falling back to name match...")
             if not opened:
@@ -1109,6 +1783,8 @@ What next?"""
             summary = extract_profile_from_dom(profile_text, snippet.profile_url)
             append_jsonl(self.profiles_path, summary.to_dict())
 
+        except GovernorLimitReached:
+            raise
         except Exception as e:
             print(f"    [ERROR] Profile extraction failed: {e}")
             log_event(self.log_path, "profile_error", name=snippet.name, error=str(e))
@@ -1132,6 +1808,16 @@ What next?"""
             return facial
 
         append_jsonl(self.final_path, final.to_dict())
+
+        # Append to cross-session history (overwrites facial entry conceptually — dict keyed by URL)
+        append_jsonl(self.history_path, {
+            "profile_url": snippet.profile_url,
+            "candidate_name": snippet.name,
+            "outcome": final.decision,
+            "confidence": final.confidence,
+            "capability_area": final.path if final.path != "none" else "",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
 
         # Record full eval decision and check bias alerts
         if self._bias_monitor:
@@ -1161,22 +1847,39 @@ What next?"""
         if final.decision in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"):
             tag = final.decision if final.decision in ("INFERENTIAL_SAVE", "TRANSFERABLE_SAVE") else "SAVE"
             print(f"    [{tag}] {final.rationale}")
-            self.stats["saved"] += 1
+            self.stats["save_attempts"] += 1
 
             if not self.test_mode:
-                already_saved = await self.browser.is_already_saved()
-                if already_saved:
-                    print(f"    Already in LinkedIn pipeline (skipping save click)")
+                profile_url = getattr(snippet, "profile_url", None) or ""
+                if profile_url in self._saved_urls:
+                    print(f"    Already saved this session (skipping duplicate)")
                     saved = True
                 else:
-                    saved = await self.browser.save_candidate()
-                    if saved:
-                        print(f"    Saved to LinkedIn pipeline")
+                    already_saved = await self.browser.is_already_saved()
+                    if already_saved:
+                        print(f"    Already in LinkedIn pipeline (skipping save click)")
+                        saved = True
                     else:
-                        print(f"    [warn] LinkedIn save may have failed")
-                    # Post-save pause — simulate the decision moment
-                    await asyncio.sleep(human_delay_correlated(3.0))
+                        saved = await self.browser.save_candidate()
+                        if saved:
+                            print(f"    Saved to LinkedIn pipeline")
+                            self._saved_urls.add(profile_url)
+                        else:
+                            print(f"    [warn] LinkedIn save may have failed")
+                        # Post-save linger — scroll back and re-read like a recruiter who just saved
+                        linger = max(4.0, min(15.0, human_delay_correlated(8.0)))
+                        chunks_back = random.randint(1, 3)
+                        px = await self.browser.scroll_for_linger(chunks_back)
+                        await asyncio.sleep(linger)
+                        print(f"    [profile-read] SAVE verdict → lingering {linger:.1f}s, scrolled back {chunks_back} chunks")
+                        await self.browser.scroll_restore(px)
+                if saved:
+                    self.stats["saved"] += 1
                 log_event(self.log_path, "candidate_saved", name=snippet.name, linkedin_save=saved)
+
+            else:
+                # test_mode: count decision as saved (no browser interaction)
+                self.stats["saved"] += 1
 
             if page_report:
                 page_report.add_saved(snippet, final)
@@ -1185,6 +1888,10 @@ What next?"""
             self.stats["rejected"] += 1
             if page_report:
                 page_report.add_skipped_opened(snippet, final)
+            # Quick exit — saw enough, moving on
+            reject_dwell = max(0.2, min(2.0, human_delay_correlated(0.5)))
+            await asyncio.sleep(reject_dwell)
+            print(f"    [profile-read] REJECT verdict → closing in {reject_dwell:.1f}s")
 
         try:
             await self.browser.go_back_to_results()
@@ -1260,6 +1967,34 @@ What next?"""
         return ordered
 
     # ------------------------------------------------------------------
+    # Block aggregate statistics (for architecture evaluation)
+    # ------------------------------------------------------------------
+
+    def _compute_block_aggregate(self, block_strings: list[SearchString]) -> str:
+        """Compute cross-string aggregate statistics for architecture evaluation."""
+        total_facial_no = sum(s.facial_no_count for s in block_strings)
+        total_facial_yes = sum(s.facial_yes_count for s in block_strings)
+        total_seen = total_facial_no + total_facial_yes
+        total_saves = sum(len(s.saves) for s in block_strings)
+
+        facial_no_rate = total_facial_no / total_seen if total_seen else 0
+        save_rate = total_saves / total_facial_yes if total_facial_yes else 0
+
+        strings_below_20 = sum(1 for s in block_strings if s.result_count < 20)
+
+        lines = [
+            "## Block Aggregate Statistics",
+            f"- Candidates seen (facial triage): {total_seen}",
+            f"- Passed facial triage: {total_facial_yes}",
+            f"- Facial NO rate: {facial_no_rate:.1%}",
+            f"- Saves: {total_saves}",
+            f"- Save rate (per evaluated): {save_rate:.1%}",
+            f"- Strings with <20 results: {strings_below_20}/{len(block_strings)}",
+        ]
+
+        return "\n".join(lines)
+
+    # ------------------------------------------------------------------
     # Full run: block-level adaptation
     # ------------------------------------------------------------------
 
@@ -1293,6 +2028,22 @@ What next?"""
                 for s in sorted(strings_with_saves, key=lambda x: len(x.saves), reverse=True)[:3]
             ],
             zero_save_string_ids=[s.id for s in block_strings if not s.saves],
+            string_details=[
+                {
+                    "string_id": s.id,
+                    "name": s.name,
+                    "boolean": s.boolean,
+                    "original_boolean": s.original_boolean or s.boolean,
+                    "result_count": s.result_count,
+                    "pages_reviewed": s.pages_reviewed,
+                    "saves": len(s.saves),
+                    "save_names": s.saves[:5],
+                    "facial_yes": s.facial_yes_count,
+                    "facial_no": s.facial_no_count,
+                    "notes": s.notes,
+                }
+                for s in block_strings
+            ],
         )
 
         print(f"  {report.to_summary_text()}")
@@ -1305,9 +2056,14 @@ What next?"""
             return
 
         try:
+            block_aggregate = self._compute_block_aggregate(block_strings)
+
             adaptation = adapt_fn(
                 self.brief_obj, report, remaining,
                 kit_vocabulary=self._kit_strings,
+                execution_plan=self._execution_plan,
+                pivot_count=progress.pivot_count,
+                block_aggregate=block_aggregate,
             )
 
             # Apply adaptations
@@ -1321,6 +2077,11 @@ What next?"""
 
             if adaptation.new_strings:
                 max_id = max(s.id for s in progress.strings) if progress.strings else 0
+                # Insert adaptive strings at front of queue (before first queued string)
+                insert_idx = next(
+                    (i for i, s in enumerate(progress.strings) if s.status == "queued"),
+                    len(progress.strings),
+                )
                 for ns in adaptation.new_strings:
                     max_id += 1
                     new_ss = SearchString(
@@ -1330,8 +2091,9 @@ What next?"""
                         block=block_name,
                         string_type="Adaptive",
                     )
-                    progress.strings.append(new_ss)
-                    print(f"    [adapt] Added new string #{max_id}: {ns['boolean'][:60]}...")
+                    progress.strings.insert(insert_idx, new_ss)
+                    insert_idx += 1
+                    print(f"    [adapt] Inserted new string #{max_id} (next in queue): {ns['boolean'][:60]}...")
 
             if adaptation.reorder:
                 for ro in adaptation.reorder:
@@ -1355,6 +2117,48 @@ What next?"""
             if adaptation.noise_updates:
                 for nu in adaptation.noise_updates:
                     print(f"    [adapt] Noise update: {nu['term']} → {nu['status']}: {nu.get('note', '')}")
+                    if nu['status'] in ("confirmed_noise", "confirmed_signal"):
+                        append_jsonl(self.noise_path, {
+                            "term": nu.get("term", ""),
+                            "status": nu["status"],
+                            "note": nu.get("note", ""),
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+
+            # Architecture pivot handling
+            if adaptation.pivot_to_architecture:
+                # Titration gets 2 pivots (recon-then-commit is its design), others get 1
+                max_pivots = 2 if (self._execution_plan and
+                                   self._execution_plan.original_architecture == "titration") else 1
+
+                if progress.pivot_count < max_pivots:
+                    old_arch = self._execution_plan.architecture if self._execution_plan else "unknown"
+                    new_arch = adaptation.pivot_to_architecture
+                    print(f"\n  {'!' * 40}")
+                    print(f"  ARCHITECTURE PIVOT: {old_arch} → {new_arch}")
+                    print(f"  Rationale: {adaptation.pivot_rationale}")
+                    print(f"  {'!' * 40}")
+
+                    if self._execution_plan:
+                        self._execution_plan.architecture = new_arch
+                        self._execution_plan.architecture_rationale = adaptation.pivot_rationale
+                        write_json(self.output_dir / "execution_plan.json", self._execution_plan.to_dict())
+
+                    # Clear remaining queued strings (new_strings already injected above)
+                    for ss in progress.strings:
+                        if ss.status == "queued":
+                            ss.status = "skipped"
+                            ss.notes = f"Skipped by architecture pivot: {old_arch} → {new_arch}"
+
+                    progress.pivot_count += 1
+                    log_event(self.log_path, "architecture_pivot",
+                              old=old_arch, new=new_arch,
+                              rationale=adaptation.pivot_rationale, block=block_name)
+                else:
+                    print(f"  [adapt] Pivot to {adaptation.pivot_to_architecture} recommended "
+                          f"but max pivots ({max_pivots}) reached — ignoring.")
+                    log_event(self.log_path, "pivot_blocked", reason="max_pivots_reached",
+                              recommended=adaptation.pivot_to_architecture)
 
             progress.save(str(self.progress_path))
             log_event(self.log_path, "block_adaptation", block=block_name, report=report.to_dict())
@@ -1441,13 +2245,30 @@ What next?"""
 
     def _archive_stale_outputs(self) -> None:
         """Rename existing output JSONL files to timestamped backups before a fresh run."""
-        from datetime import datetime
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
         for path in [self.snippets_path, self.facial_path, self.profiles_path, self.final_path]:
             if path.exists() and path.stat().st_size > 0:
                 backup = path.with_name(f"{path.stem}-{ts}{path.suffix}")
                 path.rename(backup)
                 print(f"  Archived {path.name} → {backup.name}")
+
+        # Prune old archives (keep last 5)
+        for stem in ["snippets", "facial_judgments", "profile_summaries", "final_judgments"]:
+            self._prune_old_archives(stem)
+
+    def _prune_old_archives(self, stem: str, keep: int = 5) -> None:
+        """Keep only the N most recent archived versions of a file."""
+        pattern = list(self.output_dir.glob(f"{stem}-*.jsonl"))
+        # Exclude brief-scoped persistent files (candidate_history-*, noise_discoveries-*, bias_monitor-*)
+        archives = sorted(
+            [p for p in pattern if not any(p.stem.startswith(pref) for pref in
+             ("candidate_history", "noise_discoveries", "bias_monitor"))],
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for old_file in archives[keep:]:
+            old_file.unlink()
+            print(f"  [cleanup] Removed old archive: {old_file.name}")
 
     # ------------------------------------------------------------------
     # String restart
@@ -1470,7 +2291,7 @@ What next?"""
 
         # 1. Reset the string in progress
         target.status = "queued"
-        target.pages_reviewed = 0
+        target.pages_reviewed = 1
         target.phase = "scout"
         target.saves = []
         target.notes = ""
@@ -1589,6 +2410,8 @@ What next?"""
         print(f"  Facial YES:          {self.stats['facial_yes']}")
         print(f"  Facial NO:           {self.stats['facial_no']}")
         print(f"  SAVED:               {self.stats['saved']}")
+        if self.stats.get("save_attempts", 0) != self.stats["saved"]:
+            print(f"  Save attempts:       {self.stats['save_attempts']}")
         print(f"  REJECTED:            {self.stats['rejected']}")
         if self._bias_monitor:
             summary = self._bias_monitor.session_summary()
@@ -1728,7 +2551,7 @@ Write the debrief report."""
             report_path.write_text(report)
             print(f"\n{report}")
             print(f"\n  Report saved to: {report_path}")
-            log_event(self.log_path, "run_report_generated", path=str(report_path))
+            log_event(self.log_path, "run_report_generated", report_path=str(report_path))
         except Exception as e:
             print(f"  [warn] Report generation failed: {e}")
 

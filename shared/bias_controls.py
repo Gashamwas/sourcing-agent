@@ -287,7 +287,7 @@ class BiasMonitor:
 
         facial_decisions = [
             d for d in self._per_string.get(string_id, [])
-            if d.stage == "facial"
+            if d.stage == "facial" and d.decision != "FACIAL_SKIP"
         ]
 
         if len(facial_decisions) < 10:  # Need enough samples
@@ -323,6 +323,29 @@ class BiasMonitor:
                 data={"yes_rate": yes_rate, "yes_count": yes_count, "total": len(facial_decisions)},
             )]
         return []
+
+    # --- Triage tightening ---
+
+    def get_tightening_status(self, string_id: str) -> dict | None:
+        """Check if triage should be tightened for this string.
+        Returns dict with rate info if tightening needed, else None.
+        """
+        facial_decisions = [
+            d for d in self._per_string.get(string_id, [])
+            if d.stage == "facial" and d.decision != "FACIAL_SKIP"
+        ]
+        if len(facial_decisions) < 10:
+            return None
+        yes_count = sum(1 for d in facial_decisions if d.decision == "FACIAL_YES")
+        yes_rate = yes_count / len(facial_decisions)
+        threshold = self.expected_facial_yes_high * 2
+        if yes_rate > threshold:
+            return {
+                "actual_rate": yes_rate,
+                "expected_high": self.expected_facial_yes_high,
+                "multiplier": yes_rate / self.expected_facial_yes_high,
+            }
+        return None
 
     # --- Session diagnostics ---
 

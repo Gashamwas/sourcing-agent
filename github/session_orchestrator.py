@@ -127,12 +127,12 @@ async def run_day_cycle(
             _print(f"Session error: {e}")
             stats = {"saved": 0, "enrichments": 0}
 
-        # End session
-        summary = governor.end_session()
+        # End session — use stats from the pipeline (governor in session_orchestrator
+        # doesn't track enrichments; the pipeline's internal governor does)
         record_session_end(
             session_num,
-            enrichments=summary.get("enrichments_session", 0),
-            reason=summary.get("shutdown_reason", "normal"),
+            enrichments=stats.get("candidates_enriched", 0),
+            reason="normal",
             stats=stats,
         )
         _print(f"Session {session_num} complete: {stats.get('saved', 0)} saves")

@@ -1,0 +1,39 @@
+About Turing
+
+Based in San Francisco, California, Turing is the world's leading research accelerator for frontier AI labs and a trusted partner for global enterprises looking to deploy advanced AI systems. Turing accelerates frontier research with high-quality data, specialized talent, and training pipelines that advance thinking, reasoning, coding, multimodality, and STEM. For enterprises, Turing builds proprietary intelligence systems that integrate AI into mission-critical workflows, unlock transformative outcomes, and drive lasting competitive advantage.
+
+Recognized by Forbes, The Information, and Fast Company among the world's top innovators, Turing's leadership team includes AI technologists from Meta, Google, Microsoft, Apple, Amazon, McKinsey, Bain, Stanford, Caltech, and MIT. Learn more at www.turing.com
+
+About the role
+
+Turing is building the next generation of enterprise AI, and this role sits at the center of that mission. You will define how some of the world's largest companies harness emerging technologies to reimagine their operations, products, and workforce productivity.
+
+This is technical focused role, on both strategic level and hands-on detailed level. You will be partner with the Head of AI Business, to set a technical vision for how AI systems can create lasting enterprise value, while also guiding teams through the complexity of turning that vision into real-world applications. The role requires the judgment to engage credibly with senior executives, the technical depth to drive architectural decisions, and the leadership to scale teams working at the frontier of applied AI.
+
+You will thrive here if you are a hand-on AI technologist with your opinionated vision on what the future of AI enterprise applications would be. You also need to navigate ambiguity, inspire confidence in high-stakes client environments, and build organizations that balance speed with rigor. The impact of your work will be measured not only in successful deployments, but also in the common architecture you inspire, in the lasting trust you create with clients and in the new possibilities you open for how enterprises compete and grow in the era of AI.
+
+Responsibilities
+
+- Lead the technology direction and execution of Turing's Generative AI practice, ensuring the execution of high-impact programs with enterprise clients.
+- Interact with clients to ideate and design AI solutions to help solve enterprise problems
+- Own the oversight for design, build and deployment of GenAI-powered applications, including agentic systems, copilots, reasoning workflows, and enterprise orchestration frameworks.
+- Lead and manage Generative AI and Forward-Deployed Engineering teams, ensuring delivery excellence and clear growth opportunities while staying closely engaged in critical program and design decisions.
+- Build trusted partnerships with senior enterprise stakeholders, shaping program objectives and aligning with their business transformation and productivity goals.
+- Define and enforce rigorous engineering standards, methodologies, and quality management processes to ensure reliability, scalability, and security across enterprise GenAI applications.
+- Translate engineering & delivery experience into repeatable playbooks and common product infrastructure that establish Turing as a trusted partner for deploying applied GenAI solutions at speed and at scale.
+- Partner with commercial teams to scope, shape, and resource programs, ensuring engineering capability scales with client demand.
+- Act as the accountable executive for engineering & delivery excellence in Generative AI applications, representing Turing with credibility and authority to senior external stakeholders.
+
+Requirements
+
+- 15+ years of experience in the engineering & delivery of technology services, with at least 5 years leading large-scale, client-facing engineering or applied AI practices.
+- Prior accountability for delivery outcomes at enterprise scale — budgets, teams, and programs spanning multiple regions or business units.
+- Deep and hands-on expertise in applied GenAI systems, e.g. agentic workflows, copilots, multimodal integration, orchestration frameworks, and enterprise deployment.
+- Proven record of building and managing senior technical teams (including engineering managers, architects, and data leaders).
+- Track record of working directly with C-level stakeholders in Fortune 500 or equivalent enterprises
+- Experience shaping consulting-style or services-led programs where delivery quality and client satisfaction were the growth drivers.
+- Strong business acumen and the ability to balance delivery excellence with commercial growth priorities.
+- Demonstrated ability to scale operations while preserving technical depth and client intimacy.
+- Exceptional communication skills and credibility in executive-level interactions with enterprise clients, internal leadership, and external partners.
+- Background in Computer Science, Data Science or relevant field, with a strong preference for advanced degrees and/or recognized thought leadership in AI, demonstrated through patents, publications, industry awards, or equivalent credentials.
+- You are currently based in or willing to relocate to New York City - this is a non-negotiable requirement

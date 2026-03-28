@@ -17,15 +17,17 @@ Usage:
 import argparse
 import asyncio
 import math
+import os
 import random
 import signal
 import sys
 import time
 from pathlib import Path
 
+os.environ.setdefault("AGENT_KEY_PREFIX", "LINKEDIN")
 from shared import config
 from shared import cooldown
-from shared.governor import SessionGovernor, SessionExpired, GovernorLimitReached, MAX_SESSIONS_PER_DAY
+from shared.governor import SessionGovernor, SessionExpired, GovernorLimitReached, MAX_PROFILE_OPENS_PER_24H
 from decoy.agent import DecoyAgent
 from decoy.scheduler import BurstScheduler
 from shared.human_timing import human_delay
@@ -36,18 +38,11 @@ from shared.human_timing import human_delay
 # ──────────────────────────────────────────────────────────────────────
 
 def _sample_session_duration() -> float:
-    """Log-normal session duration: median ~2h, range 1.5-3h (in seconds)."""
-    # mu=7.6, sigma=0.3 in log-seconds → exp(7.6) ≈ 2000s ≈ 33 min
-    # But spec says median ~2h = 7200s, so log(7200) ≈ 8.88
-    # The spec says mu=7.6 gives "median ~2 hours" — this means the raw sample
-    # is treated directly as seconds: exp(7.6) ≈ 1998s. That's ~33 min, not 2h.
-    # Re-interpreting: mu=7.6 means log(seconds), so median = exp(7.6) = 1998s ≈ 33 min.
-    # For median ~2h: log(7200) = 8.88. Let's use what makes the spec work:
-    # "median ~2 hours, range 1.5-3 hours" → log(7200)=8.88, sigma=0.3
-    mu = math.log(7200)  # 2 hours in seconds
-    sigma = 0.3
+    """Log-normal session duration: median ~4h, range 3.5-5h (in seconds)."""
+    mu = math.log(14400)  # 4 hours in seconds
+    sigma = 0.12
     raw = math.exp(mu + sigma * random.gauss(0, 1))
-    return max(5400, min(10800, raw))  # Clamp 1.5h - 3h
+    return max(12600, min(18000, raw))  # Clamp 3.5h - 5h
 
 
 def _sample_dormant_duration() -> float:
@@ -281,10 +276,10 @@ async def run_day_cycle(
 
     while not stop_event.is_set():
         # Pre-session checks
-        can_start, reason = governor.can_start_session()
+        can_start, reason = governor.can_start_session(session_type="linkedin_sourcing")
         if not can_start:
             _print_governor(f"Cannot start session: {reason}")
-            # If time window is closed, we're done for the day
+            # If time window is closed or session cap hit, we're done for the day
             if "time-of-day" in reason.lower() or "session cap" in reason.lower():
                 break
             # If 24h cap, run decoy until budget refreshes or window closes
@@ -293,8 +288,8 @@ async def run_day_cycle(
             continue
 
         session_num += 1
-        session_id = cooldown.record_session_start()
-        opens_remaining = 400 - cooldown.get_profile_opens_24h()
+        session_id = cooldown.record_session_start(session_type="linkedin_sourcing")
+        opens_remaining = MAX_PROFILE_OPENS_PER_24H - cooldown.get_profile_opens_24h()
         session_duration = _sample_session_duration()
 
         _print_governor(
@@ -341,7 +336,7 @@ async def run_day_cycle(
             break
 
         # Check if we can do another session
-        can_continue, reason = governor.can_start_session()
+        can_continue, reason = governor.can_start_session(session_type="linkedin_sourcing")
         if not can_continue:
             _print_governor(f"No more sessions available: {reason}")
             break

@@ -16,6 +16,7 @@ import sys
 from typing import Optional
 
 from github.schemas import GitHubSearchQuery, GitHubBatchReport
+from github.query_validator import validate_batch
 from shared.llm_clients import opus_llm
 from shared.brief_loader import Brief
 import github.config as gc
@@ -30,22 +31,24 @@ def form_github_strategy(
     prior_run_data: Optional[dict] = None,
     include_default_repos: bool = True,
     include_default_orgs: bool = True,
-) -> list[GitHubSearchQuery]:
+) -> tuple[list[GitHubSearchQuery], str]:
     """Ask Opus to generate GitHub search queries from the sourcing brief.
 
-    Returns a list of GitHubSearchQuery objects ready for execution.
+    Returns (queries, rationale) tuple.
     """
     system = _build_strategy_system(brief)
     user_prompt = _build_strategy_user(brief, prior_run_data)
 
-    print("  Strategizing... (Opus is generating GitHub search queries)")
     try:
         result = opus_llm(system, user_prompt, expect_json=True, max_tokens=16384)
     except Exception as e:
-        print(f"  [warn] GitHub strategy formation failed ({e})", file=sys.stderr)
-        return _default_queries(brief, include_default_repos, include_default_orgs)
+        return _default_queries(brief, include_default_repos, include_default_orgs), f"Fallback: {e}"
 
+    rationale = result.get("strategy_rationale", "")
     queries = _parse_strategy_response(result)
+
+    # Validate and repair LLM-generated queries
+    queries, _validation_results = validate_batch(queries, brief, set())
 
     # Append default repo mining and org exploration queries if configured
     next_id = max((q.id for q in queries), default=0) + 1
@@ -82,8 +85,7 @@ def form_github_strategy(
         ))
         next_id += 1
 
-    print(f"  Strategy complete: {len(queries)} queries generated.")
-    return queries
+    return queries, rationale
 
 
 def _build_strategy_system(brief: Brief) -> str:
@@ -393,25 +395,70 @@ def adapt_after_batch(
     brief: Brief,
     batch_report: GitHubBatchReport,
     remaining_queries: list[GitHubSearchQuery],
-) -> list[GitHubSearchQuery]:
+    executed_queries: set[str] | None = None,
+    exhaustion_context: str = "",
+) -> tuple[list[GitHubSearchQuery], str, list[int]]:
     """Ask Opus to adapt after a batch of queries — generate new queries from results.
 
-    Returns new GitHubSearchQuery objects to add to the queue.
+    Returns (new_queries, rationale, skipped_ids) tuple.
     """
+    geo = brief.permanent_filters.get("Location", "")
+    geo_constraint = ""
+    if geo:
+        geo_constraint = f"""
+GEOGRAPHY CONSTRAINT: This search is restricted to {geo}. ALL new user_search queries MUST include 'location:{geo}' in the query string. Do NOT generate queries targeting other geographies (India, Europe, etc.). Code search, repo mining, stargazer mining, and topic search are global by design — the geo filter is applied post-hoc — but user_search queries MUST be geo-scoped."""
+
+    exhaustion_section = ""
+    if exhaustion_context:
+        exhaustion_section = f"""
+
+## Channel Exhaustion Status
+{exhaustion_context}
+
+Do NOT generate new queries for EXHAUSTED channels. For DEGRADED channels,
+only generate queries that meaningfully differ from previous attempts."""
+
     system = f"""You are a sourcing strategist adapting a GitHub search plan mid-run.
 
 Role: {brief.role_title}
 {brief.role_description}
+{geo_constraint}
 
 You've received a report on a batch of completed GitHub searches. Based on the results:
 1. Generate NEW GitHub search queries that target signal patterns you observed
 2. Identify remaining queued queries to skip (redundant or similar to zero-save queries)
+
+## CRITICAL: GitHub Search API Syntax
+
+Every query you generate must be a valid GitHub search API `q` parameter string,
+NOT a natural language description.
+
+### Valid user_search examples:
+- `language:python location:Brazil followers:>50`
+- `"reinforcement learning" location:Brazil language:python`
+- `language:rust location:"São Paulo" repos:>10`
+- `"RLHF" location:Brazil followers:20..100`
+
+### INVALID user_search examples (DO NOT generate these):
+- `ML ultra-low followers highly active Brazil` ← natural language, not API syntax
+- `experienced Python developers in São Paulo` ← no qualifiers
+- `ML exact pattern that saved v3` ← meta-description, not a query
+
+### Valid code_search examples:
+- `"from trl import" language:python`
+- `"PPOTrainer" extension:py`
+- `"reward_model" "train" language:python`
+
+### Valid topic_search examples:
+- `topic:reinforcement-learning language:python stars:>20`
+- `topic:rlhf pushed:>2024-01-01`
 
 Focus on:
 - Queries that produced saves → generate adjacent/deeper queries in the same vein
 - Languages and repos common in saved candidates → mine those repos, search those language+topic combos
 - Queries that hit the 1,000 result cap → suggest narrower segmentations
 - Zero-save queries → avoid similar patterns
+{exhaustion_section}
 
 Return JSON:
 {{
@@ -446,8 +493,7 @@ Suggest adaptations."""
     try:
         result = opus_llm(system, user_prompt, expect_json=True)
     except Exception as e:
-        print(f"  [warn] GitHub adaptation failed ({e})", file=sys.stderr)
-        return []
+        return [], f"Adaptation failed: {e}", []
 
     # Parse new queries
     new_queries = []
@@ -500,14 +546,21 @@ Suggest adaptations."""
         ))
         next_id += 1
 
+    # Cap adaptation output at 10 queries per cycle
+    if len(new_queries) > 10:
+        new_queries = new_queries[:10]
+
+    # Validate adapted queries
+    new_queries, _validation_results = validate_batch(
+        new_queries, brief, executed_queries or set()
+    )
+
     # Mark skipped queries
-    skip_ids = set(result.get("skip_query_ids", []))
+    skip_ids = list(result.get("skip_query_ids", []))
     for q in remaining_queries:
-        if q.id in skip_ids:
+        if q.id in set(skip_ids):
             q.status = "skipped"
             q.notes = "Skipped by adaptation"
 
-    if new_queries:
-        print(f"  Adaptation: +{len(new_queries)} new queries, {len(skip_ids)} skipped")
-
-    return new_queries
+    rationale = result.get("rationale", "")
+    return new_queries, rationale, skip_ids
