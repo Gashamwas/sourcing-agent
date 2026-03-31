@@ -16,6 +16,7 @@ Usage:
 
 import argparse
 import asyncio
+import json
 import math
 import os
 import random
@@ -27,7 +28,14 @@ from pathlib import Path
 os.environ.setdefault("AGENT_KEY_PREFIX", "LINKEDIN")
 from shared import config
 from shared import cooldown
-from shared.governor import SessionGovernor, SessionExpired, GovernorLimitReached, MAX_PROFILE_OPENS_PER_24H
+from shared.console_tee import enable_console_tee
+from shared.governor import (
+    SessionGovernor,
+    SessionExpired,
+    GovernorLimitReached,
+    MAX_PROFILE_OPENS_PER_24H,
+    MAX_SESSIONS_PER_DAY,
+)
 from decoy.agent import DecoyAgent
 from decoy.scheduler import BurstScheduler
 from shared.human_timing import human_delay
@@ -65,6 +73,28 @@ def _print_decoy(msg: str):
     print(f"[decoy] {msg}", flush=True)
 
 
+def _resume_has_pending_work(output_dir: str | None) -> bool:
+    """Return True when progress.json still has queued or in-progress work.
+
+    If the file is missing or unreadable, err on the side of attempting resume.
+    """
+    progress_dir = Path(output_dir) if output_dir else config.OUTPUT_DIR
+    progress_path = progress_dir / "progress.json"
+    if not progress_path.exists():
+        return True
+
+    try:
+        progress = json.loads(progress_path.read_text())
+    except Exception:
+        return True
+
+    strings = progress.get("strings", [])
+    if not strings:
+        return False
+
+    return any(s.get("status") in {"queued", "in_progress"} for s in strings)
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Sourcing session runner
 # ──────────────────────────────────────────────────────────────────────
@@ -74,6 +104,7 @@ async def _run_sourcing_session(
     search_config: str | None,
     output_dir: str | None,
     resume: bool,
+    input_mode: str,
     governor: SessionGovernor,
     decoy: DecoyAgent,
     session_duration: float,
@@ -89,6 +120,7 @@ async def _run_sourcing_session(
         brief_path=brief_path,
         search_config_path=search_config,
         output_dir=output_dir,
+        input_mode=input_mode,
     )
 
     await pipeline.browser.connect()
@@ -235,6 +267,7 @@ async def run_day_cycle(
     brief_path: str,
     search_config: str | None,
     output_dir: str | None,
+    input_mode: str = "concurrent",
     single_session: bool = False,
     resume: bool = False,
     restart_string_id: int | None = None,
@@ -259,6 +292,10 @@ async def run_day_cycle(
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
+    if resume and not _resume_has_pending_work(output_dir):
+        _print_governor("No queued sourcing work remains in progress.json. Nothing to resume.")
+        return
+
     # Connect to browser for decoy agent
     from rebrowser_playwright.async_api import async_playwright
     pw = await async_playwright().start()
@@ -275,12 +312,16 @@ async def run_day_cycle(
     # resume is passed in from CLI; subsequent sessions always resume
 
     while not stop_event.is_set():
+        if resume and not _resume_has_pending_work(output_dir):
+            _print_governor("No queued sourcing work remains in progress.json. Stopping day cycle.")
+            break
+
         # Pre-session checks
         can_start, reason = governor.can_start_session(session_type="linkedin_sourcing")
         if not can_start:
             _print_governor(f"Cannot start session: {reason}")
-            # If time window is closed or session cap hit, we're done for the day
-            if "time-of-day" in reason.lower() or "session cap" in reason.lower():
+            # Session cap means we're done for the day.
+            if "session cap" in reason.lower():
                 break
             # If 24h cap, run decoy until budget refreshes or window closes
             _print_governor("Running decoy-only until conditions change...")
@@ -289,11 +330,12 @@ async def run_day_cycle(
 
         session_num += 1
         session_id = cooldown.record_session_start(session_type="linkedin_sourcing")
+        session_slot = cooldown.get_sessions_today(session_type="linkedin_sourcing")
         opens_remaining = MAX_PROFILE_OPENS_PER_24H - cooldown.get_profile_opens_24h()
         session_duration = _sample_session_duration()
 
         _print_governor(
-            f"Session {session_id} starting — "
+            f"Session {session_slot}/{MAX_SESSIONS_PER_DAY} starting — "
             f"{opens_remaining} profile opens remaining in 24h budget"
         )
 
@@ -306,6 +348,7 @@ async def run_day_cycle(
                 search_config=search_config,
                 output_dir=output_dir,
                 resume=resume,
+                input_mode=input_mode,
                 governor=governor,
                 decoy=decoy,
                 session_duration=session_duration,
@@ -323,7 +366,7 @@ async def run_day_cycle(
             )
 
             _print_governor(
-                f"Session {session_id} ended — "
+                f"Session {session_slot}/{MAX_SESSIONS_PER_DAY} ended — "
                 f"{summary['profile_opens_session']} profile opens | "
                 f"Reason: {result.get('shutdown_reason', 'unknown')}"
             )
@@ -333,6 +376,10 @@ async def run_day_cycle(
         restart_string_id = None
 
         if single_session or stop_event.is_set():
+            break
+
+        if not _resume_has_pending_work(output_dir):
+            _print_governor("No queued sourcing work remains in progress.json. Day cycle complete.")
             break
 
         # Check if we can do another session
@@ -381,16 +428,9 @@ async def run_decoy_only():
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
-    # Use governor for time-of-day checks (includes jitter)
-    governor = SessionGovernor()
-
-    # Run until stopped or time window closes
+    # Run until stopped.
     while not stop_event.is_set():
-        if not governor._in_time_window():
-            _print_governor("Outside time-of-day window. Stopping.")
-            break
-
-        # Run for 1 hour, then re-check window
+        # Run in 1 hour chunks so shutdown signals are handled promptly.
         await decoy.run_dormant_loop(stop_event, 3600)
 
     await decoy.close()
@@ -414,12 +454,20 @@ def main():
     parser.add_argument("--status", action="store_true", help="Print current 24h stats")
     parser.add_argument("--resume", action="store_true", help="Resume from existing progress")
     parser.add_argument("--restart-string", type=int, default=None, help="Reset a specific string to page 1 (use with --resume)")
+    parser.add_argument(
+        "--input-mode",
+        choices=["concurrent", "away"],
+        default="concurrent",
+        help="Browser input mode for sourcing sessions",
+    )
 
     args = parser.parse_args()
 
     if args.status:
         cooldown.print_status()
         return
+
+    enable_console_tee(Path(args.output_dir) if args.output_dir else config.OUTPUT_DIR)
 
     if args.decoy_only:
         asyncio.run(run_decoy_only())
@@ -440,6 +488,7 @@ def main():
         brief_path=args.brief,
         search_config=args.search_config,
         output_dir=args.output_dir,
+        input_mode=args.input_mode,
         single_session=args.single_session,
         resume=args.resume,
         restart_string_id=args.restart_string,

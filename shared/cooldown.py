@@ -138,20 +138,16 @@ def print_status():
     """Print current 24h stats for --status flag."""
     opens_24h = get_profile_opens_24h()
     sessions = get_sessions_today()
-    now_hour = int(time.strftime("%H"))
-    in_window = 7 <= now_hour < 23
 
     print(f"Profile opens (rolling 24h): {opens_24h}/400")
     print(f"Sessions today: {sessions}/3")
-    print(f"Time-of-day window: {'OPEN (7 AM - 11 PM)' if in_window else 'CLOSED'}")
+    print("Time-of-day window: DISABLED (24h operation)")
     print(f"Current time: {time.strftime('%I:%M %p')}")
 
     if opens_24h >= 400:
         print("\n⚠ 24h profile open cap reached. No sourcing sessions available.")
     elif sessions >= 3:
         print("\n⚠ Daily session cap reached. No more sourcing sessions today.")
-    elif not in_window:
-        print(f"\n⚠ Outside operating window. Next window opens at 7:00 AM.")
     else:
         remaining = 400 - opens_24h
         print(f"\n✓ Ready to source. {remaining} profile opens remaining in 24h budget.")

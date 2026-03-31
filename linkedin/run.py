@@ -16,6 +16,9 @@ import sys
 import urllib.request
 from pathlib import Path
 
+from shared import config
+from shared.console_tee import enable_console_tee
+
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 OUTPUT_DIR = Path(__file__).parent.parent / "output"
 
@@ -123,14 +126,35 @@ def interactive():
     if resumable:
         if mode_idx == 0:
             # Resume
-            _launch(brief_path, full_run=True, resume=True)
+            input_idx = _pick("Input mode?", [
+                "Concurrent (synthetic mouse; safe while you keep using the computer)",
+                "Away (takes over the real mouse/keyboard while you step away)",
+            ])
+            _launch(
+                brief_path,
+                full_run=True,
+                resume=True,
+                input_mode="concurrent" if input_idx == 0 else "away",
+            )
             return
         mode_idx -= 1  # Shift back to match original modes list
 
     if mode_idx == 0:
-        _launch(brief_path, full_run=True)
+        input_idx = _pick("Input mode?", [
+            "Concurrent (synthetic mouse; safe while you keep using the computer)",
+            "Away (takes over the real mouse/keyboard while you step away)",
+        ])
+        _launch(brief_path, full_run=True, input_mode="concurrent" if input_idx == 0 else "away")
     elif mode_idx == 1:
-        _launch(brief_path, test_single_page=True)
+        input_idx = _pick("Input mode?", [
+            "Concurrent (synthetic mouse; safe while you keep using the computer)",
+            "Away (takes over the real mouse/keyboard while you step away)",
+        ])
+        _launch(
+            brief_path,
+            test_single_page=True,
+            input_mode="concurrent" if input_idx == 0 else "away",
+        )
 
 
 def _launch(
@@ -140,14 +164,20 @@ def _launch(
     test_single_page: bool = False,
     search_config: str | None = None,
     rejudge_from: str | None = None,
+    output_dir: str | None = None,
+    input_mode: str = "concurrent",
 ):
     """Import Pipeline and run."""
     from linkedin.orchestrator import Pipeline
 
+    enable_console_tee(Path(output_dir) if output_dir else config.OUTPUT_DIR)
+
     pipeline = Pipeline(
         brief_path=str(brief_path),
         search_config_path=search_config,
+        output_dir=output_dir,
         test_mode=test_single_page,
+        input_mode=input_mode,
     )
 
     if rejudge_from:
@@ -196,6 +226,12 @@ def cli():
         "--resume", action="store_true",
         help="Resume from existing progress file (used with --full-run)"
     )
+    parser.add_argument(
+        "--input-mode",
+        choices=["concurrent", "away"],
+        default="concurrent",
+        help="Browser input mode: concurrent synthetic input or away-from-keyboard takeover",
+    )
 
     args = parser.parse_args()
 
@@ -210,6 +246,8 @@ def cli():
         test_single_page=args.test_single_page,
         search_config=args.search_config,
         rejudge_from=args.rejudge_from,
+        output_dir=args.output_dir,
+        input_mode=args.input_mode,
     )
 
     if not any([args.full_run, args.test_single_page, args.search_config, args.rejudge_from]):

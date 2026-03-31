@@ -25,8 +25,11 @@ from shared.schemas import (
     ExecutionPlan, GlanceResult,
 )
 from linkedin.browser import LinkedInBrowser
-from shared.extractors import extract_snippets_from_list_dom, extract_profile_from_dom
-from shared.judger import facial_judge, full_judge, init_judger
+from shared.extractors import (
+    extract_snippet_from_card_innertext,
+    extract_profile_from_dom,
+)
+from shared.judger import facial_judge, full_judge, init_judger, is_failure_decision
 from shared.storage import append_jsonl, read_jsonl, read_jsonl_set, log_event, write_json, read_json
 from shared.brief_loader import load_brief, Brief
 from shared.bias_controls import BiasMonitor, DecisionRecord
@@ -76,6 +79,7 @@ class Pipeline:
         search_config_path: str | None = None,
         output_dir: Optional[str] = None,
         test_mode: bool = False,
+        input_mode: str = "concurrent",
     ):
         self.brief_obj = load_brief(brief_path)
         self.search_config = (
@@ -86,6 +90,7 @@ class Pipeline:
         self.output_dir = Path(output_dir) if output_dir else config.OUTPUT_DIR
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.test_mode = test_mode
+        self.input_mode = input_mode
 
         # Initialize judger with the Brief dataclass
         init_judger(self.brief_obj)
@@ -99,7 +104,7 @@ class Pipeline:
         self.log_path = self.output_dir / "run_log.jsonl"
 
         # Browser
-        self.browser = LinkedInBrowser()
+        self.browser = LinkedInBrowser(input_mode=input_mode)
 
         # Brief identifier for cross-session file scoping
         self._brief_id = self.brief_obj.linkedin_project_id or Path(brief_path).stem
@@ -111,7 +116,8 @@ class Pipeline:
         self.noise_path = self.output_dir / f"noise_discoveries-{self._brief_id}.jsonl"
 
         # Dedup cache (loaded once, updated in memory — avoids O(n^2) file reads)
-        self._seen_urls: set[str] = set()
+        self._seen_urls: set[str] = set()       # terminal outcomes only
+        self._in_flight_urls: set[str] = set()  # currently being evaluated, NOT persisted
 
         # Prior session outcomes — URL → most recent outcome (for skip-on-prior-reject)
         self._prior_outcomes: dict[str, str] = {}
@@ -177,6 +183,32 @@ class Pipeline:
         rejects = sum(1 for o in self._prior_outcomes.values() if o == "REJECT")
         print(f"  [dedup] Cross-session history: {len(self._prior_outcomes)} candidates ({saves} saves, {rejects} rejects)")
 
+    def _mark_terminal(self, url: str):
+        """Promote URL from in-flight to permanent dedup."""
+        self._in_flight_urls.discard(url)
+        if url:
+            self._seen_urls.add(url)
+
+    def _checkpoint_progress(
+        self,
+        progress: Progress | None,
+        search_string: SearchString | None = None,
+        page_num: int | None = None,
+    ) -> None:
+        """Persist current run state without waiting for a full page to finish."""
+        if not progress:
+            return
+
+        if search_string is not None:
+            progress.current_string_id = search_string.id
+            if page_num is not None:
+                progress.current_page = page_num
+                search_string.pages_reviewed = max(search_string.pages_reviewed, page_num)
+
+        progress.candidates_saved = self.stats.get("saved", progress.candidates_saved)
+        progress.candidates_rejected = self.stats.get("rejected", progress.candidates_rejected)
+        progress.save(str(self.progress_path))
+
     # ------------------------------------------------------------------
     # Main entry points
     # ------------------------------------------------------------------
@@ -191,11 +223,10 @@ class Pipeline:
         await self.browser.connect()
         log_event(self.log_path, "pipeline_start", mode="full")
 
-        # Load dedup cache once
-        self._seen_urls = read_jsonl_set(self.snippets_path)
-        if self.facial_path.exists():
-            facial_urls = read_jsonl_set(self.facial_path)
-            self._seen_urls.update(facial_urls)
+        # Load dedup cache from cross-session history only
+        self._seen_urls = set()
+        self._in_flight_urls = set()
+        self._prior_outcomes = {}
         self._load_candidate_history()
 
         progress = self._load_or_create_progress()
@@ -253,25 +284,28 @@ class Pipeline:
         log_event(self.log_path, "pipeline_start", mode="single_page_test")
 
         try:
-            print("  Scrolling to load all results...")
-            card_count = await self.browser.scroll_to_load_all_results()
-            print(f"  {card_count} cards loaded")
-            print("  Reading results page innerText...")
-            innertext = await self.browser.get_results_list_innertext()
-            print(f"  Text size: {len(innertext) / 1024:.0f} KB")
-
-            print("  Extracting candidate snippets (cheap model)...")
-            snippets = extract_snippets_from_list_dom(innertext, string_id=0, string_name="test", page=1)
-            print(f"  Found {len(snippets)} candidates")
-
+            search_string = SearchString(id=0, name="test", boolean="(test)")
             page_report = _PageReport(string_id=0, string_name="test", page=1, result_count=-1)
+            string_stats = {
+                "pages": 1,
+                "candidates": 0,
+                "duplicates": 0,
+                "facial_yes": 0,
+                "facial_no": 0,
+                "saves": 0,
+                "rejects": 0,
+            }
+            all_candidates: list[dict] = []
 
-            for i, snippet in enumerate(snippets, 1):
-                print(f"\n  [{i}/{len(snippets)}] {snippet.name}")
-                print(f"    Title: {snippet.current_title} at {snippet.current_company}")
-                print(f"    Headline: {snippet.headline}")
-
-                decision = await self._evaluate_snippet(snippet, page_report)
+            await self._review_page_sequentially(
+                search_string=search_string,
+                page_num=1,
+                result_count=-1,
+                page_report=page_report,
+                all_candidates=all_candidates,
+                string_stats=string_stats,
+                progress=None,
+            )
 
             page_report.print_report(self.stats)
 
@@ -357,13 +391,10 @@ class Pipeline:
         except Exception:
             pass
 
-        # Start with dedup from prior facial judgments in this output dir
+        # Load dedup cache from cross-session history only
         self._seen_urls = set()
-        if self.facial_path.exists():
-            facial_urls = read_jsonl_set(self.facial_path)
-            self._seen_urls.update(facial_urls)
-            if facial_urls:
-                print(f"  [dedup] Loaded {len(facial_urls)} previously-evaluated candidates from facial_judgments.jsonl")
+        self._in_flight_urls = set()
+        self._prior_outcomes = {}
         self._load_candidate_history()
 
         # Ctrl+C handler — only install if not running under session_orchestrator
@@ -383,26 +414,17 @@ class Pipeline:
                 progress = Progress.from_file(str(self.progress_path))
                 self._progress = progress
 
-                # Ensure strings are in correct execution order (by ID)
-                progress.strings.sort(key=lambda s: s.id)
+                # Preserve persisted queue order. Adaptive strings may be inserted
+                # "next in queue", which is not always the same as numeric ID order.
 
                 # If restarting a specific string, reset it and clean up its output
                 if restart_string_id is not None:
                     self._restart_string(progress, restart_string_id)
 
-                # Rebuild dedup set AFTER restart (restart removes snippets from file)
-                if self.snippets_path.exists():
-                    self._seen_urls = read_jsonl_set(self.snippets_path)
-                    print(f"  Loaded {len(self._seen_urls)} URLs into dedup set from snippets")
-                else:
-                    self._seen_urls = set()
-                if self.facial_path.exists():
-                    facial_urls = read_jsonl_set(self.facial_path)
-                    pre = len(self._seen_urls)
-                    self._seen_urls.update(facial_urls)
-                    added = len(self._seen_urls) - pre
-                    if added:
-                        print(f"  [dedup] Added {added} URLs from facial_judgments.jsonl")
+                # Rebuild dedup set from cross-session history only
+                self._seen_urls = set()
+                self._in_flight_urls = set()
+                self._prior_outcomes = {}
                 self._load_candidate_history()
 
                 # Load kit strings for adaptation vocabulary
@@ -499,12 +521,16 @@ class Pipeline:
                         print(f"\n  Resuming interrupted string #{s.id}: {s.name[:60]}")
                         s.status = "queued"
 
-            for search_string in progress.strings:
+            string_index = 0
+            while string_index < len(progress.strings):
+                search_string = progress.strings[string_index]
                 if search_string.status == "done":
                     print(f"\n  [skip] String #{search_string.id}: {search_string.name} (already done)")
+                    string_index += 1
                     continue
                 if search_string.status == "skipped":
                     print(f"\n  [skip] String #{search_string.id}: {search_string.name} (skipped by strategy)")
+                    string_index += 1
                     continue
 
                 # Block transition → adaptation
@@ -513,6 +539,10 @@ class Pipeline:
                         await self._run_block_adaptation(
                             current_block, block_strings, progress, adapt_after_block
                         )
+                        block_strings = []
+                        # Re-evaluate this position because adaptation may have
+                        # inserted replacement strings or re-ordered the queue.
+                        continue
                     current_block = search_string.block
                     block_strings = []
 
@@ -528,22 +558,31 @@ class Pipeline:
                     await self._process_string(search_string, progress)
                 except GovernorLimitReached as e:
                     print(f"\n  [GOVERNOR] Session limit reached: {e.reason}")
-                    progress.save(str(self.progress_path))
+                    self._checkpoint_progress(
+                        progress,
+                        search_string=search_string,
+                        page_num=progress.current_page or None,
+                    )
                     raise
                 except Exception as e:
                     err_msg = str(e).lower()
                     if "target crashed" in err_msg or "connection closed" in err_msg or "broken pipe" in err_msg:
                         print(f"\n  [!] Browser crashed during string #{search_string.id}. Attempting reconnect...")
-                        progress.save(str(self.progress_path))
+                        self._checkpoint_progress(
+                            progress,
+                            search_string=search_string,
+                            page_num=progress.current_page or None,
+                        )
                         reconnected = await self._attempt_reconnect()
                         if reconnected:
                             print(f"  [!] Reconnected. Marking string #{search_string.id} as done (partial) and continuing.")
                             search_string.status = "done"
                             search_string.notes = (search_string.notes or "") + f" Partial — browser crashed mid-string."
                             block_strings.append(search_string)
-                            progress.save(str(self.progress_path))
+                            self._checkpoint_progress(progress, search_string=search_string)
                             log_event(self.log_path, "browser_crash_recovered", string_id=search_string.id)
                             self._print_session_summary(progress)
+                            string_index += 1
                             continue
                         else:
                             print(f"  [!] Reconnect failed. Saving progress and exiting.")
@@ -553,17 +592,19 @@ class Pipeline:
                         print(f"\n  [!] String #{search_string.id} failed: {e}")
                         search_string.status = "done"
                         search_string.notes = (search_string.notes or "") + f" Error: {e}"
-                        progress.save(str(self.progress_path))
+                        self._checkpoint_progress(progress, search_string=search_string)
                         log_event(self.log_path, "string_error", string_id=search_string.id, error=str(e))
+                        string_index += 1
                         continue
 
                 search_string.status = "done"
                 block_strings.append(search_string)
-                progress.save(str(self.progress_path))
+                self._checkpoint_progress(progress, search_string=search_string)
                 if self._bias_monitor:
                     self._bias_monitor.save_checkpoint(str(self.bias_checkpoint_path))
                 log_event(self.log_path, "string_complete", string_id=search_string.id, **self.stats)
                 self._print_session_summary(progress)
+                string_index += 1
 
             # Final block adaptation
             if current_block and block_strings:
@@ -741,52 +782,7 @@ class Pipeline:
             except Exception:
                 pass
 
-            card_count = await self.browser.scroll_to_load_all_results()
-            print(f"  {card_count} cards loaded after scroll", flush=True)
-
-            if card_count == 0:
-                print("  0 cards on page. Skipping string.")
-                break
-
-            innertext = await self.browser.get_results_list_innertext()
-            print(f"  Text size: {len(innertext) / 1024:.0f} KB", flush=True)
-
-            snippets = extract_snippets_from_list_dom(
-                innertext, search_string.id, search_string.name, page_num
-            )
-            print(f"  Extracted {len(snippets)} candidates", flush=True)
-
-            if not snippets:
-                print("  No candidates found on this page. Moving on.")
-                break
-
-            # Get name+URL pairs and saved status atomically from DOM
-            card_pairs = await self.browser.get_card_name_url_pairs()
-            card_saved = await self.browser.get_card_saved_status()
-            url_by_name: dict[str, str] = {}
-            index_by_name: dict[str, int] = {}
-            saved_by_name: dict[str, bool] = {}
-            for i, pair in enumerate(card_pairs):
-                key = pair["name"].strip().lower() if pair["name"] else ""
-                if key and pair["url"]:
-                    url_by_name[key] = pair["url"]
-                if key:
-                    index_by_name[key] = i
-                    if i < len(card_saved):
-                        saved_by_name[key] = card_saved[i]
-            matched = 0
-            for snippet in snippets:
-                key = snippet.name.strip().lower()
-                if key in url_by_name:
-                    snippet.profile_url = url_by_name[key]
-                    matched += 1
-                if key in index_by_name:
-                    snippet.card_index = index_by_name[key]
-                if saved_by_name.get(key, False):
-                    snippet.already_saved = True
-            if matched < len(snippets):
-                print(f"  [warn] URL match: {matched}/{len(snippets)} snippets matched to DOM cards")
-
+            # Review the page top-to-bottom, card by card.
             page_report = _PageReport(
                 string_id=search_string.id,
                 string_name=search_string.name,
@@ -794,158 +790,18 @@ class Pipeline:
                 result_count=result_count,
             )
 
-            # --- Glance assessment ---
-            glance_result = None
-            skip_evaluation = False
-
-            if len(snippets) >= config.GLANCE_MIN_SNIPPETS:
-                glance_result = self._glance_assess(snippets)
-                log_event(self.log_path, "glance_assess",
-                          string_id=search_string.id, page=page_num,
-                          action=glance_result.action,
-                          confidence=glance_result.confidence,
-                          signals=glance_result.signals)
-                print(f"  [glance] {glance_result.action} ({glance_result.confidence:.2f}): "
-                      f"{glance_result.summary}")
-
-                if glance_result.action == "reformulate":
-                    # Record snippets as seen (dedup) but do NOT count in string_stats
-                    for snippet in snippets:
-                        if snippet.profile_url:
-                            self._seen_urls.add(snippet.profile_url)
-                        append_jsonl(self.snippets_path, snippet.to_dict())
-                    self.stats["snippets_extracted"] += len(snippets)
-                    skip_evaluation = True
-
-            if not skip_evaluation:
-                consecutive_api_errors = 0
-                page_evaluated = 0
-                page_facial_no = 0
-                for snippet in snippets:
-                    if snippet.profile_url and snippet.profile_url in self._seen_urls:
-                        prior = self._prior_outcomes.get(snippet.profile_url, "")
-                        if prior in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"):
-                            print(f"    [dup] {snippet.name} — saved in prior session")
-                        elif prior == "REJECT":
-                            print(f"    [dup] {snippet.name} — rejected in prior session")
-                        elif prior in ("FACIAL_NO", "FACIAL_SKIP"):
-                            print(f"    [dup] {snippet.name} — facial NO/skip in prior session")
-                        elif prior == "FACIAL_YES":
-                            # Passed facial before but session ended before full eval — re-evaluate
-                            print(f"    [re-eval] {snippet.name} — facial YES in prior session, completing evaluation")
-                            self._seen_urls.discard(snippet.profile_url)
-                        else:
-                            print(f"    [dup] {snippet.name} — already processed")
-                        if snippet.profile_url in self._seen_urls:
-                            page_report.add_skip_preview(snippet.name, "duplicate")
-                            string_stats["duplicates"] += 1
-                            continue
-
-                    if getattr(snippet, 'already_saved', False):
-                        print(f"    [skip] {snippet.name} — already saved in LinkedIn pipeline")
-                        page_report.add_skip_preview(snippet.name, "already_saved")
-                        string_stats.setdefault("already_saved_skips", 0)
-                        string_stats["already_saved_skips"] += 1
-                        continue
-
-                    # Circuit breaker: pause on sustained API failures
-                    if consecutive_api_errors >= 5:
-                        print(f"    [CIRCUIT BREAKER] {consecutive_api_errors} consecutive API failures — pausing 60s")
-                        log_event(self.log_path, "circuit_breaker", consecutive_errors=consecutive_api_errors)
-                        await asyncio.sleep(60)
-                        consecutive_api_errors = 0
-
-                    if snippet.profile_url:
-                        self._seen_urls.add(snippet.profile_url)
-                    append_jsonl(self.snippets_path, snippet.to_dict())
-                    self.stats["snippets_extracted"] += 1
-                    string_stats["candidates"] += 1
-
-                    decision = await self._evaluate_snippet(snippet, page_report)
-
-                    # Track API error fallbacks for circuit breaker
-                    if decision and hasattr(decision, 'rationale') and '[API error' in (decision.rationale or ''):
-                        consecutive_api_errors += 1
-                    else:
-                        consecutive_api_errors = 0
-
-                    # If go_back_to_results failed, panel is still open — skip remaining candidates on this page
-                    if decision and getattr(decision, '_panel_stuck', False):
-                        print(f"    [ERROR] Panel stuck after {snippet.name} — skipping remaining candidates on this page")
-                        log_event(self.log_path, "panel_stuck", name=snippet.name, page=page_num)
-                        break
-
-                    outcome = "error"
-                    if decision:
-                        if decision.stage == "facial" and decision.decision == "FACIAL_NO":
-                            outcome = "facial_no"
-                            string_stats["facial_no"] += 1
-                        elif decision.stage == "facial" and decision.decision == "FACIAL_SKIP":
-                            outcome = "facial_skip"
-                            string_stats.setdefault("facial_skip", 0)
-                            string_stats["facial_skip"] += 1
-                        elif decision.decision == "SAVE":
-                            outcome = "save"
-                            string_stats["facial_yes"] += 1
-                            string_stats["saves"] += 1
-                            search_string.saves.append(snippet.name)
-                        elif decision.decision == "REJECT":
-                            outcome = "reject"
-                            string_stats["facial_yes"] += 1
-                            string_stats["rejects"] += 1
-                        elif decision.stage == "facial" and decision.decision == "FACIAL_YES":
-                            outcome = "facial_yes"
-                            string_stats["facial_yes"] += 1
-
-                    all_candidates.append({
-                        "name": snippet.name,
-                        "title": snippet.current_title,
-                        "company": snippet.current_company,
-                        "headline": snippet.headline,
-                        "outcome": outcome,
-                        "rationale": decision.rationale if decision else "",
-                        "page": page_num,
-                    })
-
-                    # Mid-page early exit
-                    if outcome == "facial_no":
-                        page_facial_no += 1
-                    if outcome in ("facial_no", "save", "reject", "facial_yes"):
-                        page_evaluated += 1
-
-                    if page_evaluated >= config.EARLY_EXIT_MIN_CANDIDATES:
-                        page_no_rate = page_facial_no / page_evaluated
-                        if page_no_rate >= self._get_early_exit_rate():
-                            print(f"    [early-exit] {page_facial_no}/{page_evaluated} "
-                                  f"facial_no ({page_no_rate:.0%}) — breaking page")
-                            log_event(self.log_path, "early_exit",
-                                      string_id=search_string.id, page=page_num,
-                                      evaluated=page_evaluated, facial_no=page_facial_no,
-                                      rate=round(page_no_rate, 2))
-                            break
-
-                    # Cooperative session expiry check.
-                    # If session_orchestrator's duration timer has fired, exit gracefully
-                    # at this safe checkpoint instead of being hard-cancelled mid-operation.
-                    if hasattr(self, '_session_expired') and self._session_expired.is_set():
-                        progress.save(str(self.progress_path))
-                        raise SessionExpired("session_duration_cap")
-
-                    # Cooperative yield point for decoy interleaving.
-                    # If session_orchestrator has set _pause_requested, we pause here
-                    # (between candidates, after evaluation is complete and results are safe).
-                    if hasattr(self, '_pause_requested') and self._pause_requested.is_set():
-                        self._pause_requested.clear()  # Acknowledge the pause
-                        progress.save(str(self.progress_path))
-                        try:
-                            await asyncio.wait_for(self._resume_event.wait(), timeout=300)
-                        except asyncio.TimeoutError:
-                            print("  [!] Resume timeout (5 min) — continuing without decoy burst.")
-                            self._resume_event.set()
+            glance_result = await self._review_page_sequentially(
+                search_string=search_string,
+                page_num=page_num,
+                result_count=result_count,
+                page_report=page_report,
+                all_candidates=all_candidates,
+                string_stats=string_stats,
+                progress=progress,
+            )
 
             string_stats["pages"] = page_num
-            search_string.pages_reviewed = page_num
-            progress.save(str(self.progress_path))
+            self._checkpoint_progress(progress, search_string=search_string, page_num=page_num)
             page_report.print_report(self.stats)
 
             # --- Two-phase adaptation ---
@@ -1054,13 +910,248 @@ class Pipeline:
                     print("  No more pages.")
                     break
                 page_num += 1
-                await asyncio.sleep(human_delay_correlated(config.PAGE_DELAY_SECONDS))
+                await asyncio.sleep(human_delay_correlated(config.PAGE_DELAY_SECONDS, channel="page_turn"))
             else:
                 break
 
         # Persist transient facial stats onto SearchString for block-level aggregation
         search_string.facial_yes_count = string_stats["facial_yes"]
         search_string.facial_no_count = string_stats["facial_no"]
+
+    async def _extract_card_snippet(
+        self,
+        search_string: SearchString,
+        page_num: int,
+        card_index: int,
+    ) -> CandidateSnippet | None:
+        """Focus one result card, pause briefly, and extract its snippet."""
+        await self.browser.focus_card_for_review(card_index)
+        await asyncio.sleep(
+            human_delay_correlated(random.uniform(0.7, 1.8), channel="card_glance")
+        )
+
+        snapshot = await self.browser.get_card_snapshot(card_index)
+        innertext = (snapshot.get("innertext") or "").strip()
+        if not innertext:
+            print(f"    [warn] Card {card_index + 1} rendered without readable text")
+            return None
+
+        snippet = extract_snippet_from_card_innertext(
+            innertext,
+            string_id=search_string.id,
+            string_name=search_string.name,
+            page=page_num,
+            result_rank=card_index + 1,
+        )
+        if snippet is None:
+            print(f"    [warn] Could not extract snippet from card {card_index + 1}")
+            return None
+
+        if snapshot.get("name"):
+            snippet.name = snapshot["name"]
+        if snapshot.get("url"):
+            snippet.profile_url = snapshot["url"]
+        snippet.card_index = card_index
+        snippet.already_saved = bool(snapshot.get("already_saved", False))
+        return snippet
+
+    async def _preview_skip_pause(self, reason: str) -> None:
+        """Pause on visible skips so the review flow does not feel bursty."""
+        if reason == "facial_no":
+            dwell = human_delay_correlated(random.uniform(0.8, 2.0), channel="preview_no")
+        elif reason == "facial_skip":
+            dwell = human_delay_correlated(random.uniform(0.7, 1.6), channel="preview_skip")
+        elif reason in {"already_saved", "duplicate"}:
+            dwell = human_delay_correlated(random.uniform(0.2, 0.6), channel="preview_skip")
+        else:
+            dwell = human_delay_correlated(random.uniform(0.2, 0.5), channel="preview_skip")
+        await asyncio.sleep(dwell)
+
+    async def _review_page_sequentially(
+        self,
+        search_string: SearchString,
+        page_num: int,
+        result_count: int,
+        page_report: "_PageReport",
+        all_candidates: list[dict],
+        string_stats: dict,
+        progress: Progress | None = None,
+    ) -> GlanceResult | None:
+        """Review the current results page top-to-bottom, card by card."""
+        slot_count = await self.browser.get_card_slot_count()
+        if slot_count == 0:
+            # Fallback if the list has not hydrated yet.
+            fallback_count = await self.browser.scroll_to_load_all_results()
+            slot_count = fallback_count or await self.browser.get_card_count()
+
+        print(f"  Reviewing {slot_count} card slots sequentially", flush=True)
+        if slot_count == 0:
+            return None
+
+        glance_result = None
+        preview_snippets: list[CandidateSnippet] = []
+        consecutive_api_errors = 0
+        page_evaluated = 0
+        page_facial_no = 0
+
+        for card_index in range(slot_count):
+            snippet = await self._extract_card_snippet(search_string, page_num, card_index)
+            if not snippet:
+                continue
+
+            preview_snippets.append(snippet)
+            print(
+                f"    [card {card_index + 1}/{slot_count}] {snippet.name} — "
+                f"{snippet.current_title or snippet.headline or 'preview only'}"
+            )
+
+            url = snippet.profile_url
+            if url and (url in self._seen_urls or url in self._in_flight_urls):
+                if url in self._seen_urls:
+                    prior = self._prior_outcomes.get(url, "")
+                    if prior in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"):
+                        print(f"    [dup] {snippet.name} — saved in prior session")
+                    elif prior == "REJECT":
+                        print(f"    [dup] {snippet.name} — rejected in prior session")
+                    elif prior in ("FACIAL_NO", "FACIAL_SKIP"):
+                        print(f"    [dup] {snippet.name} — {prior} in prior session")
+                    elif prior == "FACIAL_YES":
+                        print(f"    [re-eval] {snippet.name} — facial YES in prior session, completing evaluation")
+                        self._seen_urls.discard(url)
+                    else:
+                        print(f"    [dup] {snippet.name} — already processed")
+                if url in self._seen_urls or url in self._in_flight_urls:
+                    page_report.add_skip_preview(snippet.name, "duplicate")
+                    string_stats["duplicates"] += 1
+                    await self._preview_skip_pause("duplicate")
+                    continue
+
+            if snippet.already_saved:
+                print(f"    [skip] {snippet.name} — already saved in LinkedIn pipeline")
+                page_report.add_skip_preview(snippet.name, "already_saved")
+                string_stats.setdefault("already_saved_skips", 0)
+                string_stats["already_saved_skips"] += 1
+                await self._preview_skip_pause("already_saved")
+                continue
+
+            if consecutive_api_errors >= 5:
+                print(f"    [CIRCUIT BREAKER] {consecutive_api_errors} consecutive API failures — pausing 60s")
+                log_event(self.log_path, "circuit_breaker", consecutive_errors=consecutive_api_errors)
+                await asyncio.sleep(60)
+                consecutive_api_errors = 0
+
+            if snippet.profile_url:
+                self._in_flight_urls.add(snippet.profile_url)
+            append_jsonl(self.snippets_path, snippet.to_dict())
+            self.stats["snippets_extracted"] += 1
+            string_stats["candidates"] += 1
+
+            decision = await self._evaluate_snippet(snippet, page_report)
+
+            if decision and hasattr(decision, "rationale") and "[API error" in (decision.rationale or ""):
+                consecutive_api_errors += 1
+            else:
+                consecutive_api_errors = 0
+
+            if decision and getattr(decision, "_panel_stuck", False):
+                print(f"    [ERROR] Panel stuck after {snippet.name} — skipping remaining candidates on this page")
+                log_event(self.log_path, "panel_stuck", name=snippet.name, page=page_num)
+                break
+
+            outcome = "error"
+            if decision:
+                if decision.stage == "facial" and decision.decision == "FACIAL_NO":
+                    outcome = "facial_no"
+                    string_stats["facial_no"] += 1
+                elif decision.stage == "facial" and decision.decision == "FACIAL_SKIP":
+                    outcome = "facial_skip"
+                    string_stats.setdefault("facial_skip", 0)
+                    string_stats["facial_skip"] += 1
+                elif decision.decision == "SAVE":
+                    outcome = "save"
+                    string_stats["facial_yes"] += 1
+                    string_stats["saves"] += 1
+                    search_string.saves.append(snippet.name)
+                elif decision.decision == "REJECT":
+                    outcome = "reject"
+                    string_stats["facial_yes"] += 1
+                    string_stats["rejects"] += 1
+                elif decision.stage == "facial" and decision.decision == "FACIAL_YES":
+                    outcome = "facial_yes"
+                    string_stats["facial_yes"] += 1
+
+            all_candidates.append({
+                "name": snippet.name,
+                "title": snippet.current_title,
+                "company": snippet.current_company,
+                "headline": snippet.headline,
+                "outcome": outcome,
+                "rationale": decision.rationale if decision else "",
+                "page": page_num,
+            })
+
+            if outcome == "facial_no":
+                page_facial_no += 1
+                await self._preview_skip_pause("facial_no")
+            elif outcome == "facial_skip":
+                await self._preview_skip_pause("facial_skip")
+
+            if outcome in ("facial_no", "save", "reject", "facial_yes"):
+                page_evaluated += 1
+
+            self._checkpoint_progress(progress, search_string=search_string, page_num=page_num)
+
+            if glance_result is None and len(preview_snippets) >= config.GLANCE_MIN_SNIPPETS:
+                glance_result = self._glance_assess(preview_snippets)
+                log_event(
+                    self.log_path,
+                    "glance_assess",
+                    string_id=search_string.id,
+                    page=page_num,
+                    action=glance_result.action,
+                    confidence=glance_result.confidence,
+                    signals=glance_result.signals,
+                )
+                print(
+                    f"  [glance] {glance_result.action} ({glance_result.confidence:.2f}): "
+                    f"{glance_result.summary}"
+                )
+                if glance_result.action == "reformulate":
+                    print("    [glance] Sequential review found strong reformulation signal — breaking page")
+                    break
+
+            if page_evaluated >= config.EARLY_EXIT_MIN_CANDIDATES:
+                page_no_rate = page_facial_no / page_evaluated
+                if page_no_rate >= self._get_early_exit_rate():
+                    print(
+                        f"    [early-exit] {page_facial_no}/{page_evaluated} "
+                        f"facial_no ({page_no_rate:.0%}) — breaking page"
+                    )
+                    log_event(
+                        self.log_path,
+                        "early_exit",
+                        string_id=search_string.id,
+                        page=page_num,
+                        evaluated=page_evaluated,
+                        facial_no=page_facial_no,
+                        rate=round(page_no_rate, 2),
+                    )
+                    break
+
+            if progress and hasattr(self, "_session_expired") and self._session_expired.is_set():
+                progress.save(str(self.progress_path))
+                raise SessionExpired("session_duration_cap")
+
+            if progress and hasattr(self, "_pause_requested") and self._pause_requested.is_set():
+                self._pause_requested.clear()
+                progress.save(str(self.progress_path))
+                try:
+                    await asyncio.wait_for(self._resume_event.wait(), timeout=300)
+                except asyncio.TimeoutError:
+                    print("  [!] Resume timeout (5 min) — continuing without decoy burst.")
+                    self._resume_event.set()
+
+        return glance_result
 
     def _get_min_pages(self, result_count: int) -> int:
         """Get minimum pages to review before allowing stop/abandon."""
@@ -1678,11 +1769,23 @@ Provide a narrowed Boolean."""
                     self.stats["blacklist_skips"] += 1
                     if page_report:
                         page_report.add_skip_preview(snippet.name, f"BLACKLIST: {blocked}")
-                    return OpusDecision(
+                    blacklist_decision = OpusDecision(
                         stage="facial", decision="FACIAL_NO", path="employer_blacklist",
                         confidence=1.0, rationale=f"Employer blacklist: {blocked}",
                         candidate_name=snippet.name, profile_url=snippet.profile_url,
                     )
+                    append_jsonl(self.facial_path, blacklist_decision.to_dict())
+                    append_jsonl(self.history_path, {
+                        "profile_url": snippet.profile_url,
+                        "candidate_name": snippet.name,
+                        "outcome": "FACIAL_NO",
+                        "confidence": 1.0,
+                        "source_string_id": snippet.source_string_id,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    })
+                    self._prior_outcomes[snippet.profile_url] = "FACIAL_NO"
+                    self._mark_terminal(snippet.profile_url)
+                    return blacklist_decision
 
         # --- Facial judgment (Opus) ---
         print(f"    Facial judgment (Opus)...")
@@ -1692,21 +1795,42 @@ Provide a narrowed Boolean."""
             print(f"    [ERROR] Facial judgment failed: {e}")
             log_event(self.log_path, "facial_error", name=snippet.name, error=str(e))
             facial = OpusDecision(
-                stage="facial", decision="FACIAL_SKIP", path="none", confidence=0.0,
-                rationale=f"[API error — skipping candidate] {str(e)[:100]}",
+                stage="facial", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+                rationale=f"[JUDGMENT_FAILURE: {str(e)[:100]}]",
                 candidate_name=snippet.name, profile_url=snippet.profile_url,
             )
 
         append_jsonl(self.facial_path, facial.to_dict())
 
-        # Append to cross-session history
+        # Intercept parse/judgment failures — log but do NOT persist to cross-session history
+        if is_failure_decision(facial.decision):
+            print(f"    [PARSE_FAILURE] {facial.rationale}")
+            self.stats.setdefault("parse_failures", 0)
+            self.stats["parse_failures"] += 1
+            if self._bias_monitor:
+                self._bias_monitor.record_decision(DecisionRecord(
+                    candidate_id=f"{snippet.source_string_id}_p{snippet.page}_r{snippet.result_rank}",
+                    string_id=str(snippet.source_string_id),
+                    stage="facial",
+                    decision=facial.decision,
+                    confidence=facial.confidence,
+                    capability_area=None,
+                ))
+            # Non-terminal: allow retry later in this session or on resume
+            self._in_flight_urls.discard(snippet.profile_url)
+            return facial
+
+        # Append to cross-session history (only for terminal decisions)
         append_jsonl(self.history_path, {
             "profile_url": snippet.profile_url,
             "candidate_name": snippet.name,
             "outcome": facial.decision,
             "confidence": facial.confidence,
+            "source_string_id": snippet.source_string_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
+        self._prior_outcomes[snippet.profile_url] = facial.decision
+        self._mark_terminal(snippet.profile_url)
 
         # Record facial decision for bias monitoring
         if self._bias_monitor:
@@ -1756,8 +1880,8 @@ Provide a narrowed Boolean."""
 
         print(f"    Opening profile for full evaluation...")
         # Pre-open pause — simulate scanning the snippet before deciding to click
-        scan_time = random.uniform(1.5, 4.0)
-        await asyncio.sleep(human_delay_correlated(scan_time))
+        scan_time = random.uniform(0.8, 2.2)
+        await asyncio.sleep(human_delay_correlated(scan_time, channel="snippet_scan"))
 
         try:
             # Re-render the target card's article (LinkedIn virtual scrolling de-renders offscreen)
@@ -1801,23 +1925,49 @@ Provide a narrowed Boolean."""
         except Exception as e:
             print(f"    [ERROR] Final judgment failed: {e}")
             log_event(self.log_path, "final_error", name=snippet.name, error=str(e))
-            try:
-                await self.browser.go_back_to_results()
-            except Exception:
-                print(f"    [warn] go_back_to_results also failed after judgment error")
-            return facial
+            final = OpusDecision(
+                stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+                rationale=f"[JUDGMENT_FAILURE: {e}]",
+                candidate_name=snippet.name, profile_url=snippet.profile_url,
+            )
 
         append_jsonl(self.final_path, final.to_dict())
 
-        # Append to cross-session history (overwrites facial entry conceptually — dict keyed by URL)
+        # Intercept parse/judgment failures — do NOT persist to cross-session history
+        if is_failure_decision(final.decision):
+            print(f"    [{final.decision}] {final.rationale}")
+            self.stats.setdefault("parse_failures", 0)
+            self.stats["parse_failures"] += 1
+            if self._bias_monitor:
+                self._bias_monitor.record_decision(DecisionRecord(
+                    candidate_id=f"{snippet.source_string_id}_p{snippet.page}_r{snippet.result_rank}",
+                    string_id=str(snippet.source_string_id),
+                    stage="full",
+                    decision=final.decision,
+                    confidence=final.confidence,
+                    capability_area=None,
+                ))
+            # Non-terminal: allow same-session retry if candidate appears again
+            self._in_flight_urls.discard(snippet.profile_url)
+            try:
+                await self.browser.go_back_to_results()
+                await asyncio.sleep(human_delay_correlated(0.8, channel="panel_close"))
+            except Exception:
+                final._panel_stuck = True
+            return final
+
+        # Append to cross-session history (only for terminal decisions)
         append_jsonl(self.history_path, {
             "profile_url": snippet.profile_url,
             "candidate_name": snippet.name,
             "outcome": final.decision,
             "confidence": final.confidence,
             "capability_area": final.path if final.path != "none" else "",
+            "source_string_id": snippet.source_string_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         })
+        self._prior_outcomes[snippet.profile_url] = final.decision
+        self._mark_terminal(snippet.profile_url)
 
         # Record full eval decision and check bias alerts
         if self._bias_monitor:
@@ -1867,7 +2017,7 @@ Provide a narrowed Boolean."""
                         else:
                             print(f"    [warn] LinkedIn save may have failed")
                         # Post-save linger — scroll back and re-read like a recruiter who just saved
-                        linger = max(4.0, min(15.0, human_delay_correlated(8.0)))
+                        linger = max(2.5, min(8.0, human_delay_correlated(4.5, channel="save_linger")))
                         chunks_back = random.randint(1, 3)
                         px = await self.browser.scroll_for_linger(chunks_back)
                         await asyncio.sleep(linger)
@@ -1889,13 +2039,13 @@ Provide a narrowed Boolean."""
             if page_report:
                 page_report.add_skipped_opened(snippet, final)
             # Quick exit — saw enough, moving on
-            reject_dwell = max(0.2, min(2.0, human_delay_correlated(0.5)))
+            reject_dwell = max(0.2, min(2.0, human_delay_correlated(0.5, channel="reject_close")))
             await asyncio.sleep(reject_dwell)
             print(f"    [profile-read] REJECT verdict → closing in {reject_dwell:.1f}s")
 
         try:
             await self.browser.go_back_to_results()
-            await asyncio.sleep(human_delay_correlated(0.8))
+            await asyncio.sleep(human_delay_correlated(0.8, channel="panel_close"))
         except Exception as e:
             print(f"    [ERROR] go_back_to_results failed: {e} — panel may still be open")
             log_event(self.log_path, "go_back_error", name=snippet.name, error=str(e))
@@ -2075,6 +2225,8 @@ Provide a narrowed Boolean."""
                         ss.notes = f"Skipped by adaptation: {next((s['reason'] for s in adaptation.skip_remaining if s['string_id'] == ss.id), '')}"
                         print(f"    [adapt] Skipping #{ss.id}: {ss.notes}")
 
+            inserted_ids: set[int] = set()
+
             if adaptation.new_strings:
                 max_id = max(s.id for s in progress.strings) if progress.strings else 0
                 # Insert adaptive strings at front of queue (before first queued string)
@@ -2092,6 +2244,7 @@ Provide a narrowed Boolean."""
                         string_type="Adaptive",
                     )
                     progress.strings.insert(insert_idx, new_ss)
+                    inserted_ids.add(max_id)
                     insert_idx += 1
                     print(f"    [adapt] Inserted new string #{max_id} (next in queue): {ns['boolean'][:60]}...")
 
@@ -2144,9 +2297,10 @@ Provide a narrowed Boolean."""
                         self._execution_plan.architecture_rationale = adaptation.pivot_rationale
                         write_json(self.output_dir / "execution_plan.json", self._execution_plan.to_dict())
 
-                    # Clear remaining queued strings (new_strings already injected above)
+                    # Clear remaining queued strings but keep the replacement strings
+                    # we just injected for the new architecture.
                     for ss in progress.strings:
-                        if ss.status == "queued":
+                        if ss.status == "queued" and ss.id not in inserted_ids:
                             ss.status = "skipped"
                             ss.notes = f"Skipped by architecture pivot: {old_arch} → {new_arch}"
 
@@ -2323,7 +2477,28 @@ Provide a narrowed Boolean."""
                     self._rewrite_jsonl(path, kept)
                     print(f"  Removed {removed} entries from {path.name}")
 
-        # 4. Save updated progress
+        # 4. Remove this string's entries from cross-session history
+        if self.history_path.exists():
+            history_records = read_jsonl(self.history_path)
+            def _should_remove(r):
+                if r.get("source_string_id") == string_id:
+                    return True
+                if "source_string_id" not in r and r.get("profile_url", "") in urls_to_remove:
+                    return True
+                return False
+            kept_history = [r for r in history_records if not _should_remove(r)]
+            removed = len(history_records) - len(kept_history)
+            if removed > 0:
+                self._rewrite_jsonl(self.history_path, kept_history)
+                print(f"  Removed {removed} entries from {self.history_path.name}")
+
+        # 5. Purge in-memory dedup state for removed URLs
+        for url in urls_to_remove:
+            self._seen_urls.discard(url)
+            self._prior_outcomes.pop(url, None)
+            self._in_flight_urls.discard(url)
+
+        # 6. Save updated progress
         progress.save(str(self.progress_path))
         print(f"  String #{string_id} reset to page 1. Ready for re-evaluation.")
 
