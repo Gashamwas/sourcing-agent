@@ -479,7 +479,7 @@ class GitHubSearchQuery:
     name: str  # human-readable description
     query: str  # GitHub search query string
     channel: str  # "user_search" | "code_search" | "repo_mining" | "org_exploration" | "topic_search" | "stargazer_mining" | "graph_expansion"
-    status: str = "queued"  # "queued" | "in_progress" | "done" | "skipped"
+    status: str = "queued"  # "queued" | "in_progress" | "done" | "skipped" | "error"
     result_count: int = 0
     candidates_discovered: int = 0
     saves: list[str] = field(default_factory=list)

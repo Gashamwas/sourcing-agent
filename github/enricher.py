@@ -24,9 +24,11 @@ Usage:
 from __future__ import annotations
 
 import json
+import logging
 import re
 import base64
 from html.parser import HTMLParser
+from urllib.parse import urljoin
 from typing import Optional
 
 from github.client import GitHubClient
@@ -39,6 +41,9 @@ from github.schemas import (
 from shared.contact_discovery import discover_contacts
 from shared.llm_clients import cheap_llm
 import github.config as gc
+from shared.url_safety import check_url
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -421,31 +426,56 @@ class GitHubEnricher:
                     "detail": f"Listed as contributor to {frontier_repo}",
                 })
 
+    # Valid arXiv ID formats: new-style "2301.00001" or old-style "hep-th/9901001"
+    _ARXIV_ID_RE = re.compile(
+        r'^(\d{4}\.\d{4,5}(v\d+)?|[a-zA-Z-]+(\.[a-zA-Z-]+)?/\d{7}(v\d+)?)$'
+    )
+
+    _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
+    _MAX_REDIRECTS = 5
+
     async def _crawl_website_and_papers(self, candidate: GitHubCandidate) -> None:
-        """Crawl personal website and discover papers."""
-        urls_to_check = []
+        """Crawl personal website and discover papers.
+
+        All candidate-controlled URLs are validated against SSRF blocklists
+        before fetching, and redirects are followed manually with per-hop
+        validation.
+        """
+        username = candidate.user.username
+        urls_to_check: list[str] = []
 
         # Blog URL from profile
         blog = candidate.user.blog
         if blog and "linkedin.com" not in blog.lower():
             if not blog.startswith("http"):
                 blog = f"https://{blog}"
-            urls_to_check.append(blog)
+            safe, reason = await check_url(blog)
+            if safe:
+                urls_to_check.append(blog)
+            else:
+                logger.warning("Blocked blog URL for %s: %s (%s)", username, blog, reason)
 
         # Look for URLs in profile README
         if candidate.readme_text:
-            # Find URLs in README
             url_pattern = r'https?://[^\s\)\]>\"\'<]+'
             found_urls = re.findall(url_pattern, candidate.readme_text)
             for url in found_urls:
                 url_lower = url.lower()
                 if any(domain in url_lower for domain in ("arxiv.org", "scholar.google", "semanticscholar.org", "dl.acm.org")):
-                    candidate.paper_links.append(url)
+                    safe, reason = await check_url(url)
+                    if safe:
+                        candidate.paper_links.append(url)
+                    else:
+                        logger.warning("Blocked paper URL for %s: %s (%s)", username, url, reason)
                 elif "linkedin.com" not in url_lower and "github.com" not in url_lower:
                     if url not in urls_to_check:
-                        urls_to_check.append(url)
+                        safe, reason = await check_url(url)
+                        if safe:
+                            urls_to_check.append(url)
+                        else:
+                            logger.warning("Blocked README URL for %s: %s (%s)", username, url, reason)
 
-        # Fetch website content
+        # Fetch website content (redirect-safe)
         for url in urls_to_check[:2]:  # Max 2 websites
             try:
                 import aiohttp
@@ -454,15 +484,29 @@ class GitHubEnricher:
                 ssl_ctx = ssl.create_default_context(cafile=certifi.where())
                 connector = aiohttp.TCPConnector(ssl=ssl_ctx)
                 async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
-                    async with session.get(url) as resp:
-                        if resp.status == 200:
-                            content_type = resp.headers.get("Content-Type", "")
-                            if "html" in content_type:
-                                html = await resp.text()
-                                candidate.website_text = _html_to_text(html, gc.MAX_WEBSITE_FETCH_SIZE)
-                                # Look for paper links in website
-                                paper_urls = re.findall(r'https?://arxiv\.org/abs/[^\s\)\]>\"\'<]+', html)
-                                candidate.paper_links.extend(paper_urls)
+                    target = url
+                    for _ in range(self._MAX_REDIRECTS):
+                        async with session.get(target, allow_redirects=False) as resp:
+                            if resp.status in self._REDIRECT_STATUSES:
+                                location = resp.headers.get("Location")
+                                if not location:
+                                    break
+                                location = urljoin(target, location)
+                                safe, reason = await check_url(location)
+                                if not safe:
+                                    logger.warning("Blocked redirect for %s: %s -> %s (%s)", username, target, location, reason)
+                                    break
+                                target = location
+                                continue
+                            if resp.status == 200:
+                                content_type = resp.headers.get("Content-Type", "")
+                                if "html" in content_type:
+                                    html = await resp.text()
+                                    candidate.website_text = _html_to_text(html, gc.MAX_WEBSITE_FETCH_SIZE)
+                                    # Look for paper links in website
+                                    paper_urls = re.findall(r'https?://arxiv\.org/abs/[^\s\)\]>\"\'<]+', html)
+                                    candidate.paper_links.extend(paper_urls)
+                            break
             except Exception:
                 pass  # Not critical
 
@@ -473,24 +517,27 @@ class GitHubEnricher:
         for link in candidate.paper_links[:5]:  # Max 5 papers
             if "arxiv.org" in link:
                 try:
-                    # Extract arxiv ID and fetch title from API
-                    arxiv_id = link.split("/abs/")[-1].split("/")[0].rstrip(".")
-                    if arxiv_id:
-                        import aiohttp
-                        import ssl
-                        import certifi
-                        ssl_ctx = ssl.create_default_context(cafile=certifi.where())
-                        connector = aiohttp.TCPConnector(ssl=ssl_ctx)
-                        async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
-                            async with session.get(f"https://export.arxiv.org/api/query?id_list={arxiv_id}") as resp:
-                                if resp.status == 200:
-                                    xml = await resp.text()
-                                    # Simple title extraction from Atom XML
-                                    title_match = re.search(r'<title[^>]*>(.*?)</title>', xml, re.DOTALL)
-                                    if title_match:
-                                        title = title_match.group(1).strip()
-                                        if title and title != "ArXiv Query":
-                                            candidate.paper_titles.append(title)
+                    arxiv_id = link.split("/abs/")[-1].rstrip("/").rstrip(".")
+                    if not arxiv_id or not self._ARXIV_ID_RE.match(arxiv_id):
+                        continue
+                    import aiohttp
+                    import ssl
+                    import certifi
+                    ssl_ctx = ssl.create_default_context(cafile=certifi.where())
+                    connector = aiohttp.TCPConnector(ssl=ssl_ctx)
+                    async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
+                        async with session.get(
+                            "https://export.arxiv.org/api/query",
+                            params={"id_list": arxiv_id},
+                        ) as resp:
+                            if resp.status == 200:
+                                xml = await resp.text()
+                                # Simple title extraction from Atom XML
+                                title_match = re.search(r'<title[^>]*>(.*?)</title>', xml, re.DOTALL)
+                                if title_match:
+                                    title = title_match.group(1).strip()
+                                    if title and title != "ArXiv Query":
+                                        candidate.paper_titles.append(title)
                 except Exception:
                     pass
 

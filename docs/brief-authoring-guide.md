@@ -2,6 +2,8 @@
 
 This guide walks you through writing a brief for the autonomous sourcing agent. The brief carries ALL role-specific evaluation criteria — the pipeline's templates, adaptation logic, and bias controls read from it. A well-written brief is the single highest-leverage input to the system.
 
+If you're trying to socialize brief-writing with recruiters and recruiting managers, or you need to translate unfamiliar roles into agent-ready criteria, start with `docs/team-brief-translation-playbook.md` and fill `docs/agent-brief-intake-template.md` before drafting the JSON.
+
 The questions below map directly to fields in the brief schema. Answer each one. If you're using preflight (Opus generates a draft from the JD), use this guide to review what it produces — preflight fills gaps with generic criteria, and generic criteria compound into either false positives or false negatives over hundreds of evaluations.
 
 ---

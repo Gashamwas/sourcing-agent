@@ -14,7 +14,7 @@ import re
 from typing import Optional, TYPE_CHECKING
 from shared import config
 from shared.human_timing import human_delay_correlated
-from decoy.actions._utils import human_scroll
+from linkedin.input_backends import create_input_backend
 
 if TYPE_CHECKING:
     from rebrowser_playwright.async_api import Browser, Page, BrowserContext
@@ -41,12 +41,13 @@ async def _retry(coro_fn, retries=MAX_RETRIES, delay=RETRY_DELAY_SECONDS):
 class LinkedInBrowser:
     """Manages a Playwright connection to LinkedIn Recruiter via CDP."""
 
-    def __init__(self):
+    def __init__(self, input_mode: str = "concurrent"):
         self._playwright = None
         self._browser: Optional[Browser] = None
         self._context: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
-        self._cursor = None  # GhostCursor for human-like mouse movement
+        self.input_mode = input_mode
+        self._input_backend = create_input_backend(input_mode)
         self._project_id: Optional[str] = None  # Auto-detected from browser URL
 
     async def connect(self) -> None:
@@ -67,13 +68,11 @@ class LinkedInBrowser:
                     m = re.search(r'/talent/hire/(\d+)', page.url)
                     if m:
                         self._project_id = m.group(1)
-                    # Initialize ghost-cursor for human-like mouse trajectories
-                    try:
-                        from python_ghost_cursor.playwright_async import create_cursor
-                        self._cursor = create_cursor(self._page)
-                        print(f"  Connected to browser (ghost-cursor active). Active page: {self._page.url}")
-                    except Exception as e:
-                        print(f"  Connected to browser (ghost-cursor unavailable: {e}). Active page: {self._page.url}")
+                    await self._input_backend.initialize(self._page)
+                    print(
+                        f"  Connected to browser ({self._input_backend.status_label}). "
+                        f"Active page: {self._page.url}"
+                    )
                     return
 
         # No Recruiter tab found
@@ -89,6 +88,7 @@ class LinkedInBrowser:
         )
 
     async def disconnect(self) -> None:
+        await self._input_backend.shutdown()
         if self._playwright:
             await self._playwright.stop()
 
@@ -98,37 +98,27 @@ class LinkedInBrowser:
         Falls back to JS eval click if ghost-cursor unavailable or fails.
         Returns True if ghost-cursor succeeded, False if fell back to JS.
         """
-        if self._cursor:
-            try:
-                await asyncio.wait_for(self._cursor.click(selector), timeout=5.0)
-                return True
-            except Exception:
-                pass
-        return False
+        return await self._input_backend.click_selector(self.page, selector)
 
     async def _ghost_move(self, selector: str) -> bool:
         """Move cursor to element without clicking. Returns True if succeeded."""
-        if self._cursor:
-            try:
-                await asyncio.wait_for(self._cursor.move(selector), timeout=5.0)
-                return True
-            except Exception:
-                pass
-        return False
+        return await self._input_backend.move_selector(self.page, selector)
 
     async def _ghost_click_locator(self, locator) -> bool:
         """Ghost-click a Playwright Locator (not a CSS selector)."""
-        if self._cursor:
-            try:
-                handle = await locator.element_handle(timeout=3000)
-                if handle:
-                    await asyncio.wait_for(self._cursor.click(handle), timeout=5.0)
-                    return True
-            except Exception:
-                pass
+        if await self._input_backend.click_locator(self.page, locator):
+            return True
         # Fallback to Playwright click
         await locator.click(timeout=5000)
         return False
+
+    async def _human_scroll(self, delta_y: int, *, channel: str) -> None:
+        await self._input_backend.scroll(self.page, delta_y, channel=channel)
+
+    async def _press_key(self, key: str) -> None:
+        handled = await self._input_backend.press_key(self.page, key)
+        if not handled:
+            await self.page.keyboard.press(key)
 
     @property
     def page(self) -> Page:
@@ -310,7 +300,7 @@ class LinkedInBrowser:
             await textarea.fill(boolean)
 
             # Step 4: Submit
-            await self.page.keyboard.press("Enter")
+            await self._press_key("Enter")
 
         await _retry(_do)
 
@@ -443,7 +433,6 @@ class LinkedInBrowser:
         if await self.page.locator("ol.profile-list").count() == 0:
             return 0
 
-        SCROLL_STEP = 400       # ~4-5 card heights per increment
         MAX_SCROLLS = 50        # safety cap (50×400 = 20,000px, well beyond 26 cards)
         STABLE_ROUNDS = 3       # stop after 3 scrolls with no new cards
 
@@ -455,12 +444,13 @@ class LinkedInBrowser:
             if stable >= STABLE_ROUNDS:
                 break
 
-            await human_scroll(self.page, SCROLL_STEP)
-            total_scrolled += SCROLL_STEP
+            step = random.randint(260, 560)
+            await self._human_scroll(step, channel="results_list")
+            total_scrolled += step
 
-            # Dwell every 5 scrolls to simulate scanning
-            if scroll_num % 5 == 0:
-                await asyncio.sleep(human_delay_correlated(0.4))
+            # Occasional scan pause while reviewing newly exposed cards.
+            if scroll_num % random.randint(4, 6) == 0:
+                await asyncio.sleep(human_delay_correlated(0.5, channel="results_list_scan"))
 
             # Let DOM update after scroll
             await self.page.wait_for_timeout(300)
@@ -469,16 +459,30 @@ class LinkedInBrowser:
             if current_count > prev_count:
                 prev_count = current_count
                 stable = 0
+                if random.random() < 0.35:
+                    await asyncio.sleep(
+                        human_delay_correlated(
+                            random.uniform(0.5, 1.4),
+                            channel="results_list_scan",
+                        )
+                    )
             else:
                 stable += 1
+                if random.random() < 0.25:
+                    await asyncio.sleep(
+                        human_delay_correlated(
+                            random.uniform(0.15, 0.45),
+                            channel="results_list_scan",
+                        )
+                    )
 
         # Final wait for remaining renders
         await self.page.wait_for_timeout(800)
 
         # Scroll back to top
         if total_scrolled > 0:
-            await human_scroll(self.page, -total_scrolled)
-        await asyncio.sleep(human_delay_correlated(0.3))
+            await self._human_scroll(-total_scrolled, channel="results_list_return")
+        await asyncio.sleep(human_delay_correlated(0.3, channel="results_list_return"))
 
         return await self.page.locator(cards_selector).count()
 
@@ -565,9 +569,85 @@ class LinkedInBrowser:
             return statuses
         return await _retry(_do)
 
+    async def get_card_slot_count(self) -> int:
+        """Count result slots, including offscreen virtualized cards."""
+        slots = self.page.locator("ol.profile-list > li")
+        return await slots.count()
+
     async def get_card_count(self) -> int:
         cards = self.page.locator("ol.profile-list article.profile-list-item")
         return await cards.count()
+
+    async def focus_card_for_review(self, card_index: int) -> None:
+        """Bring a result card into a readable viewport position with visible scrolling."""
+        li = self.page.locator("ol.profile-list > li").nth(card_index)
+        await li.wait_for(state="attached", timeout=5000)
+
+        try:
+            rect = await li.evaluate("""el => {
+                const r = el.getBoundingClientRect();
+                return { top: r.top, bottom: r.bottom, height: r.height };
+            }""")
+            viewport_h = await self.page.evaluate("() => window.innerHeight")
+            target_top = random.randint(130, max(180, min(320, int(viewport_h * 0.35))))
+
+            if rect:
+                delta = rect["top"] - target_top
+                if abs(delta) > 40:
+                    await self._human_scroll(int(delta), channel="results_review")
+                    if random.random() < 0.25:
+                        correction = random.randint(12, 36)
+                        await self._human_scroll(
+                            -correction if delta > 0 else correction,
+                            channel="results_review",
+                        )
+            await self.page.wait_for_timeout(450)
+            article = li.locator("article.profile-list-item").first
+            await article.wait_for(state="visible", timeout=3000)
+        except Exception:
+            await li.scroll_into_view_if_needed(timeout=3000)
+            await self.page.wait_for_timeout(600)
+
+    async def get_card_snapshot(self, card_index: int) -> dict:
+        """Read one result card's rendered text plus stable DOM metadata."""
+        async def _do():
+            li = self.page.locator("ol.profile-list > li").nth(card_index)
+            article = li.locator("article.profile-list-item").first
+            await article.wait_for(state="visible", timeout=5000)
+
+            innertext = await article.inner_text(timeout=10000)
+
+            name = ""
+            url = ""
+            try:
+                name_el = article.locator('[class*="lockup__title"] a').first
+                name = (await name_el.inner_text(timeout=2000)).strip()
+                url = (await name_el.get_attribute("href")) or ""
+            except Exception:
+                try:
+                    link = article.locator('a[href*="/talent/profile/"]').first
+                    url = (await link.get_attribute("href")) or ""
+                    name = (await link.inner_text(timeout=2000)).strip()
+                except Exception:
+                    pass
+
+            already_saved = False
+            try:
+                change_btn = article.locator(
+                    ':is(button:has-text("Change stage"), button[data-test-change-stage-button])'
+                ).first
+                already_saved = await change_btn.is_visible(timeout=500)
+            except Exception:
+                already_saved = False
+
+            return {
+                "innertext": innertext,
+                "name": name,
+                "url": url,
+                "already_saved": already_saved,
+            }
+
+        return await _retry(_do)
 
     async def go_to_next_page(self) -> bool:
         """Click the bottom pagination link to advance to the next results page.
@@ -790,12 +870,12 @@ class LinkedInBrowser:
             height = await container.evaluate("el => el.scrollHeight")
             viewport_h = await container.evaluate("el => el.clientHeight")
         except Exception:
-            await asyncio.sleep(human_delay_correlated(self._BASE_SHORT_DWELL))
+            await asyncio.sleep(human_delay_correlated(self._BASE_SHORT_DWELL, channel="profile_read"))
             return
 
         if height <= viewport_h:
             # Profile fits in viewport, just dwell
-            await asyncio.sleep(human_delay_correlated(self._BASE_SHORT_DWELL))
+            await asyncio.sleep(human_delay_correlated(self._BASE_SHORT_DWELL, channel="profile_read"))
             return
 
         scrollable = height - viewport_h
@@ -829,7 +909,7 @@ class LinkedInBrowser:
 
         for i in range(chunks):
             px = min(chunk_size, scrollable - scrolled)
-            await human_scroll(self.page, px)
+            await self._human_scroll(px, channel="profile_read")
             scrolled += px
 
             if random.random() < 0.4:
@@ -841,15 +921,15 @@ class LinkedInBrowser:
                 base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
                 dwell = base * random.uniform(0.3, 0.5)
 
-            await asyncio.sleep(human_delay_correlated(dwell))
+            await asyncio.sleep(human_delay_correlated(dwell, channel="profile_read"))
 
             if i == reread_chunk:
                 # Re-read pause
-                await asyncio.sleep(human_delay_correlated(random.uniform(2.0, 8.0)))
+                await asyncio.sleep(human_delay_correlated(random.uniform(2.0, 8.0), channel="profile_read"))
 
         # Scroll back to top
-        await human_scroll(self.page, -scrolled)
-        await asyncio.sleep(human_delay_correlated(0.5))
+        await self._human_scroll(-scrolled, channel="profile_read_return")
+        await asyncio.sleep(human_delay_correlated(0.5, channel="profile_read_return"))
 
     async def _read_skipper(self, scrollable: int) -> None:
         """Pattern B — Skipper: jump to bottom section, back up, then finish."""
@@ -861,13 +941,13 @@ class LinkedInBrowser:
         scrolled = 0
         for _ in range(chunks_down_1):
             px = min(chunk_size, target_1 - scrolled)
-            await human_scroll(self.page, px)
+            await self._human_scroll(px, channel="profile_read")
             scrolled += px
             base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
-            await asyncio.sleep(human_delay_correlated(base * 0.3))
+            await asyncio.sleep(human_delay_correlated(base * 0.3, channel="profile_read"))
 
         # 2. Pause
-        await asyncio.sleep(human_delay_correlated(random.uniform(3.0, 8.0)))
+        await asyncio.sleep(human_delay_correlated(random.uniform(3.0, 8.0), channel="profile_read"))
 
         # 3. Scroll back up to ~20-30%
         target_2 = int(scrollable * random.uniform(0.2, 0.3))
@@ -876,14 +956,14 @@ class LinkedInBrowser:
             chunks_up = max(1, scroll_up // chunk_size)
             for _ in range(chunks_up):
                 px = min(chunk_size, scroll_up)
-                await human_scroll(self.page, -px)
+                await self._human_scroll(-px, channel="profile_read")
                 scrolled -= px
                 scroll_up -= px
                 base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
-                await asyncio.sleep(human_delay_correlated(base * 0.5))
+                await asyncio.sleep(human_delay_correlated(base * 0.5, channel="profile_read"))
 
         # 4. Pause
-        await asyncio.sleep(human_delay_correlated(random.uniform(2.0, 5.0)))
+        await asyncio.sleep(human_delay_correlated(random.uniform(2.0, 5.0), channel="profile_read"))
 
         # 5. Scroll to bottom
         remaining = scrollable - scrolled
@@ -891,15 +971,15 @@ class LinkedInBrowser:
             chunks_rest = max(1, remaining // chunk_size)
             for _ in range(chunks_rest):
                 px = min(chunk_size, remaining)
-                await human_scroll(self.page, px)
+                await self._human_scroll(px, channel="profile_read")
                 scrolled += px
                 remaining -= px
                 base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
-                await asyncio.sleep(human_delay_correlated(base))
+                await asyncio.sleep(human_delay_correlated(base, channel="profile_read"))
 
         # Scroll back to top
-        await human_scroll(self.page, -scrolled)
-        await asyncio.sleep(human_delay_correlated(0.5))
+        await self._human_scroll(-scrolled, channel="profile_read_return")
+        await asyncio.sleep(human_delay_correlated(0.5, channel="profile_read_return"))
 
     async def _read_skimmer(self, scrollable: int) -> None:
         """Pattern C — Skimmer: fast down, slow back up."""
@@ -910,24 +990,24 @@ class LinkedInBrowser:
         # 1. Fast scroll down
         for _ in range(chunks):
             px = min(chunk_size, scrollable - scrolled)
-            await human_scroll(self.page, px)
+            await self._human_scroll(px, channel="profile_read")
             scrolled += px
             base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
-            await asyncio.sleep(human_delay_correlated(base * random.uniform(0.3, 0.8)))
+            await asyncio.sleep(human_delay_correlated(base * random.uniform(0.3, 0.8), channel="profile_read"))
 
         # 2. Bottom pause
-        await asyncio.sleep(human_delay_correlated(random.uniform(1.0, 3.0)))
+        await asyncio.sleep(human_delay_correlated(random.uniform(1.0, 3.0), channel="profile_read"))
 
         # 3. Slow scroll back up
         scroll_remaining = scrolled
         while scroll_remaining > 0:
             px = min(chunk_size, scroll_remaining)
-            await human_scroll(self.page, -px)
+            await self._human_scroll(-px, channel="profile_read")
             scroll_remaining -= px
             base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
-            await asyncio.sleep(human_delay_correlated(base * random.uniform(1.5, 3.0)))
+            await asyncio.sleep(human_delay_correlated(base * random.uniform(1.5, 3.0), channel="profile_read"))
 
-        await asyncio.sleep(human_delay_correlated(0.5))
+        await asyncio.sleep(human_delay_correlated(0.5, channel="profile_read_return"))
 
     async def _read_section_hopper(self, scrollable: int) -> None:
         """Pattern D — Section hopper: top to bottom with 1-2 backtracks."""
@@ -938,36 +1018,48 @@ class LinkedInBrowser:
 
         for i in range(chunks):
             px = min(chunk_size, scrollable - scrolled)
-            await human_scroll(self.page, px)
+            await self._human_scroll(px, channel="profile_read")
             scrolled += px
             base = random.uniform(self._BASE_CHUNK_DWELL_LOW, self._BASE_CHUNK_DWELL_HIGH)
-            await asyncio.sleep(human_delay_correlated(base))
+            await asyncio.sleep(human_delay_correlated(base, channel="profile_read"))
 
             if i in backtrack_points:
                 # Backtrack: scroll UP 1 chunk, pause, then resume
                 backtrack_px = min(chunk_size, scrolled)
-                await human_scroll(self.page, -backtrack_px)
+                await self._human_scroll(-backtrack_px, channel="profile_read")
                 scrolled -= backtrack_px
-                await asyncio.sleep(human_delay_correlated(random.uniform(2.0, 4.0)))
+                await asyncio.sleep(human_delay_correlated(random.uniform(2.0, 4.0), channel="profile_read"))
                 # Resume forward
-                await human_scroll(self.page, backtrack_px)
+                await self._human_scroll(backtrack_px, channel="profile_read")
                 scrolled += backtrack_px
 
         # Scroll back to top
-        await human_scroll(self.page, -scrolled)
-        await asyncio.sleep(human_delay_correlated(0.5))
+        await self._human_scroll(-scrolled, channel="profile_read_return")
+        await asyncio.sleep(human_delay_correlated(0.5, channel="profile_read_return"))
 
     # ── Scroll helpers for post-evaluation dwell ─────────────────
 
     async def scroll_for_linger(self, chunks_back: int) -> int:
         """Scroll back up N chunks for re-reading, return actual pixels scrolled."""
-        px = chunks_back * random.randint(300, 500)
-        await human_scroll(self.page, -px)
+        requested = chunks_back * random.randint(300, 500)
+        try:
+            current_top = int(
+                await self.page.locator("div.profile__main-container").first.evaluate(
+                    "el => el.scrollTop"
+                )
+            )
+        except Exception:
+            current_top = 0
+
+        px = min(requested, max(0, current_top))
+        if px > 0:
+            await self._human_scroll(-px, channel="profile_linger")
         return px
 
     async def scroll_restore(self, px: int):
         """Scroll back down to restore position."""
-        await human_scroll(self.page, px)
+        if px > 0:
+            await self._human_scroll(px, channel="profile_linger")
 
     async def get_profile_innertext(self) -> str:
         """Get trimmed innerText from div.profile__main-container.
@@ -1014,7 +1106,7 @@ class LinkedInBrowser:
                     if visible:
                         await self._ghost_click_locator(el)
                         clicked += 1
-                        await asyncio.sleep(human_delay_correlated(0.4))
+                        await asyncio.sleep(human_delay_correlated(0.4, channel="profile_expand"))
             except Exception:
                 continue
 
@@ -1059,7 +1151,7 @@ class LinkedInBrowser:
                     return
 
             # Strategy 2: Escape key
-            await self.page.keyboard.press("Escape")
+            await self._press_key("Escape")
             await self.page.wait_for_timeout(1000)
             if not await slidein.is_visible():
                 return

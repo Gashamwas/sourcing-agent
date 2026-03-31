@@ -25,7 +25,7 @@ class DecisionRecord:
     candidate_id: str
     string_id: str
     stage: str                  # "facial" | "full"
-    decision: str               # "FACIAL_YES" | "FACIAL_NO" | "SAVE" | "INFERENTIAL_SAVE" | "TRANSFERABLE_SAVE" | "REJECT" | "PARSE_FAILURE"
+    decision: str               # "FACIAL_YES" | "FACIAL_NO" | "SAVE" | "INFERENTIAL_SAVE" | "TRANSFERABLE_SAVE" | "SIGNAL_SAVE" | "REJECT" | "PARSE_FAILURE"
     confidence: float
     capability_area: Optional[str]
     timestamp: float = field(default_factory=time.time)
@@ -48,6 +48,19 @@ class AlertType:
     PARSE_FAILURE_RATE = "parse_failure_rate"
     FACIAL_RATE_ANOMALY = "facial_rate_anomaly"
     VOLUME_INVERSION = "volume_inversion"
+
+
+SAVE_DECISIONS = {
+    "SAVE",
+    "INFERENTIAL_SAVE",
+    "TRANSFERABLE_SAVE",
+    "SIGNAL_SAVE",
+}
+
+
+def is_save_decision(decision: str) -> bool:
+    """Return True when a terminal decision should count as a save."""
+    return decision in SAVE_DECISIONS
 
 
 class BiasMonitor:
@@ -149,7 +162,7 @@ class BiasMonitor:
         # Count consecutive saves from the end
         consecutive = 0
         for d in reversed(string_decisions):
-            if d.decision in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"):
+            if is_save_decision(d.decision):
                 consecutive += 1
             else:
                 break
@@ -227,7 +240,7 @@ class BiasMonitor:
             return []
 
         recent = string_decisions[-window:]
-        save_count = sum(1 for d in recent if d.decision in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"))
+        save_count = sum(1 for d in recent if is_save_decision(d.decision))
         save_rate = save_count / len(recent)
 
         if save_rate >= self.save_rate_spike_threshold:
@@ -258,7 +271,8 @@ class BiasMonitor:
         if total < 20:  # Don't alert on small samples
             return []
 
-        parse_failures = sum(1 for d in self._decisions if "PARSE_FAILURE" in d.decision)
+        parse_failures = sum(1 for d in self._decisions
+                             if "PARSE_FAILURE" in d.decision or "JUDGMENT_FAILURE" in d.decision)
         failure_rate = parse_failures / total
 
         if failure_rate >= self.parse_failure_alarm_rate:
@@ -359,15 +373,16 @@ class BiasMonitor:
         full = [d for d in self._decisions if d.stage == "full"]
 
         facial_yes = sum(1 for d in facial if d.decision == "FACIAL_YES")
-        saves = sum(1 for d in full if d.decision in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"))
+        saves = sum(1 for d in full if is_save_decision(d.decision))
         rejects = sum(1 for d in full if d.decision == "REJECT")
-        parse_failures = sum(1 for d in self._decisions if "PARSE_FAILURE" in d.decision)
+        parse_failures = sum(1 for d in self._decisions
+                             if "PARSE_FAILURE" in d.decision or "JUDGMENT_FAILURE" in d.decision)
 
         # Per-string breakdown
         per_string_stats = {}
         for sid, decisions in self._per_string.items():
             full_d = [d for d in decisions if d.stage == "full"]
-            s = sum(1 for d in full_d if d.decision in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"))
+            s = sum(1 for d in full_d if is_save_decision(d.decision))
             r = sum(1 for d in full_d if d.decision == "REJECT")
             per_string_stats[sid] = {
                 "saves": s,

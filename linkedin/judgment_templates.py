@@ -347,7 +347,7 @@ from typing import Optional
 
 @dataclass
 class FacialResult:
-    decision: str           # "FACIAL_YES" | "FACIAL_NO" | "FACIAL_SKIP" | "PARSE_FAILURE"
+    decision: str           # "FACIAL_YES" | "FACIAL_NO" | "PARSE_FAILURE"
     reason: str
     raw_response: str
 
@@ -373,8 +373,7 @@ class FullEvaluationResult:
 def parse_facial_response(raw: str) -> FacialResult:
     """
     Parse facial triage response.
-    Default on failure: FACIAL_SKIP (skip candidate rather than inflating YES rate).
-    Flags the failure explicitly.
+    Default on failure: PARSE_FAILURE (non-terminal — candidate can be retried).
     """
     raw_stripped = raw.strip()
 
@@ -396,14 +395,14 @@ def parse_facial_response(raw: str) -> FacialResult:
     if "FACIAL_NO" in raw_stripped.upper():
         return FacialResult("FACIAL_NO", "parsed from raw", raw_stripped)
 
-    # Parse failure — skip candidate rather than inflating YES rate
-    return FacialResult("FACIAL_SKIP", "PARSE_FAILURE: skipping candidate", raw_stripped)
+    # Parse failure — non-terminal, candidate can be retried
+    return FacialResult("PARSE_FAILURE", "could not parse facial decision", raw_stripped)
 
 
 def parse_full_evaluation_response(raw: str) -> FullEvaluationResult:
     """
     Parse full evaluation response (4-step format with transferability).
-    Default on failure: REJECT with PARSE_FAILURE flag (auditable, not silent).
+    Default on failure: PARSE_FAILURE (non-terminal — candidate can be retried).
     """
     raw_stripped = raw.strip()
 
@@ -517,7 +516,7 @@ def parse_full_evaluation_response(raw: str) -> FullEvaluationResult:
 
     except Exception:
         return FullEvaluationResult(
-            decision="REJECT",
+            decision="PARSE_FAILURE",
             match_type=None,
             capability_area=None,
             capability_evidence="",

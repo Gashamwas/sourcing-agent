@@ -10,10 +10,30 @@ prompt builders below.
 
 from __future__ import annotations
 import json
+import logging
 import re
 from shared.schemas import CandidateSnippet, CandidateProfileSummary, OpusDecision
 from shared.llm_clients import opus_llm
 from shared.brief_loader import Brief
+
+logger = logging.getLogger(__name__)
+
+# Valid decisions for old-brief prompt contracts
+_VALID_FACIAL = {"FACIAL_YES", "FACIAL_NO"}
+_VALID_FULL = {"SAVE", "REJECT"}
+
+
+def _safe_confidence(val, default: float = 0.5) -> float:
+    """Safely convert a value to float, returning default on failure."""
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def is_failure_decision(decision: str) -> bool:
+    """True if decision represents a non-terminal parse/judgment failure."""
+    return decision in ("PARSE_FAILURE", "JUDGMENT_FAILURE")
 
 
 def extract_priority_rank(path: str) -> int:
@@ -340,14 +360,17 @@ def facial_judge(snippet: CandidateSnippet, brief: Brief | None = None, prompt_p
         prompt = assemble_facial_prompt(b._new_brief, snippet_text)
         if prompt_prefix:
             prompt = prompt_prefix + prompt
-        raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
+        try:
+            raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
+        except Exception as e:
+            logger.warning("V2 facial judge exception: %s", e)
+            return OpusDecision(
+                stage="facial", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+                rationale=f"[JUDGMENT_FAILURE: {e}]",
+                candidate_name=snippet.name, profile_url=snippet.profile_url,
+            )
         result = parse_facial_response(raw)
-        if result.decision == "FACIAL_SKIP":
-            confidence = 0.0
-        elif result.decision == "FACIAL_NO":
-            confidence = 1.0
-        else:
-            confidence = 1.0
+        confidence = 0.0 if is_failure_decision(result.decision) else 1.0
         return OpusDecision(
             stage="facial",
             decision=result.decision,
@@ -376,14 +399,30 @@ Education: {snippet.education_snippet}{career_section}
 
 Decide: FACIAL_YES or FACIAL_NO."""
 
-    result = opus_llm(system, user_prompt, expect_json=True)
+    try:
+        result = opus_llm(system, user_prompt, expect_json=True)
+    except Exception as e:
+        logger.warning("old-brief facial judge exception: %s", e)
+        return OpusDecision(
+            stage="facial", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+            rationale=f"[JUDGMENT_FAILURE: {e}]",
+            candidate_name=snippet.name, profile_url=snippet.profile_url,
+        )
 
+    raw_decision = result.get("decision") if isinstance(result, dict) else None
+    if raw_decision not in _VALID_FACIAL:
+        logger.warning("facial parse-failure: decision=%r (old-brief path)", raw_decision)
+        return OpusDecision(
+            stage="facial", decision="PARSE_FAILURE", path="none", confidence=0.0,
+            rationale=f"[PARSE_FAILURE: decision={raw_decision!r}]",
+            candidate_name=snippet.name, profile_url=snippet.profile_url,
+        )
     return OpusDecision(
         stage="facial",
-        decision=result.get("decision", "FACIAL_YES"),  # Default YES on parse failure — false positive > false negative
+        decision=raw_decision,
         path=result.get("path", "none"),
-        confidence=float(result.get("confidence", 0.5)),
-        rationale=result.get("rationale", "[parse error — defaulting to YES for human review]"),
+        confidence=_safe_confidence(result.get("confidence", 0.5)),
+        rationale=result.get("rationale", ""),
         candidate_name=snippet.name,
         profile_url=snippet.profile_url,
     )
@@ -402,7 +441,15 @@ def full_judge(summary: CandidateProfileSummary, brief: Brief | None = None) -> 
     if b.has_v2_schema:
         profile_text = _profile_to_text(summary)
         prompt = assemble_full_evaluation_prompt(b._new_brief, profile_text)
-        raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
+        try:
+            raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
+        except Exception as e:
+            logger.warning("V2 full judge exception: %s", e)
+            return OpusDecision(
+                stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+                rationale=f"[JUDGMENT_FAILURE: {e}]",
+                candidate_name=summary.name, profile_url=summary.profile_url,
+            )
         result = parse_full_evaluation_response(raw)
         # Build path from match_type + capability_area for downstream logging
         if result.match_type and result.capability_area:
@@ -416,7 +463,7 @@ def full_judge(summary: CandidateProfileSummary, brief: Brief | None = None) -> 
             path += f"|{result.transferability}"
         return OpusDecision(
             stage="full",
-            decision=result.decision if result.decision != "PARSE_FAILURE" else "REJECT",
+            decision=result.decision,
             path=path,
             confidence=result.confidence,
             rationale=result.summary or result.case_for or "[parse error]",
@@ -453,14 +500,30 @@ Skills: {skills_text}
 
 Decide: SAVE or REJECT."""
 
-    result = opus_llm(system, user_prompt, expect_json=True)
+    try:
+        result = opus_llm(system, user_prompt, expect_json=True)
+    except Exception as e:
+        logger.warning("old-brief full judge exception: %s", e)
+        return OpusDecision(
+            stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+            rationale=f"[JUDGMENT_FAILURE: {e}]",
+            candidate_name=summary.name, profile_url=summary.profile_url,
+        )
 
+    raw_decision = result.get("decision") if isinstance(result, dict) else None
+    if raw_decision not in _VALID_FULL:
+        logger.warning("full parse-failure: decision=%r (old-brief path)", raw_decision)
+        return OpusDecision(
+            stage="full", decision="PARSE_FAILURE", path="none", confidence=0.0,
+            rationale=f"[PARSE_FAILURE: decision={raw_decision!r}]",
+            candidate_name=summary.name, profile_url=summary.profile_url,
+        )
     return OpusDecision(
         stage="full",
-        decision=result.get("decision", "SAVE"),  # Default SAVE on parse failure — human will review anyway
+        decision=raw_decision,
         path=result.get("path", "none"),
-        confidence=float(result.get("confidence", 0.5)),
-        rationale=result.get("rationale", "[parse error — defaulting to SAVE for human review]"),
+        confidence=_safe_confidence(result.get("confidence", 0.5)),
+        rationale=result.get("rationale", ""),
         candidate_name=summary.name,
         profile_url=summary.profile_url,
     )
@@ -490,14 +553,22 @@ def github_facial_judge(portfolio_text: str, brief: Brief | None = None) -> Opus
         raise RuntimeError("GitHub judges require a V2 brief with capability_areas.")
 
     prompt = assemble_github_facial_prompt(b._new_brief, portfolio_text)
-    raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
+    try:
+        raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
+    except Exception as e:
+        logger.warning("GitHub facial judge exception: %s", e)
+        return OpusDecision(
+            stage="facial", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+            rationale=f"[JUDGMENT_FAILURE: {e}]",
+            candidate_name="", profile_url="",
+        )
     result = parse_facial_response(raw)
 
     return OpusDecision(
         stage="facial",
         decision=result.decision,
         path="none",
-        confidence=1.0 if "PARSE_FAILURE" not in result.reason else 0.0,
+        confidence=0.0 if is_failure_decision(result.decision) else 1.0,
         rationale=result.reason,
         candidate_name="",  # Caller sets this
         profile_url="",     # Caller sets this
@@ -524,7 +595,15 @@ def github_full_judge(evidence_text: str, brief: Brief | None = None) -> OpusDec
         raise RuntimeError("GitHub judges require a V2 brief with capability_areas.")
 
     prompt = assemble_github_full_evaluation_prompt(b._new_brief, evidence_text)
-    raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
+    try:
+        raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
+    except Exception as e:
+        logger.warning("GitHub full judge exception: %s", e)
+        return OpusDecision(
+            stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+            rationale=f"[JUDGMENT_FAILURE: {e}]",
+            candidate_name="", profile_url="",
+        )
     result = parse_full_evaluation_response(raw)
 
     # Build path from match_type + capability_area
@@ -539,7 +618,7 @@ def github_full_judge(evidence_text: str, brief: Brief | None = None) -> OpusDec
 
     return OpusDecision(
         stage="full",
-        decision=result.decision if result.decision != "PARSE_FAILURE" else "REJECT",
+        decision=result.decision,
         path=path,
         confidence=result.confidence,
         rationale=result.summary or result.case_for or "[parse error]",

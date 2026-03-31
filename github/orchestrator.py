@@ -37,7 +37,7 @@ from github.observability import SessionObserver
 from shared.contact_discovery import merge_profile_contact
 
 from shared.schemas import CandidateSnippet, CandidateProfileSummary, OpusDecision
-from shared.judger import facial_judge, full_judge, init_judger, github_facial_judge, github_full_judge, extract_priority_rank
+from shared.judger import facial_judge, full_judge, init_judger, github_facial_judge, github_full_judge, extract_priority_rank, is_failure_decision
 from github.outreach import generate_outreach
 from shared.storage import append_jsonl, read_jsonl_set, log_event
 from shared.brief_loader import load_brief, Brief
@@ -133,8 +133,11 @@ class GitHubPipeline:
         session_id = f"{self.brief_obj.id}_{session_ts}"
         self._observer = SessionObserver(session_id, self.output_dir, self.brief_obj)
 
-        # Load dedup cache
-        self._seen_usernames = read_jsonl_set(self.candidates_path, key="username")
+        # Dedup sets — _seen_usernames holds terminal outcomes only (loaded from
+        # progress checkpoint on resume).  _in_flight_usernames tracks candidates
+        # currently being processed and is deliberately NOT persisted.
+        self._seen_usernames: set[str] = set()
+        self._in_flight_usernames: set[str] = set()
 
         # Load or create progress
         progress = self._load_or_create_progress(resume)
@@ -144,6 +147,7 @@ class GitHubPipeline:
         self._install_signal_handler()
 
         log_event(self.log_path, "pipeline_start", mode="autonomous")
+        self._governor.start_session()
 
         async with GitHubClient() as client:
             self._client = client
@@ -174,6 +178,7 @@ class GitHubPipeline:
                 import traceback
                 traceback.print_exc()
             finally:
+                self._governor.end_session()
                 self._save_progress()
                 log_event(self.log_path, "pipeline_end", stats=self.stats)
 
@@ -207,8 +212,8 @@ class GitHubPipeline:
     ):
         """Execute all queries in the queue with adaptation."""
         queries = progress.queries
-        batch_start_idx = 0
         batch_stats: list[dict] = []
+        executed_since_batch = 0
 
         for i, query in enumerate(queries):
             if self._shutdown_requested:
@@ -248,36 +253,37 @@ class GitHubPipeline:
 
             try:
                 await self._execute_single_query(client, enricher, query, progress)
+                query.status = "done"
+                batch_stats.append({
+                    "query_id": query.id,
+                    "name": query.name,
+                    "query_string": query.query,
+                    "channel": query.channel,
+                    "saves": len(query.saves),
+                    "candidates": query.candidates_discovered,
+                })
+
+                # Record result in exhaustion state
+                pre_dedup = getattr(query, '_pre_dedup_count', query.result_count)
+                self._exhaustion.record_query_result(
+                    channel=query.channel,
+                    saves=len(query.saves),
+                    candidates=query.candidates_discovered,
+                    pre_dedup=pre_dedup,
+                    post_dedup=query.result_count,
+                )
             except GitHubGovernorLimitReached:
                 raise
             except Exception as e:
                 self._observer.on_error("query", e, query)
                 query.notes = f"Error: {e}"
-
-            query.status = "done"
-            batch_stats.append({
-                "query_id": query.id,
-                "name": query.name,
-                "query_string": query.query,
-                "channel": query.channel,
-                "saves": len(query.saves),
-                "candidates": query.candidates_discovered,
-            })
-
-            # Record result in exhaustion state
-            pre_dedup = getattr(query, '_pre_dedup_count', query.result_count)
-            self._exhaustion.record_query_result(
-                channel=query.channel,
-                saves=len(query.saves),
-                candidates=query.candidates_discovered,
-                pre_dedup=pre_dedup,
-                post_dedup=query.result_count,
-            )
+                query.status = "error"
 
             self._save_progress()
+            executed_since_batch += 1
 
             # Adaptation after batch
-            if (i - batch_start_idx + 1) >= _ADAPTATION_BATCH_SIZE:
+            if executed_since_batch >= _ADAPTATION_BATCH_SIZE:
                 remaining = [q for q in queries if q.status == "queued"]
                 if remaining:
                     batch_report = self._build_batch_report(batch_stats)
@@ -301,7 +307,7 @@ class GitHubPipeline:
                         self._observer.console.emit_info(f"Session stop: {stop_rec}")
                         return
 
-                batch_start_idx = i + 1
+                executed_since_batch = 0
                 batch_stats = []
 
                 # Process graph expansion queue between batches
@@ -539,6 +545,7 @@ class GitHubPipeline:
                 self.stats.setdefault("geo_filtered_light", 0)
                 self.stats["geo_filtered_light"] += 1
                 self._observer.on_geo_filtered(username, candidate.user.location or "no location", query, "light")
+                self._mark_terminal(username)
                 return
 
         # Rule-based pre-screen using light data only
@@ -547,6 +554,7 @@ class GitHubPipeline:
             self.stats.setdefault("prescreen_filtered", 0)
             self.stats["prescreen_filtered"] += 1
             self._observer.on_prescreen_filtered(username, candidate, query)
+            self._mark_terminal(username)
             return
 
         # Full enrichment
@@ -577,6 +585,7 @@ class GitHubPipeline:
             self.stats.setdefault("geo_filtered", 0)
             self.stats["geo_filtered"] += 1
             self._observer.on_geo_filtered(username, candidate.user.location or "no location", query, "full")
+            self._mark_terminal(username)
             return
 
         # Check data sufficiency
@@ -585,13 +594,22 @@ class GitHubPipeline:
             progress.candidates_insufficient += 1
             log_event(self.log_path, "insufficient_data", username=username)
             self._observer.on_insufficient_data(username, query)
+            self._mark_terminal(username)
             return
 
         # --- GitHub-native evaluation pipeline ---
         if self.brief_obj.has_v2_schema:
             # GitHub facial triage using portfolio text
             portfolio_text = candidate.to_portfolio_text()
-            facial_decision = github_facial_judge(portfolio_text)
+            try:
+                facial_decision = github_facial_judge(portfolio_text)
+            except Exception as e:
+                facial_decision = OpusDecision(
+                    stage="facial", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+                    rationale=f"[JUDGMENT_FAILURE: {e}]",
+                    candidate_name=candidate.user.name or username,
+                    profile_url=candidate.user.profile_url,
+                )
             facial_decision.candidate_name = candidate.user.name or username
             facial_decision.profile_url = candidate.user.profile_url
         else:
@@ -602,7 +620,14 @@ class GitHubPipeline:
                 result_rank=result_rank,
             )
             append_jsonl(self.snippets_path, snippet.to_dict())
-            facial_decision = facial_judge(snippet)
+            try:
+                facial_decision = facial_judge(snippet)
+            except Exception as e:
+                facial_decision = OpusDecision(
+                    stage="facial", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+                    rationale=f"[JUDGMENT_FAILURE: {e}]",
+                    candidate_name=snippet.name, profile_url=snippet.profile_url,
+                )
 
         append_jsonl(self.facial_path, facial_decision.to_dict())
 
@@ -616,9 +641,16 @@ class GitHubPipeline:
                 string_id=str(query.id),
             ))
 
+        if is_failure_decision(facial_decision.decision):
+            self.stats.setdefault("parse_failures", 0)
+            self.stats["parse_failures"] += 1
+            self._observer.on_facial_decision(username, facial_decision.decision, facial_decision.rationale, query)
+            return
+
         if facial_decision.decision == "FACIAL_NO":
             self.stats["facial_no"] += 1
             self._observer.on_facial_decision(username, "FACIAL_NO", facial_decision.rationale, query)
+            self._mark_terminal(username)
             return
 
         self.stats["facial_yes"] += 1
@@ -627,13 +659,28 @@ class GitHubPipeline:
         # Full evaluation
         if self.brief_obj.has_v2_schema:
             evidence_text = candidate.to_evidence_text()
-            full_decision = github_full_judge(evidence_text)
+            try:
+                full_decision = github_full_judge(evidence_text)
+            except Exception as e:
+                full_decision = OpusDecision(
+                    stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+                    rationale=f"[JUDGMENT_FAILURE: {e}]",
+                    candidate_name=candidate.user.name or username,
+                    profile_url=candidate.user.profile_url,
+                )
             full_decision.candidate_name = candidate.user.name or username
             full_decision.profile_url = candidate.user.profile_url
         else:
             profile_summary = candidate.to_profile_summary()
             append_jsonl(self.profiles_path, profile_summary.to_dict())
-            full_decision = full_judge(profile_summary)
+            try:
+                full_decision = full_judge(profile_summary)
+            except Exception as e:
+                full_decision = OpusDecision(
+                    stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+                    rationale=f"[JUDGMENT_FAILURE: {e}]",
+                    candidate_name=profile_summary.name, profile_url=profile_summary.profile_url,
+                )
 
         append_jsonl(self.final_path, full_decision.to_dict())
 
@@ -646,6 +693,11 @@ class GitHubPipeline:
                 capability_area=getattr(full_decision, 'path', None),
                 string_id=str(query.id),
             ))
+
+        if is_failure_decision(full_decision.decision):
+            self.stats.setdefault("parse_failures", 0)
+            self.stats["parse_failures"] += 1
+            return
 
         if full_decision.decision in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE", "SIGNAL_SAVE"):
             self.stats["saved"] += 1
@@ -711,6 +763,8 @@ class GitHubPipeline:
             self.stats["rejected"] += 1
             progress.candidates_rejected += 1
             self._observer.on_reject(username, candidate, full_decision, query)
+
+        self._mark_terminal(username)
 
         # Checkpoint periodically
         if (progress.candidates_enriched % _CHECKPOINT_EVERY) == 0:
@@ -1019,12 +1073,17 @@ class GitHubPipeline:
         # Append global queries at the end
         queries.extend(global_queries)
 
+    def _mark_terminal(self, username: str):
+        """Promote username from in-flight to permanent dedup."""
+        self._in_flight_usernames.discard(username)
+        self._seen_usernames.add(username)
+
     def _dedup_usernames(self, usernames: list[str]) -> list[str]:
-        """Filter out already-seen usernames."""
+        """Filter out already-seen or in-flight usernames."""
         new = []
         for u in usernames:
-            if u and u not in self._seen_usernames:
-                self._seen_usernames.add(u)
+            if u and u not in self._seen_usernames and u not in self._in_flight_usernames:
+                self._in_flight_usernames.add(u)
                 new.append(u)
         return new
 

@@ -6,9 +6,11 @@ Run with: python -m pytest test_extractors.py -v
 import json
 import importlib
 from pathlib import Path
+from unittest.mock import patch
 
-from shared.schemas import CandidateSnippet
-from shared.judger import _build_facial_system, _build_full_system
+from shared.schemas import CandidateSnippet, CandidateProfileSummary
+from shared.extractors import extract_snippet_from_card_innertext
+from shared.judger import _build_facial_system, _build_full_system, facial_judge, full_judge
 from shared.brief_loader import load_brief, Brief
 
 
@@ -179,3 +181,237 @@ def test_pipeline_import_works():
     """Verify orchestrator module imports cleanly."""
     from linkedin.orchestrator import Pipeline
     assert Pipeline is not None
+
+
+def test_single_card_extractor_builds_snippet():
+    with patch("shared.extractors.cheap_llm", return_value={
+        "name": "Ada Lovelace",
+        "headline": "ML Engineer",
+        "current_title": "ML Engineer",
+        "current_company": "Analytical Engines",
+        "location": "London",
+        "education_snippet": "University of London",
+        "profile_url": "/talent/profile/ada",
+        "experience_entries": ["ML Engineer at Analytical Engines (2024-Present)"],
+    }):
+        snippet = extract_snippet_from_card_innertext(
+            "Select Ada Lovelace\nAda Lovelace\nML Engineer",
+            string_id=7,
+            string_name="test string",
+            page=2,
+            result_rank=4,
+        )
+
+    assert snippet is not None
+    assert snippet.name == "Ada Lovelace"
+    assert snippet.profile_url == "/talent/profile/ada"
+    assert snippet.source_string_id == 7
+    assert snippet.source_string_name == "test string"
+    assert snippet.page == 2
+    assert snippet.result_rank == 4
+
+
+def test_single_card_extractor_returns_none_for_invalid_payload():
+    with patch("shared.extractors.cheap_llm", return_value="not-json"):
+        snippet = extract_snippet_from_card_innertext(
+            "Select Test Person\nTest Person",
+            string_id=1,
+            string_name="test",
+            page=1,
+            result_rank=1,
+        )
+
+    assert snippet is None
+
+
+# ---------------------------------------------------------------------------
+# Judgment parse-failure hardening (old-brief paths)
+# ---------------------------------------------------------------------------
+
+def _make_summary(**kwargs) -> CandidateProfileSummary:
+    defaults = {
+        "name": "Test Person",
+        "profile_url": "/talent/profile/test",
+        "headline": "Engineer",
+    }
+    defaults.update(kwargs)
+    return CandidateProfileSummary(**defaults)
+
+
+def test_facial_missing_decision_parse_failure():
+    """Old-brief facial: missing decision key -> PARSE_FAILURE."""
+    with patch("shared.judger.opus_llm", return_value={}):
+        result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
+    assert result.decision == "PARSE_FAILURE"
+    assert result.confidence == 0.0
+    assert "PARSE_FAILURE" in result.rationale
+
+
+def test_facial_garbage_decision_parse_failure():
+    """Old-brief facial: unrecognized decision value -> PARSE_FAILURE."""
+    with patch("shared.judger.opus_llm", return_value={"decision": "YOLO"}):
+        result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
+    assert result.decision == "PARSE_FAILURE"
+    assert result.confidence == 0.0
+
+
+def test_facial_nondict_result_parse_failure():
+    """Old-brief facial: non-dict LLM result -> PARSE_FAILURE."""
+    with patch("shared.judger.opus_llm", return_value="just a string"):
+        result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
+    assert result.decision == "PARSE_FAILURE"
+    assert result.confidence == 0.0
+
+
+def test_full_missing_decision_parse_failure():
+    """Old-brief full: missing decision key -> PARSE_FAILURE."""
+    with patch("shared.judger.opus_llm", return_value={}):
+        result = full_judge(_make_summary(), BRAZIL_BRIEF)
+    assert result.decision == "PARSE_FAILURE"
+    assert result.confidence == 0.0
+    assert "PARSE_FAILURE" in result.rationale
+
+
+def test_full_garbage_decision_parse_failure():
+    """Old-brief full: unrecognized decision value -> PARSE_FAILURE."""
+    with patch("shared.judger.opus_llm", return_value={"decision": "MAYBE"}):
+        result = full_judge(_make_summary(), BRAZIL_BRIEF)
+    assert result.decision == "PARSE_FAILURE"
+    assert result.confidence == 0.0
+
+
+def test_full_nondict_result_parse_failure():
+    """Old-brief full: non-dict LLM result -> PARSE_FAILURE."""
+    with patch("shared.judger.opus_llm", return_value=42):
+        result = full_judge(_make_summary(), BRAZIL_BRIEF)
+    assert result.decision == "PARSE_FAILURE"
+    assert result.confidence == 0.0
+
+
+def test_facial_malformed_confidence_safe():
+    """Old-brief facial: non-numeric confidence -> default, not exception."""
+    with patch("shared.judger.opus_llm", return_value={
+        "decision": "FACIAL_YES", "confidence": "high", "rationale": "ok"
+    }):
+        result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
+    assert result.decision == "FACIAL_YES"
+    assert result.confidence == 0.5  # default fallback
+
+
+def test_full_malformed_confidence_safe():
+    """Old-brief full: non-numeric confidence -> default, not exception."""
+    with patch("shared.judger.opus_llm", return_value={
+        "decision": "SAVE", "confidence": "???", "rationale": "match"
+    }):
+        result = full_judge(_make_summary(), BRAZIL_BRIEF)
+    assert result.decision == "SAVE"
+    assert result.confidence == 0.5  # default fallback
+
+
+def test_facial_opus_exception_judgment_failure():
+    """Old-brief facial: opus_llm exception -> JUDGMENT_FAILURE."""
+    with patch("shared.judger.opus_llm", side_effect=RuntimeError("API timeout")):
+        result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
+    assert result.decision == "JUDGMENT_FAILURE"
+    assert result.confidence == 0.0
+
+
+def test_full_opus_exception_judgment_failure():
+    """Old-brief full: opus_llm exception -> JUDGMENT_FAILURE."""
+    with patch("shared.judger.opus_llm", side_effect=RuntimeError("API timeout")):
+        result = full_judge(_make_summary(), BRAZIL_BRIEF)
+    assert result.decision == "JUDGMENT_FAILURE"
+    assert result.confidence == 0.0
+
+
+def test_facial_none_result_parse_failure():
+    """Old-brief facial: None result -> PARSE_FAILURE."""
+    with patch("shared.judger.opus_llm", return_value=None):
+        result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
+    assert result.decision == "PARSE_FAILURE"
+    assert result.confidence == 0.0
+
+
+def test_is_failure_decision_helper():
+    """is_failure_decision returns True for failures, False for real decisions."""
+    from shared.judger import is_failure_decision
+    assert is_failure_decision("PARSE_FAILURE") is True
+    assert is_failure_decision("JUDGMENT_FAILURE") is True
+    assert is_failure_decision("FACIAL_YES") is False
+    assert is_failure_decision("FACIAL_NO") is False
+    assert is_failure_decision("SAVE") is False
+    assert is_failure_decision("REJECT") is False
+    assert is_failure_decision("FACIAL_SKIP") is False
+
+
+# ---------------------------------------------------------------------------
+# Parser-level regression tests
+# ---------------------------------------------------------------------------
+
+def test_parse_facial_malformed_returns_parse_failure():
+    """parse_facial_response with garbage input -> PARSE_FAILURE decision."""
+    from linkedin.judgment_templates import parse_facial_response
+    result = parse_facial_response("totally garbage response with no decision")
+    assert result.decision == "PARSE_FAILURE"
+
+
+def test_parse_full_malformed_returns_parse_failure():
+    """parse_full_evaluation_response with garbage input -> PARSE_FAILURE decision."""
+    from linkedin.judgment_templates import parse_full_evaluation_response
+    result = parse_full_evaluation_response("totally garbage response")
+    assert result.decision == "PARSE_FAILURE"
+
+
+# ---------------------------------------------------------------------------
+# V2 path regression tests
+# ---------------------------------------------------------------------------
+
+def test_v2_facial_parse_failure_not_skip():
+    """V2 facial: parser failure -> PARSE_FAILURE, not FACIAL_SKIP."""
+    with patch("shared.judger.opus_llm", return_value="garbage with no decision line"):
+        result = facial_judge(_make_snippet(), HEAD_AI_BRIEF)
+    assert result.decision == "PARSE_FAILURE"
+    assert result.decision != "FACIAL_SKIP"
+    assert result.confidence == 0.0
+
+
+def test_v2_full_parse_failure_not_reject():
+    """V2 full: parser failure -> PARSE_FAILURE, not REJECT."""
+    with patch("shared.judger.opus_llm", return_value="garbage with no structure"):
+        result = full_judge(_make_summary(), HEAD_AI_BRIEF)
+    assert result.decision == "PARSE_FAILURE"
+    assert result.decision != "REJECT"
+
+
+def test_github_full_parse_failure_not_reject():
+    """GitHub full: parser failure -> PARSE_FAILURE, not REJECT.
+
+    Tests via the parser directly since github_full_judge requires V2 brief.
+    The parser is re-exported from linkedin.judgment_templates.
+    """
+    from github.judgment_templates import parse_full_evaluation_response
+    result = parse_full_evaluation_response("garbage with no structure at all")
+    assert result.decision == "PARSE_FAILURE"
+    assert result.decision != "REJECT"
+
+
+def test_facial_valid_yes_passes():
+    """Old-brief facial: valid FACIAL_YES passes through normally."""
+    with patch("shared.judger.opus_llm", return_value={
+        "decision": "FACIAL_YES", "path": "eng", "confidence": 0.8, "rationale": "looks good"
+    }):
+        result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
+    assert result.decision == "FACIAL_YES"
+    assert result.confidence == 0.8
+    assert result.rationale == "looks good"
+
+
+def test_full_valid_save_passes():
+    """Old-brief full: valid SAVE passes through normally."""
+    with patch("shared.judger.opus_llm", return_value={
+        "decision": "SAVE", "path": "eng", "confidence": 0.7, "rationale": "strong match"
+    }):
+        result = full_judge(_make_summary(), BRAZIL_BRIEF)
+    assert result.decision == "SAVE"
+    assert result.confidence == 0.7
+    assert result.rationale == "strong match"

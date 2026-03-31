@@ -8,8 +8,9 @@ classifiers with near-100% accuracy.
 Usage:
     from human_timing import human_delay, human_delay_correlated
 
-    await asyncio.sleep(human_delay(1.5, 4.0))        # single delay
-    await asyncio.sleep(human_delay_correlated(2.0))   # session-correlated
+    await asyncio.sleep(human_delay(1.5, 4.0))                       # single delay
+    await asyncio.sleep(human_delay_correlated(2.0))                 # default stream
+    await asyncio.sleep(human_delay_correlated(0.04, channel="scroll"))
 """
 
 import math
@@ -21,8 +22,9 @@ import random
 _DEFAULT_MU = 1.5
 _DEFAULT_SIGMA = 0.8
 
-# State for correlated delays (consecutive delays should be correlated, not independent)
-_last_delay: float = 0.0
+# State for correlated delays. Keep independent streams so micro-scroll cadence
+# does not leak into page-turn, profile-read, or save/close pacing.
+_last_delay_by_channel: dict[str, float] = {}
 _CORRELATION_WEIGHT = 0.3  # How much the previous delay influences the next
 
 
@@ -41,7 +43,15 @@ def human_delay(low: float, high: float, mu: float = 0.0, sigma: float = 0.6) ->
     return max(low, min(high, sample))
 
 
-def human_delay_correlated(base: float, spread: float = 0.6) -> float:
+def reset_human_timing(channel: str | None = None) -> None:
+    """Reset correlated timing state."""
+    if channel is None:
+        _last_delay_by_channel.clear()
+        return
+    _last_delay_by_channel.pop(channel, None)
+
+
+def human_delay_correlated(base: float, spread: float = 0.6, *, channel: str = "default") -> float:
     """Sample a delay with temporal autocorrelation.
 
     Consecutive calls produce correlated values — a long pause makes the
@@ -50,19 +60,20 @@ def human_delay_correlated(base: float, spread: float = 0.6) -> float:
 
     base: center of the delay range
     spread: log-normal sigma (higher = more variance)
+    channel: independent pacing stream name
     """
-    global _last_delay
 
     mu = math.log(max(base, 0.1))
     raw = random.lognormvariate(mu, spread)
+    last_delay = _last_delay_by_channel.get(channel, 0.0)
 
     # Blend with previous delay for autocorrelation
-    if _last_delay > 0:
-        blended = (1 - _CORRELATION_WEIGHT) * raw + _CORRELATION_WEIGHT * _last_delay
+    if last_delay > 0:
+        blended = (1 - _CORRELATION_WEIGHT) * raw + _CORRELATION_WEIGHT * last_delay
     else:
         blended = raw
 
     # Clamp to reasonable bounds (0.3x to 4x the base)
     result = max(base * 0.3, min(base * 4.0, blended))
-    _last_delay = result
+    _last_delay_by_channel[channel] = result
     return result

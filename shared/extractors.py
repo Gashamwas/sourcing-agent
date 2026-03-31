@@ -1,8 +1,9 @@
 """Extractors: innerText -> structured data via cheap model.
 
-Two extractors:
+Three extractors:
 1. extract_snippets_from_list_innertext() - results list innerText -> CandidateSnippets
-2. extract_profile_from_innertext() - profile innerText -> CandidateProfileSummary
+2. extract_snippet_from_card_innertext() - one result card innerText -> CandidateSnippet
+3. extract_profile_from_innertext() - profile innerText -> CandidateProfileSummary
 
 These receive innerText (clean labeled text), NOT raw HTML/DOM.
 """
@@ -46,6 +47,49 @@ Rules:
 - Parse current_title and current_company from Experience section or headline ("Title at Company")
 - Do NOT invent data. Only extract what's in the text.
 - Return valid JSON only. No markdown, no explanation."""
+
+
+CARD_EXTRACTION_SYSTEM = """You are a precise data extractor. You receive innerText from ONE LinkedIn Recruiter candidate result card.
+
+Return a JSON object:
+- "name": Full name (string)
+- "headline": Headline text (string)
+- "current_title": Current job title (string, from first experience entry or headline)
+- "current_company": Current employer (string)
+- "location": Location (string)
+- "education_snippet": Visible education info (string, empty if not shown)
+- "profile_url": LinkedIn profile URL if visible in the text (string)
+- "experience_entries": Array of visible experience entries as compact strings in format "Title at Company (dates)" (array of strings)
+
+Rules:
+- Extract data from this ONE card only
+- If a field is not visible, use empty string ""
+- Do NOT invent data
+- Return valid JSON only. No markdown, no explanation."""
+
+
+def _build_snippet(
+    candidate: dict,
+    *,
+    string_id: int,
+    string_name: str,
+    page: int,
+    result_rank: int,
+) -> CandidateSnippet:
+    return CandidateSnippet(
+        name=candidate.get("name", ""),
+        headline=candidate.get("headline", ""),
+        current_title=candidate.get("current_title", ""),
+        current_company=candidate.get("current_company", ""),
+        location=candidate.get("location", ""),
+        education_snippet=candidate.get("education_snippet", ""),
+        profile_url=candidate.get("profile_url", ""),
+        source_string_id=string_id,
+        source_string_name=string_name,
+        page=page,
+        result_rank=result_rank,
+        experience_entries=candidate.get("experience_entries", []),
+    )
 
 
 def _chunk_innertext(innertext: str, max_cards_per_chunk: int = 10) -> list[str]:
@@ -108,19 +152,12 @@ Results text:
         candidates_raw = result.get("candidates", []) if isinstance(result, dict) else result
         for c in candidates_raw:
             try:
-                snippet = CandidateSnippet(
-                    name=c.get("name", ""),
-                    headline=c.get("headline", ""),
-                    current_title=c.get("current_title", ""),
-                    current_company=c.get("current_company", ""),
-                    location=c.get("location", ""),
-                    education_snippet=c.get("education_snippet", ""),
-                    profile_url=c.get("profile_url", ""),
-                    source_string_id=string_id,
-                    source_string_name=string_name,
+                snippet = _build_snippet(
+                    c,
+                    string_id=string_id,
+                    string_name=string_name,
                     page=page,
                     result_rank=c.get("result_rank", 0) + rank_offset,
-                    experience_entries=c.get("experience_entries", []),
                 )
                 if snippet.name:
                     all_snippets.append(snippet)
@@ -138,6 +175,35 @@ def extract_snippets_from_list_dom(
     dom_text: str, string_id: int, string_name: str, page: int,
 ) -> list[CandidateSnippet]:
     return extract_snippets_from_list_innertext(dom_text, string_id, string_name, page)
+
+
+def extract_snippet_from_card_innertext(
+    innertext: str,
+    string_id: int,
+    string_name: str,
+    page: int,
+    result_rank: int,
+) -> CandidateSnippet | None:
+    """Extract one candidate snippet from a single LinkedIn Recruiter result card."""
+    user_prompt = f"""Extract the candidate data from this single LinkedIn Recruiter card.
+
+Search context: String #{string_id} "{string_name}", page {page}, rank {result_rank}.
+
+Card text:
+{innertext}"""
+
+    result = cheap_llm(CARD_EXTRACTION_SYSTEM, user_prompt, expect_json=True)
+    if not isinstance(result, dict):
+        return None
+
+    snippet = _build_snippet(
+        result,
+        string_id=string_id,
+        string_name=string_name,
+        page=page,
+        result_rank=result_rank,
+    )
+    return snippet if snippet.name else None
 
 
 # ---------------------------------------------------------------------------
