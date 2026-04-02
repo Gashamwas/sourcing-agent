@@ -1,0 +1,563 @@
+{
+  "role_title": "Forward Deployed Engineer",
+  "role_level": "IC5-IC6",
+  "role_summary": "Hands-on senior IC who partners directly with enterprise customers to scope, architect, build, and ship production GenAI systems. The work is part backend engineer, part applied LLM builder, part technical lead: translating ambiguous customer needs into technical specs, integrating models into real systems, and creating reusable delivery patterns that shorten future deployments. This is not a research role, not a pure product role, and not a pre-sales role. The hard bar is production agentic/GenAI delivery plus strong architectural judgment. Client-facing experience and pedigree matter, but they should increase confidence rather than substitute for build evidence.",
+  "geography": "New York, New York, United States",
+  "linkedin_project": "FDE - Leah",
+  "linkedin_project_id": "1990251114",
+
+  "instructions": [
+    "This market has already been worked for months. The FIRST 8 strings must be majority edge-case transfer populations, not the canonical FDE pool. Exact-title strings, company-first frontier-AI strings, framework-first strings, and broad 'agentic + production' nets belong in later cleanup passes only.",
+    "Before generating strings, first model what a generally solid technical sourcer would search in a standard pass. Then explicitly move one layer outward: ask which same-caliber candidates those standard searches miss, and target those nooks and crannies first.",
+    "Judge the opening sequence by novelty as well as productivity. In the first 2 blocks, at least half of the saves should ideally come from adjacent or edge-case pools rather than exact-title FDEs, framework-first strings, or canonical frontier-company pools. Strong saves from the obvious pool are useful, but they are cleanup confirmation, not proof the opening strategy is correct.",
+    "Front-load edge-case but credible populations: staff or senior backend engineers who shipped internal copilots or AI workflows; applied scientists or ML engineers who owned deployment and productization; technical leads or managers at consultancies who still personally built customer systems; founding engineers at vertical AI SaaS startups; internal GenAI platform builders at large companies; engineers who built reusable delivery accelerators, observability, evals, or reference architectures.",
+    "Search both SWE-shaped and DS/ML-shaped paths. Do not assume the best candidates call themselves FDEs. The title is a weak proxy; production agentic work plus architecture is the real signal.",
+    "Search both product-language and systems-language populations. Strong candidates may describe their work as document understanding, knowledge management, intelligent search, support automation, compliance workflows, developer productivity, or internal tools rather than GenAI, agentic, or RAG.",
+    "The core evaluation bar is production GenAI or agentic delivery plus architectural ownership. Client-facing delivery, stakeholder management, and pedigree are confidence boosters, not substitutes for technical build evidence.",
+    "Favor profiles that show translation from ambiguous requirements into implemented systems: discovery, solution design, architecture docs, API or data integration, deployment, iteration, and reusable delivery tooling.",
+    "Use adjacent titles aggressively, but do NOT blanket-exclude titles like Solutions Architect, Consulting Engineer, Customer Engineer, Manager, or Consultant in search strings. Many real edge cases hide there. Only exclude when paired with clearly non-building sales, advisory, or large-org leadership language.",
+    "Use adjacent titles aggressively when AND-gated with build evidence: staff engineer, principal engineer, technical lead, solution architect, customer engineer, implementation engineer, delivery engineer, applied scientist, ML engineer, AI engineer, founding engineer.",
+    "For GitHub, use precision-heavy queries and code-level fingerprints. Prioritize repos that show orchestration, integrations, evals, backend services, deployment tooling, or reusable delivery accelerators. De-emphasize toy demos, prompt collections, and thin wrappers around hosted APIs."
+  ],
+
+  "search_priorities": [
+    "Staff or senior backend/platform engineers who built internal copilots, AI assistants, knowledge systems, or workflow automation in production",
+    "Engineers who built reusable delivery accelerators, reference architectures, eval harnesses, tracing, or observability for GenAI deployments",
+    "Applied scientists, ML engineers, and AI engineers who owned productization and deployment rather than only offline model work",
+    "Technical leads, managers, and consulting engineers at consultancies or AI boutiques who still personally built customer systems",
+    "Principal or senior engineers in internal enterprise AI platform teams who paired architecture depth with cross-functional stakeholder work",
+    "Founding engineers or hands-on CTOs at small vertical AI SaaS startups selling workflow or knowledge products into enterprises",
+    "Engineers whose profiles emphasize product/problem language like document understanding, intelligent search, support automation, compliance workflows, or developer productivity rather than generic GenAI vocabulary",
+    "Canonical forward-deployed / customer-engineering / Palantir-style populations only after edge-case pools have been tested and the opening save mix is not overly concentrated in obvious pools"
+  ],
+
+  "additional_search_terms": [
+    "technical discovery",
+    "solution design",
+    "solutions delivery",
+    "requirements gathering",
+    "trusted advisor",
+    "technical lead",
+    "reference architecture",
+    "reference implementation",
+    "accelerator",
+    "deployment toolkit",
+    "reusable module",
+    "delivery playbook",
+    "modular delivery",
+    "workflow engine",
+    "human in the loop",
+    "semantic cache",
+    "guardrails",
+    "evals",
+    "evaluation harness",
+    "observability",
+    "tracing",
+    "prompt logging",
+    "latency optimization",
+    "cost optimization",
+    "agent routing",
+    "knowledge management",
+    "knowledge assistant",
+    "intelligent search",
+    "semantic search",
+    "document understanding",
+    "document intelligence",
+    "contract analysis",
+    "compliance workflow",
+    "support automation",
+    "internal tools",
+    "developer productivity",
+    "analyst assistant",
+    "operations assistant",
+    "retrieval pipeline",
+    "event-driven",
+    "Temporal",
+    "FastAPI"
+  ],
+
+  "intake_notes": "Recruiter guidance is sparse beyond the JD. The must-haves are: good pedigree, production agentic work, strong architectural design fundamentals, either SWE or DS/ML background, and either client-facing experience or clear communication gravitas. Ideal profile is 5-10 years of experience; 15-20 years is generally too senior. The talent pool is reportedly tapped dry. For strategy, treat the obvious pool as already mined: do not open with direct FDE titles, canonical framework strings, or company-first frontier AI strings. Open with edge-case transfer populations and product-language/system-language builders first.",
+
+  "capability_areas": [
+    {
+      "name": "1. Production Agentic / GenAI Application Delivery (HARD GATE)",
+      "description": "Has personally designed and shipped production LLM applications, copilots, or agentic workflows into real user or customer environments. Not a demo, not a weekend hack, not a vendor rollout. The signal is end-to-end ownership of a system that went live and solved an actual workflow problem.",
+      "builder_signals": [
+        "Architected and implemented a production RAG, copilot, or agentic workflow that served real users or customers",
+        "Owned orchestration patterns such as tool calling, function calling, agent routing, workflow state, or multi-step execution",
+        "Integrated LLM systems into real business or product workflows rather than leaving them as isolated demos",
+        "Iterated on prompts, retrieval, guardrails, or evals based on production behavior, latency, accuracy, or adoption",
+        "Can describe concrete delivery outcomes: launch context, scale, latency, reliability, error handling, or measurable impact"
+      ],
+      "user_signals": [
+        "Rolled out GitHub Copilot, ChatGPT Enterprise, or other vendor AI tools without building custom systems",
+        "Built a prototype chatbot or internal demo with no evidence it reached production or real workflow adoption",
+        "Implemented thin wrappers over hosted APIs without owning system design, integration, or production hardening",
+        "Led the team that built the GenAI application but does not appear to have built key parts personally"
+      ],
+      "key_terms": [
+        "agentic workflow",
+        "tool calling",
+        "function calling",
+        "copilot",
+        "guardrails",
+        "evals",
+        "orchestration",
+        "workflow state",
+        "agent routing",
+        "human in the loop",
+        "multi-step execution"
+      ],
+      "github_code_signals": [
+        "langgraph",
+        "pydantic_ai",
+        "dspy",
+        "litellm",
+        "openai",
+        "anthropic",
+        "crewai",
+        "autogen",
+        "browser_use",
+        "playwright"
+      ]
+    },
+    {
+      "name": "2. Enterprise Architecture & Systems Integration",
+      "description": "Designs the surrounding system architecture that makes LLM applications actually usable in enterprise settings: APIs, services, data stores, queues, auth, observability, and cloud deployment. This is the architectural maturity requirement. The person should be able to translate a vague customer problem into a credible system design.",
+      "builder_signals": [
+        "Designed APIs, microservices, event-driven workflows, or async job systems that support the GenAI product",
+        "Integrated LLM applications with customer data sources, internal tools, business systems, or external platforms",
+        "Made architecture tradeoffs around latency, reliability, security, cost, observability, or multi-tenant concerns",
+        "Built secure and performant cloud deployments on AWS, GCP, or Azure for AI-powered applications",
+        "Produced technical specs, architecture docs, or implementation plans that drove the delivery"
+      ],
+      "user_signals": [
+        "Only worked on prompt engineering, notebooks, or experimentation without owning the production system architecture",
+        "Built the UI shell around a model but did not own the integration or backend design",
+        "Did platform or infrastructure work with no visible ownership of the GenAI application itself",
+        "Acted as a stakeholder or reviewer on architecture without implementing the system"
+      ],
+      "key_terms": [
+        "API design",
+        "microservices",
+        "event-driven",
+        "webhooks",
+        "Temporal",
+        "FastAPI",
+        "queues",
+        "Kafka",
+        "OAuth",
+        "observability",
+        "Terraform",
+        "Pulumi"
+      ],
+      "github_code_signals": [
+        "fastapi",
+        "temporalio",
+        "kafka",
+        "celery",
+        "pulumi",
+        "terraform",
+        "opentelemetry",
+        "oauth",
+        "docker",
+        "kubernetes"
+      ]
+    },
+    {
+      "name": "3. Reusable Delivery Tooling & Operationalization",
+      "description": "Builds reusable modules, accelerators, deployment patterns, evaluation harnesses, or internal tooling that make future customer deployments faster, safer, and more repeatable. This separates a strong one-off implementer from someone who improves the delivery machine itself.",
+      "builder_signals": [
+        "Built reusable modules, SDKs, templates, or scaffolds that supported more than one delivery",
+        "Created deployment playbooks, accelerators, reference architectures, or internal tooling used across projects",
+        "Built evaluation or regression harnesses that reduced quality risk for ongoing GenAI deployments",
+        "Standardized CI/CD, IaC, tracing, or operational workflows for GenAI delivery teams",
+        "Improved time-to-value across multiple deployments through reusable engineering assets"
+      ],
+      "user_signals": [
+        "Delivered one-off bespoke builds with no evidence of reuse or operational improvement",
+        "Managed delivery timelines or operations but did not build the tooling or technical standards",
+        "Owned only project coordination or enablement around someone else's engineering system"
+      ],
+      "key_terms": [
+        "accelerator",
+        "reference architecture",
+        "deployment toolkit",
+        "evaluation harness",
+        "template",
+        "scaffold",
+        "CI/CD",
+        "IaC",
+        "tracing",
+        "observability"
+      ],
+      "github_code_signals": [
+        "deepeval",
+        "ragas",
+        "pytest",
+        "pulumi",
+        "terraform",
+        "helm",
+        "docker-compose",
+        "opentelemetry"
+      ]
+    },
+    {
+      "name": "4. Applied LLM Adaptation, Evaluation & Retrieval",
+      "description": "Hands-on work improving model behavior through retrieval design, prompt programs, evals, fine-tuning, reranking, or LLM operations. This is not required to be frontier-ML depth, but it is a strong differentiator for FDEs who can go beyond basic application wiring.",
+      "builder_signals": [
+        "Built evaluation frameworks, prompt optimization loops, or benchmarking processes for production LLM systems",
+        "Owned retrieval design, reranking, chunking, embedding strategy, or knowledge quality improvements",
+        "Fine-tuned or adapted models, or ran experiments to improve model behavior through data, prompts, or model selection",
+        "Can explain tradeoffs among models, retrieval strategies, latency, and quality for production use cases"
+      ],
+      "user_signals": [
+        "Consumed hosted models without tuning behavior, retrieval, or evaluation methodology",
+        "Listed fine-tuning or RAG as buzzwords with no evidence of hands-on experimentation or system impact",
+        "Only called pre-built frameworks with default settings and no evaluation rigor"
+      ],
+      "key_terms": [
+        "fine-tuning",
+        "RAG",
+        "reranking",
+        "embeddings",
+        "evals",
+        "semantic cache",
+        "quality regression",
+        "LoRA",
+        "PEFT",
+        "prompt optimization"
+      ],
+      "github_code_signals": [
+        "ragas",
+        "deepeval",
+        "langsmith",
+        "peft",
+        "trl",
+        "unsloth",
+        "haystack",
+        "llama_index"
+      ]
+    }
+  ],
+
+  "post_save_modifiers": [
+    {
+      "name": "Customer-Facing Discovery / Gravitas",
+      "trigger": "Candidate already qualifies as a SAVE, SIGNAL_SAVE, TRANSFERABLE_SAVE, or INFERENTIAL_SAVE based on the core capability areas",
+      "if_present": "Boost confidence by 0.05-0.10. Note that the candidate appears able to drive customer conversations, gather requirements, and translate them into technical plans.",
+      "if_absent": "No adjustment. Lack of explicit client-facing evidence is not a rejection reason if the technical bar is met and the profile still signals communication maturity.",
+      "signals": [
+        "Led discovery, solution design, or technical scoping with customers or business stakeholders",
+        "Acted as trusted technical advisor, solutions lead, or technical lead in customer-facing deployments",
+        "Owned requirements gathering and converted ambiguous stakeholder needs into technical specs or architecture plans",
+        "Presentation, workshop, or consulting-style delivery language paired with hands-on engineering evidence"
+      ]
+    },
+    {
+      "name": "Pedigree / High-Slope Trajectory",
+      "trigger": "Candidate already qualifies as a SAVE, SIGNAL_SAVE, TRANSFERABLE_SAVE, or INFERENTIAL_SAVE based on the core capability areas",
+      "if_present": "Boost confidence by 0.03-0.08. Note that strong school, employer, or trajectory signal increases confidence in slope and screen-worthiness.",
+      "if_absent": "No adjustment. Do not reject solely for lacking obvious pedigree if the production-builder evidence is strong.",
+      "signals": [
+        "Top-tier school or highly selective technical training",
+        "Strong employer trajectory across respected engineering or AI organizations",
+        "Unusually high-slope progression from engineer to staff or architecture-heavy roles within the 5-10 year target band",
+        "Open-source or public technical artifacts that signal above-average technical taste and credibility"
+      ]
+    }
+  ],
+
+  "depth_distinction": {
+    "builder_definition": "A builder for this role personally drives the technical design and implementation of production GenAI systems. They do not just suggest the architecture. They write or review meaningful code, make architecture tradeoffs, integrate with real systems, and can explain how requirements became a working deployment. The whiteboard test is: could this person walk a customer from vague problem statement to system diagram, model or retrieval choices, API and data integrations, eval plan, and rollout approach from first principles?",
+    "user_definition": "A user or adjacent profile talks about AI, sells AI, scopes AI, or adopts AI without personally building the production system. This includes pre-sales demo work, AI transformation strategy, product management over engineering teams, vendor-tool rollout, and thin prompt or wrapper work that never grows into real system ownership. The distinguishing question is: if the customer asked this person to personally build the first credible version, could they do it?",
+    "edge_case_guidance": "SWE BACKGROUND: A senior backend or platform engineer with recent production copilot or agent experience can absolutely fit even without a classic ML title. Prioritize architecture ownership and shipped GenAI systems. DS/ML BACKGROUND: An applied scientist or ML engineer can fit if they clearly owned productization, system integration, and delivery rather than only experimentation or offline modeling. SOLUTIONS / CONSULTING TITLES: These can be strong fits if the bullets describe personal engineering authorship of custom deployments. They are non-fits only when the work is pre-sales, advisory, staffing, or account management. STARTUP FOUNDERS / CTOs: At small startups under roughly 150 employees, founders and CTOs can be strong fits if they are still hands-on and within the target seniority band. At larger organizations, VP / Head / Partner / practice-leader titles usually drift too far from the code. EXPERIENCE BAND: Ideal is 5-10 years. Once profiles push into 15+ years with large-org leadership titles, be skeptical unless the profile is clearly still IC-like and hands-on."
+  },
+
+  "inferential_save_rules": {
+    "description": "This search is intentionally edge-case-friendly because the obvious pool has already been exhausted. When a sparse profile still has a strong prior of fitting the hard technical bar, prefer INFERENTIAL_SAVE over silent rejection so the recruiter can review it.",
+    "conditions": [
+      "Staff, senior, or lead engineer with explicit GenAI, copilot, agent, LLM, or retrieval terms in the most recent role, even if bullets are sparse",
+      "Solutions architect, customer engineer, or consulting engineer at an enterprise AI company with clear engineering or deployment language in title or headline",
+      "Applied scientist, ML engineer, or AI engineer whose headline shows production LLM, eval, or deployment vocabulary even if the profile lacks detailed bullets",
+      "Founding engineer or CTO at a small AI startup with strong hands-on product or architecture language and plausible 5-10 year seniority",
+      "Candidate from a strong school or employer trajectory whose most recent work clearly sits in production GenAI delivery, even if details are thin"
+    ],
+    "save_tag": "INFERENTIAL_SAVE",
+    "confidence_range": [0.35, 0.5],
+    "note": "The recruiter would rather inspect a small set of strong edge-case maybes than miss the right profile because it used non-standard titles or sparse LinkedIn bullets."
+  },
+
+  "non_fit_patterns": [
+    {
+      "label": "Cloud-vendor pre-sales solutions architect",
+      "description": "Customer-facing architecture roles at AWS, Azure, GCP, Snowflake, Databricks, or similar vendors where the work is demos, solutioning, and technical sales support around platform capabilities rather than hands-on authorship of custom production systems.",
+      "why_not": "Trusted-advisor energy is relevant, but the role requires a builder who personally ships the system. Demoing or advising on vendor capabilities is not the same as engineering the deployment.",
+      "examples": [
+        "Principal Solutions Architect at AWS",
+        "Customer Engineer at Google Cloud with demo-focused work",
+        "AI Solutions Specialist at Azure"
+      ]
+    },
+    {
+      "label": "AI strategy, transformation, or product leadership",
+      "description": "Profiles centered on roadmaps, product management, AI transformation, or organizational strategy rather than engineering authorship.",
+      "why_not": "The role needs someone who can personally turn requirements into running systems. Defining what to build is not enough without evidence of building it.",
+      "examples": [
+        "Director of AI Products",
+        "AI Transformation Lead",
+        "Principal Product Manager, Generative AI"
+      ]
+    },
+    {
+      "label": "Thin GenAI wrappers, demos, or prompt engineering only",
+      "description": "Profiles that mention GenAI, copilots, or agents, but the actual work appears to be prompt experiments, demo apps, hackathon projects, or UI-level wrappers around hosted APIs.",
+      "why_not": "The surface vocabulary matches, but the technical depth does not. This role needs production ownership, architecture, and operational hardening, not just AI-flavored prototypes.",
+      "examples": [
+        "Built an internal chatbot demo",
+        "Prompt engineer for marketing workflows",
+        "Hackathon agent builder with no production evidence"
+      ]
+    },
+    {
+      "label": "Pure MLOps, platform, or DevOps without application ownership",
+      "description": "Engineers who build model-serving infrastructure, CI/CD, feature stores, or cloud platforms but do not own the GenAI application, workflow logic, or customer-facing system design.",
+      "why_not": "Useful adjacent skills, but the role needs someone who owns the application layer and the solution architecture, not just the platform around it.",
+      "examples": [
+        "MLOps engineer managing SageMaker pipelines",
+        "Platform engineer for ML infrastructure",
+        "DevOps engineer supporting AI teams"
+      ]
+    },
+    {
+      "label": "Classical DS/ML for business metrics",
+      "description": "Data scientists and ML engineers focused on recommendation systems, fraud models, pricing models, ad ranking, forecasting, or analytics with no evidence of production LLM or agentic application delivery.",
+      "why_not": "Strong technical people, but the role is about applied GenAI delivery and architecture. Traditional predictive ML alone is too far from the daily work unless the profile clearly transitioned into deployment-oriented LLM systems.",
+      "examples": [
+        "Senior Data Scientist, fraud",
+        "ML engineer for recommender systems",
+        "Pricing data scientist"
+      ]
+    },
+    {
+      "label": "Customer-facing enablement without engineering authorship",
+      "description": "Profiles that live close to customers but focus on onboarding, enablement, project coordination, or adoption rather than writing and owning the core engineering system.",
+      "why_not": "Customer empathy matters here, but not at the expense of engineering depth. This role still needs a builder, not only a delivery coordinator.",
+      "examples": [
+        "Implementation consultant",
+        "Customer success engineer",
+        "Technical account manager"
+      ]
+    },
+    {
+      "label": "Too-senior AI practice or org leadership",
+      "description": "VPs, Heads, Partners, or large-practice leaders with 15-20+ years experience whose recent work is organizational leadership rather than hands-on building.",
+      "why_not": "The leveling is wrong. The role wants architectural maturity with IC-level execution, not someone who now runs a large org or sells the practice.",
+      "examples": [
+        "Partner, AI Transformation",
+        "VP Engineering at a large enterprise",
+        "Head of AI practice at a major consultancy"
+      ]
+    }
+  ],
+
+  "non_fit_override_rule": "Non-fit patterns describe the default expectation for common noisy populations, not absolute bans. If the profile contains specific evidence that the person personally built and shipped production GenAI systems with architectural ownership, that evidence overrides the pattern. This is especially important for titles like Solutions Architect, Consulting Engineer, Customer Engineer, or Applied Scientist, which can hide real fits as easily as they can hide noise.",
+
+  "employer_signal_rules": [
+    {
+      "tier": "forward_deployed_like_ai_companies",
+      "employer_patterns": [
+        "Palantir",
+        "Scale AI",
+        "Dataiku",
+        "C3 AI",
+        "DataRobot",
+        "Glean",
+        "Writer",
+        "Moveworks",
+        "Hebbia",
+        "Sierra",
+        "Unstructured"
+      ],
+      "evidence_required": "Relevant engineering, architect, solutions, or deployment title plus some sign of hands-on GenAI or production delivery. These companies are good hunting grounds, but employer alone is not enough because some roles are pre-sales, product, or pure management.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "consulting_engineering",
+      "employer_patterns": [
+        "Accenture",
+        "Deloitte",
+        "BCG X",
+        "McKinsey",
+        "QuantumBlack",
+        "Slalom",
+        "Thoughtworks",
+        "EPAM",
+        "Globant",
+        "CI&T"
+      ],
+      "evidence_required": "Only save when the profile clearly shows build-and-deploy work. Advisory, staffing, transformation, partner, and account-heavy roles are common false positives. Consulting engineers who personally implemented production systems can be excellent fits.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "ai_startup_builder",
+      "employer_patterns": [],
+      "evidence_required": "Small or mid-size AI-native startups selling copilots, agents, workflow automation, or enterprise AI systems. This tier is intentionally not name-limited. Look for engineering titles, architecture ownership, and evidence that the person is still hands-on.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "enterprise_internal_builder",
+      "employer_patterns": [],
+      "evidence_required": "Large enterprises where the candidate built internal or external GenAI systems for real users. The employer can be in finance, healthcare, software, retail, or any other enterprise domain. What matters is builder evidence plus architecture ownership, not the logo itself.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "strong_pedigree_signal",
+      "employer_patterns": [
+        "OpenAI",
+        "Anthropic",
+        "Google",
+        "Meta",
+        "Microsoft",
+        "Amazon",
+        "Databricks",
+        "Snowflake",
+        "Stripe"
+      ],
+      "evidence_required": "Treat these employers as strong priors, not shortcuts. The role still needs production GenAI delivery and architecture evidence. Generic software engineering at a strong company is not enough.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "neutral",
+      "employer_patterns": [],
+      "evidence_required": "Apply the same technical standard as any other candidate. Strong fits can absolutely come from lesser-known employers if the actual work is right.",
+      "save_on_employer_alone": false
+    }
+  ],
+
+  "minimum_years_experience": 5,
+  "minimum_bar_description": "Five or more years of hands-on engineering is the floor, but the meaningful bar is not the number. The candidate should already have owned production software systems and should have at least one credible example of taking a GenAI or agentic system into production. Ideal profiles land in the 5-10 year range with strong upward slope. Be cautious with 15+ year candidates whose recent work is mostly leadership, sales, or practice-building rather than hands-on technical delivery.",
+
+  "facial_calibration": {
+    "expected_yes_rate_low": 0.15,
+    "expected_yes_rate_high": 0.35,
+    "fast_exit_patterns": [
+      "ENTIRE career is sales, business development, account management, or customer success",
+      "ENTIRE career is program management, delivery management, or project coordination with no engineering IC roles",
+      "ENTIRE career is BI, analytics, or reporting with no software or ML engineering positions",
+      "ENTIRE career is frontend-only or mobile-only engineering with no backend, platform, AI, or architecture signals",
+      "ENTIRE career is DevOps / SRE / platform infrastructure with no visible AI application ownership or customer-solution work",
+      "Fresh graduate or early-career profile with fewer than 5 years visible experience",
+      "Current role is clearly Partner, VP, Head, or large-practice leader and the trajectory shows 15-20+ years of increasingly managerial work"
+    ],
+    "trajectory_yes_patterns": [
+      "Staff, senior, or lead engineer with recent AI, GenAI, LLM, copilot, or agent terms in headline or most recent role",
+      "Principal engineer, architect, or technical lead with backend or platform trajectory plus recent GenAI delivery language",
+      "Solutions architect, customer engineer, or consulting engineer at an enterprise AI company with engineering or deployment language visible",
+      "Applied scientist, ML engineer, or AI engineer whose recent role combines production deployment language with LLM or agentic terms",
+      "Founding engineer or CTO at a small AI startup with clear hands-on product or architecture language",
+      "Career progression from backend or platform engineering into AI, GenAI, or applied ML delivery roles",
+      "Senior engineer or tech lead whose recent work is described in product/problem language such as document understanding, knowledge search, support automation, compliance workflows, internal tools, or developer productivity alongside AI or automation signals"
+    ],
+    "trajectory_ambiguous_patterns": [
+      "Solutions Architect or Customer Engineer at any company — could be pre-sales noise or could be a real builder",
+      "ML Engineer, Applied Scientist, or AI Engineer at a known company — could be offline modeling or real product deployment",
+      "Principal or Staff engineer with vague innovation, AI, or platform language — needs full profile to resolve",
+      "Consulting or delivery title at a consultancy — build/deploy versus advisory cannot be resolved from snippet alone",
+      "Manager or Senior Manager at a consultancy or AI vendor with engineering language — could still be 50/50 hands-on and should not be ruled out from snippet alone",
+      "Startup founder or CTO — could be deeply hands-on or too leadership-heavy depending on company size and stage"
+    ],
+    "trajectory_no_patterns": [
+      "Title contains customer success, account management, or solutions consulting without engineering words and the rest of the trajectory points the same way",
+      "No visible AI, GenAI, architecture, backend, or ML delivery signal anywhere in the trajectory",
+      "Most recent title is VP, Head, Partner, or practice lead at a large organization and the visible trajectory suggests the candidate is above the intended level"
+    ],
+    "github_fast_exit_patterns": [
+      "Profile has zero meaningful non-fork repositories and no bio or profile README that suggests professional AI or backend work",
+      "ALL repositories are frontend shells, website clones, prompt collections, or tutorial completions with no backend or ML system code",
+      "ALL repositories are DevOps or infrastructure only with no application-level AI or integration work"
+    ],
+    "github_portfolio_yes_patterns": [
+      "Repos show agent orchestration, tool calling, evaluation harnesses, retrieval systems, or reusable delivery tooling rather than only notebooks or prompts",
+      "Portfolio combines backend service code with LLM application logic, integrations, or workflow orchestration",
+      "Profile README or bio describes production AI engineering, customer deployments, solution architecture, or technical lead work in concrete tooling terms",
+      "Repos demonstrate both application code and operational hardening such as tracing, deployment configs, evals, or reusable modules"
+    ],
+    "github_portfolio_ambiguous_patterns": [
+      "Public repos are sparse, but the profile README describes professional AI engineering work with specific toolchain references",
+      "Repo mix includes some demo agents plus strong backend or infrastructure code that could support real delivery work",
+      "Company or org affiliation looks strong, but the visible repos do not fully prove whether the candidate owned production work",
+      "Mostly private-work profile with a few relevant repos, frameworks, or contribution hints"
+    ],
+    "github_portfolio_no_patterns": [
+      "ALL repos are toy chatbots, prompt packs, or UI wrappers around hosted APIs with no backend or evaluation depth",
+      "ALL repos are only data notebooks, coursework, or tutorial projects with no production-oriented system code",
+      "ALL repos are platform or infrastructure experiments with no AI application, orchestration, or integration ownership"
+    ]
+  },
+
+  "market_density": "sparse",
+  "employer_blacklist": [
+    "Turing"
+  ],
+  "jd_path": "config/jd-forward-deployed-engineer-nyc.txt",
+
+  "bias_controls": {
+    "max_consecutive_saves": 6,
+    "max_consecutive_rejects": 18,
+    "parse_failure_alarm_rate": 0.03
+  },
+
+  "calibration_examples": {
+    "strong_saves": [
+      {
+        "name": "ARCHETYPE: Staff backend engineer turned internal copilot builder",
+        "why": "Career starts in backend or platform engineering, then recent bullets show owning an internal copilot or agent workflow in production, integrating with enterprise systems, and making architecture decisions. No FDE title needed."
+      },
+      {
+        "name": "ARCHETYPE: Consulting engineer at enterprise AI vendor who still writes the system",
+        "why": "Customer-facing title, but the profile clearly describes architecting and implementing custom LLM workflows, integrations, and deployment patterns for multiple clients. This is the right kind of consulting signal."
+      },
+      {
+        "name": "ARCHETYPE: Applied scientist who owns productization",
+        "why": "ML-shaped background, but not just experimentation. The candidate built eval loops, retrieval strategies, APIs, and production delivery around LLM systems. Strong fit because the deployment layer is real."
+      },
+      {
+        "name": "ARCHETYPE: Founding engineer at small AI startup",
+        "why": "Still hands-on, built the product and architecture personally, shipped agentic workflows into customer environments, and remains within the 5-10 year seniority band."
+      }
+    ],
+    "incorrect_saves": [
+      {
+        "name": "ARCHETYPE: Cloud vendor pre-sales architect",
+        "why": "Great at discovery and demos, but the profile never shows personal authorship of custom production systems."
+      },
+      {
+        "name": "ARCHETYPE: AI product or transformation leader",
+        "why": "Owns roadmap and stakeholder management, not the actual engineering system."
+      },
+      {
+        "name": "ARCHETYPE: Classical data scientist in fraud or recommender systems",
+        "why": "Strong ML, wrong daily work. No production GenAI delivery or FDE-style system ownership."
+      },
+      {
+        "name": "ARCHETYPE: VP or Partner running an AI practice",
+        "why": "Too senior and too far from hands-on implementation for this level."
+      }
+    ],
+    "borderline_verify": [
+      {
+        "name": "ARCHETYPE: MLOps or platform engineer with some GenAI application ownership",
+        "why": "Could be a strong fit if the profile shows they owned the application and solution design, not just the infra around it."
+      },
+      {
+        "name": "ARCHETYPE: Sparse LinkedIn, strong GitHub, unusual title",
+        "why": "Often worth an inferential or signal save if code artifacts clearly show orchestration, integrations, and real system-building."
+      }
+    ]
+  },
+
+  "version": "1.2",
+  "author": "Codex",
+  "notes": "Built from the shared Turing FDE JD plus recruiter notes. Revised in v1.1 to bias even more strongly toward edge-case sourcing: fewer framework-brand anchors, more product-language and operational-language search vocabulary, narrower non-fit patterns for customer-facing titles, and explicit instructions to treat canonical forward-deployed / Palantir / framework-first populations as later cleanup passes rather than opening strings. Revised again in v1.2 after observing the live run skew toward strong-but-obvious GenAI pools: the brief now explicitly scores the opening on novelty mix, not just save rate, and treats exact-title FDE / framework-first / canonical frontier-company saves as lower-novelty confirmation rather than opening-strategy success. Geography is set to New York, New York, United States per recruiter confirmation."
+}

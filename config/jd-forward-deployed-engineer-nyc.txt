@@ -1,0 +1,40 @@
+Forward Deployed Engineer
+Location: New York, New York, United States
+
+About the role
+We're seeking a highly skilled and motivated Forward Deployed Engineer (FDE) to work at the cutting edge of Generative AI deployments. In this role, you'll partner directly with customers to design, build, and deploy intelligent applications using Python, LangChain/LangGraph, and large language models. You'll bridge engineering excellence with customer empathy to solve high-impact real-world problems.
+
+This is a hands-on engineering role embedded within customer projects, ideal for engineers who enjoy ownership, love solving hard problems, and thrive in dynamic, technical environments.
+
+Key responsibilities
+- Lead the end-to-end deployment of GenAI applications for customers, from discovery to delivery.
+- Architect and implement robust, scalable solutions using Python, LangChain/LangGraph, and LLM frameworks.
+- Act as a trusted technical advisor to customers, understanding their needs and crafting tailored AI solutions.
+- Collaborate closely with product, ML, and engineering teams to influence roadmap and core platform capabilities.
+- Write clean, maintainable code and build reusable modules to streamline future deployments.
+- Operate across cloud platforms (AWS, Azure, GCP) to ensure secure, performant infrastructure.
+- Continuously improve deployment tools, pipelines, and methodologies to reduce time-to-value.
+
+Required qualifications
+- 5-8+ years of experience in software engineering or solutions engineering, ideally in a customer-facing capacity.
+- Proven expertise in Python, LangChain, LangGraph, and SQL.
+- Deep experience with engineering architecture, including APIs, microservices, and event-driven systems.
+- Demonstrated success in designing and deploying GenAI applications into production environments.
+- Strong proficiency with cloud services such as AWS, GCP, and/or Azure.
+- Excellent communication skills, with the ability to translate technical complexity to customer-facing narratives.
+- Comfortable working autonomously and managing multiple deployment tracks in parallel.
+
+Preferred qualifications
+- Familiarity with CI/CD, infrastructure-as-code (Terraform, Pulumi), and container orchestration (Docker, Kubernetes).
+- Background in LLM fine-tuning, retrieval-augmented generation (RAG), or AI/ML operations.
+- Previous experience in a startup, consulting, or fast-paced customer-obsessed environment.
+
+Education
+- Bachelor's, Master's, or Ph.D. in Computer Science, Engineering, or a related technical field.
+
+Compensation
+- Salary range: 200-240k
+
+Notes
+- Source: Turing careers page PDF shared by recruiter/user.
+- The page lists "New York, New York, United States" but also describes the opportunity as full-time remote. This brief assumes a broader United States sourcing radius unless the recruiter later confirms a hard NYC-only requirement.

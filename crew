@@ -1,0 +1,296 @@
+#!/usr/bin/env bash
+# crew — headless Claude Code utilities for the sourcing agent
+# Usage: crew <command> [args]
+#
+# Add to PATH:
+#   ln -s ~/Projects/recruiting-tools/sourcing-agent/crew ~/bin/crew
+
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+RECRUITING_TOOLS="$(cd "$REPO_ROOT/.." && pwd)"
+
+# ── helpers ──────────────────────────────────────────────────────────
+
+_claude() {
+  claude --bare -p "$1" \
+    --allowedTools "Read,Glob,Grep,Bash(wc *),Bash(cat *),Bash(head *),Bash(tail *),Bash(python3 *),Bash(jq *),Bash(git diff *),Bash(git log *),Bash(git status *)" \
+    -C "${2:-$REPO_ROOT}" \
+    "${@:3}"
+}
+
+_claude_write() {
+  claude --bare -p "$1" \
+    --allowedTools "Read,Glob,Grep,Write,Edit,Bash(wc *),Bash(cat *),Bash(head *),Bash(tail *),Bash(python3 *),Bash(jq *),Bash(git diff *),Bash(git log *),Bash(git status *),Bash(git commit *),Bash(git add *)" \
+    -C "${2:-$REPO_ROOT}" \
+    "${@:3}"
+}
+
+# ── 1. brief: generate a v2 brief from a JD ─────────────────────────
+
+cmd_brief() {
+  local jd_path="$1"
+  local role_slug="${2:-$(basename "$jd_path" .txt | sed 's/^jd-//')}"
+  local version="${3:-v1}"
+  local output_path="$REPO_ROOT/config/brief-${role_slug}-${version}.json"
+
+  if [[ ! -f "$jd_path" ]]; then
+    echo "Error: JD file not found: $jd_path" >&2
+    exit 1
+  fi
+
+  echo "Generating brief for: $jd_path"
+  echo "Output: $output_path"
+
+  _claude_write "You are an expert recruiting strategist generating a sourcing brief.
+
+Read the job description at $jd_path.
+Read the brief schema at $REPO_ROOT/shared/brief_schema.py to understand every field.
+Read one strong example brief at $REPO_ROOT/config/brief-forward-deployed-engineer-us-v1.json for tone and depth calibration.
+
+Generate a complete v2 brief JSON for this role. The brief must:
+- Include ALL required v2 fields: role_title, role_level, role_summary, geography, capability_areas (3-5), depth_distinction, non_fit_patterns (5-7), employer_signal_rules, facial_calibration, minimum_years_experience, minimum_bar_description
+- Include instructions, search_priorities, additional_search_terms, inferential_save_rules, calibration_examples, post_save_modifiers where appropriate
+- Match the quality, specificity, and builder/user signal depth of the example brief
+- Adapt the content entirely to THIS role — do not copy the FDE brief's content
+- Set linkedin_project and linkedin_project_id to empty strings (recruiter fills these in)
+- Set geography based on what the JD says
+- Set jd_path to the relative path of the JD file from the config directory
+
+Write the result to $output_path. Output only a brief confirmation of what you generated — do not dump the full JSON."
+}
+
+# ── 2. intel: market intelligence from session logs ──────────────────
+
+cmd_intel() {
+  local project_id="${1:-}"
+
+  if [[ -z "$project_id" ]]; then
+    echo "Usage: crew intel <linkedin_project_id>"
+    echo ""
+    echo "Available projects (from candidate_history files):"
+    ls "$REPO_ROOT/output"/candidate_history-*.jsonl 2>/dev/null | \
+      sed 's/.*candidate_history-//; s/\.jsonl//'
+    exit 1
+  fi
+
+  echo "Generating market intelligence for project $project_id..."
+
+  _claude "You are a recruiting market intelligence analyst.
+
+Analyze the sourcing session data for LinkedIn project $project_id:
+- Candidate history: $REPO_ROOT/output/candidate_history-${project_id}.jsonl
+- Final judgments (all projects): $REPO_ROOT/output/final_judgments.jsonl
+- Bias monitor: $REPO_ROOT/output/bias_monitor-${project_id}.json
+- Run log: $REPO_ROOT/output/run_log.jsonl
+- Current brief (for role context): read whichever brief in $REPO_ROOT/config/ has linkedin_project_id matching $project_id
+
+Produce a market intelligence brief covering:
+
+1. YIELD METRICS: facial pass rate, full-eval save rate, reject reasons distribution, confidence distribution on saves
+2. SEARCH STRING PERFORMANCE: which string IDs produced saves vs dry holes, what the page_adapt rationale patterns say about string quality
+3. CANDIDATE ARCHETYPE PATTERNS: what do the saves have in common (titles, employers, capability paths)? What are the most common reject archetypes?
+4. BRIEF CALIBRATION SIGNALS: is the brief too tight (low save rate, many borderline rejects)? Too loose (saves at low confidence)? Are inferential saves overrepresented?
+5. MARKET SIGNAL: based on the data, is this talent pool genuinely sparse or is the search strategy missing pockets? What populations should the next session prioritize?
+6. RECOMMENDED BRIEF EDITS: specific, actionable changes to the brief based on what the data shows
+
+Be concrete — use actual numbers, candidate archetypes, and string IDs. No filler."
+}
+
+# ── 3. diagnose: architecture-vs-output analysis ─────────────────────
+
+cmd_diagnose() {
+  local project_id="${1:-}"
+  local pipeline="${2:-linkedin}"
+
+  if [[ -z "$project_id" ]]; then
+    echo "Usage: crew diagnose <linkedin_project_id> [linkedin|github]"
+    echo ""
+    echo "Available projects (from candidate_history files):"
+    ls "$REPO_ROOT/output"/candidate_history-*.jsonl 2>/dev/null | \
+      sed 's/.*candidate_history-//; s/\.jsonl//'
+    exit 1
+  fi
+
+  local code_dir="$REPO_ROOT/$pipeline"
+
+  echo "Running architecture diagnosis for project $project_id ($pipeline pipeline)..."
+
+  _claude "You are a systems architect analyzing an autonomous sourcing agent to find
+concrete opportunities for architectural improvement. Your job is to cross-reference
+the agent's CODE DESIGN with its RUNTIME OUTPUT to surface mismatches, bottlenecks,
+and missed opportunities that the developer wouldn't see from looking at either in isolation.
+
+## AGENT ARCHITECTURE — read these files to understand the design:
+
+Strategy layer:
+- $code_dir/strategy.py — how search strings/queries are generated and adapted
+
+Orchestration layer:
+- $code_dir/orchestrator.py — the main execution loop, page processing, evaluation dispatch, adaptation triggers, bias controls integration
+
+Evaluation layer:
+- $code_dir/judgment_templates.py — the facial triage and full evaluation prompts that Opus executes
+
+Brief (the role spec driving this run):
+- Find the brief in $REPO_ROOT/config/ whose linkedin_project_id matches '$project_id'
+
+Shared components:
+- $REPO_ROOT/shared/bias_controls.py — the BiasMonitor that tracks decision rates and fires alerts
+- $REPO_ROOT/shared/brief_schema.py — the Brief dataclass (what fields exist and how they're used)
+
+## RUNTIME OUTPUT — read these to understand what actually happened:
+
+- $REPO_ROOT/output/run_log.jsonl — every pipeline event: page_adapt decisions with rationale, early_exits, bias_alerts, forced_narrows, glance_assess results, profile_errors, browser crashes, architecture_pivots, block_adaptations
+- $REPO_ROOT/output/final_judgments.jsonl — every full evaluation decision with confidence, path, and rationale
+- $REPO_ROOT/output/facial_judgments-*.jsonl — facial triage decisions (read the most recent dated file)
+- $REPO_ROOT/output/candidate_history-${project_id}.jsonl — all terminal decisions for this role
+- $REPO_ROOT/output/bias_monitor-${project_id}.json — bias monitor state and alert history
+- $REPO_ROOT/output/snippets-*.jsonl — the raw candidate cards the agent saw (read the most recent dated file)
+- $REPO_ROOT/output/progress.json — where the session left off
+
+## YOUR ANALYSIS
+
+Cross-reference the architecture with the output. Produce a diagnosis organized by subsystem:
+
+### 1. STRATEGY → OUTPUT FIT
+- Are the search strings the strategy generates actually producing saveable candidates?
+- Look at page_adapt rationale text: what patterns does the adaptation layer keep flagging? Do those patterns point to a fixable strategy.py issue (e.g., string construction logic, architecture selection, coverage gaps)?
+- How many strings hit early_exit vs produced saves? What does the ratio say about string quality?
+- Did any architecture_pivot or block_adaptation events fire? What triggered them and did the adaptation actually improve yield on subsequent strings?
+
+### 2. FACIAL TRIAGE CALIBRATION
+- Compare facial YES rate to the brief's expected_yes_rate_low/high bounds. Is the facial prompt in judgment_templates.py calibrated correctly?
+- Look for facial YES → full REJECT patterns. If common, the facial prompt is too permissive — identify which trajectory_yes_patterns or trajectory_ambiguous_patterns are letting through candidates that fail full eval.
+- Look for facial NO on candidates whose snippets suggest they might have been worth opening. Are the fast_exit_patterns or trajectory_no_patterns in the brief too aggressive?
+
+### 3. FULL EVALUATION QUALITY
+- Confidence distribution on SAVEs: are most saves high-confidence (>0.7) or borderline (0.5-0.6)? A cluster of borderline saves suggests the capability_areas or depth_distinction aren't discriminating well.
+- Reject rationale patterns: what are the top 3 reject reasons? Do they point to a brief issue (missing capability area, non-fit pattern too broad) or a strategy issue (wrong population being surfaced)?
+- INFERENTIAL_SAVE vs SAVE ratio: too many inferential saves means the full eval prompt isn't getting enough signal from profiles — consider whether the profile extraction is losing data.
+
+### 4. BIAS CONTROLS & ADAPTATION EFFECTIVENESS
+- Did bias_alerts fire? Were they true positives (genuine calibration drift) or false alarms (natural variance in a sparse market)?
+- How did the orchestrator respond to bias pauses? Did it adjust or just resume?
+- forced_narrow events: are these masking a deeper problem where the min-pages constraint forces the agent to keep searching unproductive strings?
+
+### 5. ERROR & RELIABILITY PATTERNS
+- profile_error frequency: are Playwright timeouts burning candidates who should have been evaluated? If so, what does the error pattern suggest about the browser automation code?
+- browser_crash_recovered: how often? Does the recovery logic in orchestrator.py actually work or does it lose state?
+- circuit_breaker events: API reliability issues?
+
+### 6. CONCRETE RECOMMENDATIONS
+For each finding, give:
+- THE SIGNAL: what you saw in the output data (with specific numbers/events)
+- THE ROOT CAUSE: which code component is responsible
+- THE FIX: what specifically should change (file, function, logic)
+- EXPECTED IMPACT: what would improve if this fix shipped
+
+Prioritize by impact. Lead with the highest-leverage fix. Be specific enough that a developer could act on each recommendation without further research."
+}
+
+# ── 4. review: code review across all repos ──────────────────────────
+
+cmd_review() {
+  local target="${1:-all}"
+
+  if [[ "$target" == "all" ]]; then
+    local repos=()
+    for repo in "$RECRUITING_TOOLS"/*/; do
+      [[ -d "$repo/.git" ]] || continue
+      local name=$(basename "$repo")
+      [[ "$name" == "Sourcing Agent" ]] && continue
+      repos+=("$repo")
+    done
+  else
+    repos=("$RECRUITING_TOOLS/$target")
+  fi
+
+  for repo in "${repos[@]}"; do
+    local name=$(basename "$repo")
+    local changes=$(cd "$repo" && git status --porcelain 2>/dev/null | wc -l | tr -d ' ')
+
+    if [[ "$changes" == "0" ]]; then
+      continue
+    fi
+
+    echo ""
+    echo "═══ $name ($changes changed files) ═══"
+
+    _claude "Review the uncommitted changes in this repo.
+
+Run git status and git diff to see what's changed.
+For each changed file:
+- Flag bugs, regressions, or security issues
+- Flag anything that looks half-finished or accidentally left in (debug prints, commented-out code, hardcoded secrets)
+- Note if tests should be written or updated for these changes
+
+Be terse. Skip files that look fine. Only speak up when something needs attention." \
+      "$repo"
+  done
+
+  echo ""
+  echo "Review complete."
+}
+
+# ── 5. uncommitted: scan all repos for uncommitted work ──────────────
+
+cmd_uncommitted() {
+  echo "Scanning recruiting-tools for uncommitted work..."
+  echo ""
+
+  for repo in "$RECRUITING_TOOLS"/*/; do
+    [[ -d "$repo/.git" ]] || continue
+    local name=$(basename "$repo")
+    [[ "$name" == "Sourcing Agent" ]] && continue
+
+    local status=$(cd "$repo" && git status --porcelain 2>/dev/null)
+    if [[ -n "$status" ]]; then
+      local staged=$(echo "$status" | grep -c '^[MADRC]' || true)
+      local unstaged=$(echo "$status" | grep -c '^.[MADRC]' || true)
+      local untracked=$(echo "$status" | grep -c '^??' || true)
+      echo "  $name: ${staged} staged, ${unstaged} modified, ${untracked} untracked"
+    fi
+  done
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────
+
+case "${1:-help}" in
+  brief)       shift; cmd_brief "$@" ;;
+  intel)       shift; cmd_intel "$@" ;;
+  diagnose)    shift; cmd_diagnose "$@" ;;
+  review)      shift; cmd_review "$@" ;;
+  uncommitted) shift; cmd_uncommitted "$@" ;;
+  help|--help|-h)
+    cat <<'USAGE'
+crew — headless Claude Code utilities for the sourcing agent
+
+Commands:
+  brief <jd-path> [role-slug] [version]
+      Generate a v2 sourcing brief from a job description.
+      Example: crew brief config/jd-sre-lead.txt sre-lead v1
+
+  intel <linkedin_project_id>
+      Generate market intelligence from sourcing session logs.
+      Example: crew intel 1990251114
+
+  diagnose <linkedin_project_id> [linkedin|github]
+      Cross-reference agent architecture with runtime output to find
+      improvement opportunities. Reads both code and session data.
+      Example: crew diagnose 1990251114
+
+  review [repo-name|all]
+      Code review uncommitted changes across recruiting-tools repos.
+      Example: crew review sourcing-agent
+
+  uncommitted
+      Quick scan of all repos for uncommitted work.
+      Example: crew uncommitted
+USAGE
+    ;;
+  *)
+    echo "Unknown command: $1 (try: crew help)" >&2
+    exit 1
+    ;;
+esac
