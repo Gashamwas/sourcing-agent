@@ -240,7 +240,7 @@ def _make_summary(**kwargs) -> CandidateProfileSummary:
 
 def test_facial_missing_decision_parse_failure():
     """Old-brief facial: missing decision key -> PARSE_FAILURE."""
-    with patch("shared.judger.opus_llm", return_value={}):
+    with patch("shared.judger.opus_llm_cached", return_value={}):
         result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
     assert result.decision == "PARSE_FAILURE"
     assert result.confidence == 0.0
@@ -249,7 +249,7 @@ def test_facial_missing_decision_parse_failure():
 
 def test_facial_garbage_decision_parse_failure():
     """Old-brief facial: unrecognized decision value -> PARSE_FAILURE."""
-    with patch("shared.judger.opus_llm", return_value={"decision": "YOLO"}):
+    with patch("shared.judger.opus_llm_cached", return_value={"decision": "YOLO"}):
         result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
     assert result.decision == "PARSE_FAILURE"
     assert result.confidence == 0.0
@@ -257,7 +257,7 @@ def test_facial_garbage_decision_parse_failure():
 
 def test_facial_nondict_result_parse_failure():
     """Old-brief facial: non-dict LLM result -> PARSE_FAILURE."""
-    with patch("shared.judger.opus_llm", return_value="just a string"):
+    with patch("shared.judger.opus_llm_cached", return_value="just a string"):
         result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
     assert result.decision == "PARSE_FAILURE"
     assert result.confidence == 0.0
@@ -265,7 +265,7 @@ def test_facial_nondict_result_parse_failure():
 
 def test_full_missing_decision_parse_failure():
     """Old-brief full: missing decision key -> PARSE_FAILURE."""
-    with patch("shared.judger.opus_llm", return_value={}):
+    with patch("shared.judger.opus_llm_cached", return_value={}):
         result = full_judge(_make_summary(), BRAZIL_BRIEF)
     assert result.decision == "PARSE_FAILURE"
     assert result.confidence == 0.0
@@ -274,7 +274,7 @@ def test_full_missing_decision_parse_failure():
 
 def test_full_garbage_decision_parse_failure():
     """Old-brief full: unrecognized decision value -> PARSE_FAILURE."""
-    with patch("shared.judger.opus_llm", return_value={"decision": "MAYBE"}):
+    with patch("shared.judger.opus_llm_cached", return_value={"decision": "MAYBE"}):
         result = full_judge(_make_summary(), BRAZIL_BRIEF)
     assert result.decision == "PARSE_FAILURE"
     assert result.confidence == 0.0
@@ -282,7 +282,7 @@ def test_full_garbage_decision_parse_failure():
 
 def test_full_nondict_result_parse_failure():
     """Old-brief full: non-dict LLM result -> PARSE_FAILURE."""
-    with patch("shared.judger.opus_llm", return_value=42):
+    with patch("shared.judger.opus_llm_cached", return_value=42):
         result = full_judge(_make_summary(), BRAZIL_BRIEF)
     assert result.decision == "PARSE_FAILURE"
     assert result.confidence == 0.0
@@ -290,7 +290,7 @@ def test_full_nondict_result_parse_failure():
 
 def test_facial_malformed_confidence_safe():
     """Old-brief facial: non-numeric confidence -> default, not exception."""
-    with patch("shared.judger.opus_llm", return_value={
+    with patch("shared.judger.opus_llm_cached", return_value={
         "decision": "FACIAL_YES", "confidence": "high", "rationale": "ok"
     }):
         result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
@@ -300,7 +300,7 @@ def test_facial_malformed_confidence_safe():
 
 def test_full_malformed_confidence_safe():
     """Old-brief full: non-numeric confidence -> default, not exception."""
-    with patch("shared.judger.opus_llm", return_value={
+    with patch("shared.judger.opus_llm_cached", return_value={
         "decision": "SAVE", "confidence": "???", "rationale": "match"
     }):
         result = full_judge(_make_summary(), BRAZIL_BRIEF)
@@ -309,16 +309,16 @@ def test_full_malformed_confidence_safe():
 
 
 def test_facial_opus_exception_judgment_failure():
-    """Old-brief facial: opus_llm exception -> JUDGMENT_FAILURE."""
-    with patch("shared.judger.opus_llm", side_effect=RuntimeError("API timeout")):
+    """Old-brief facial: opus_llm_cached exception -> JUDGMENT_FAILURE."""
+    with patch("shared.judger.opus_llm_cached", side_effect=RuntimeError("API timeout")):
         result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
     assert result.decision == "JUDGMENT_FAILURE"
     assert result.confidence == 0.0
 
 
 def test_full_opus_exception_judgment_failure():
-    """Old-brief full: opus_llm exception -> JUDGMENT_FAILURE."""
-    with patch("shared.judger.opus_llm", side_effect=RuntimeError("API timeout")):
+    """Old-brief full: opus_llm_cached exception -> JUDGMENT_FAILURE."""
+    with patch("shared.judger.opus_llm_cached", side_effect=RuntimeError("API timeout")):
         result = full_judge(_make_summary(), BRAZIL_BRIEF)
     assert result.decision == "JUDGMENT_FAILURE"
     assert result.confidence == 0.0
@@ -326,7 +326,7 @@ def test_full_opus_exception_judgment_failure():
 
 def test_facial_none_result_parse_failure():
     """Old-brief facial: None result -> PARSE_FAILURE."""
-    with patch("shared.judger.opus_llm", return_value=None):
+    with patch("shared.judger.opus_llm_cached", return_value=None):
         result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
     assert result.decision == "PARSE_FAILURE"
     assert result.confidence == 0.0
@@ -368,7 +368,7 @@ def test_parse_full_malformed_returns_parse_failure():
 
 def test_v2_facial_parse_failure_not_skip():
     """V2 facial: parser failure -> PARSE_FAILURE, not FACIAL_SKIP."""
-    with patch("shared.judger.opus_llm", return_value="garbage with no decision line"):
+    with patch("shared.judger.opus_llm_cached", return_value="garbage with no decision line"):
         result = facial_judge(_make_snippet(), HEAD_AI_BRIEF)
     assert result.decision == "PARSE_FAILURE"
     assert result.decision != "FACIAL_SKIP"
@@ -377,7 +377,7 @@ def test_v2_facial_parse_failure_not_skip():
 
 def test_v2_full_parse_failure_not_reject():
     """V2 full: parser failure -> PARSE_FAILURE, not REJECT."""
-    with patch("shared.judger.opus_llm", return_value="garbage with no structure"):
+    with patch("shared.judger.opus_llm_cached", return_value="garbage with no structure"):
         result = full_judge(_make_summary(), HEAD_AI_BRIEF)
     assert result.decision == "PARSE_FAILURE"
     assert result.decision != "REJECT"
@@ -397,7 +397,7 @@ def test_github_full_parse_failure_not_reject():
 
 def test_facial_valid_yes_passes():
     """Old-brief facial: valid FACIAL_YES passes through normally."""
-    with patch("shared.judger.opus_llm", return_value={
+    with patch("shared.judger.opus_llm_cached", return_value={
         "decision": "FACIAL_YES", "path": "eng", "confidence": 0.8, "rationale": "looks good"
     }):
         result = facial_judge(_make_snippet(), BRAZIL_BRIEF)
@@ -408,7 +408,7 @@ def test_facial_valid_yes_passes():
 
 def test_full_valid_save_passes():
     """Old-brief full: valid SAVE passes through normally."""
-    with patch("shared.judger.opus_llm", return_value={
+    with patch("shared.judger.opus_llm_cached", return_value={
         "decision": "SAVE", "path": "eng", "confidence": 0.7, "rationale": "strong match"
     }):
         result = full_judge(_make_summary(), BRAZIL_BRIEF)

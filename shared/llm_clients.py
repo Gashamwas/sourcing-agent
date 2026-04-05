@@ -89,6 +89,75 @@ def opus_llm(system_prompt: str, user_prompt: str, expect_json: bool = True, max
     return text
 
 
+def opus_llm_cached(system_prompt: str, user_prompt: str, expect_json: bool = True, max_tokens: int = 8192) -> str | dict:
+    """Call Opus with prompt caching on the system prompt.
+
+    System prompt is sent as a content block with cache_control: {"type": "ephemeral"}.
+    Cache write costs 1.25x, cache read costs 0.1x, TTL is 5 minutes (refreshed on hit).
+    """
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=300.0)
+
+    def _call():
+        message = client.messages.create(
+            model=config.OPUS_MODEL_NAME,
+            max_tokens=max_tokens,
+            system=[
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        if message.stop_reason != "end_turn":
+            raise RuntimeError(f"Opus response truncated: stop_reason={message.stop_reason}. Increase max_tokens or reduce prompt size.")
+        return message.content[0].text.strip()
+
+    text = _retry_with_backoff(_call, label="Opus-cached")
+
+    if expect_json:
+        return _parse_json_response(text)
+    return text
+
+
+def facial_llm(system_prompt: str, user_prompt: str, expect_json: bool = True, max_tokens: int = 2048) -> str | dict:
+    """Call the facial triage model with prompt caching.
+
+    Defaults to Opus (same as opus_llm_cached) but can be overridden to Sonnet
+    via FACIAL_MODEL_NAME in .env for 5x cost reduction on facial calls.
+    Lower default max_tokens since facial responses are short.
+    """
+    import anthropic
+
+    client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY, timeout=300.0)
+
+    def _call():
+        message = client.messages.create(
+            model=config.FACIAL_MODEL_NAME,
+            max_tokens=max_tokens,
+            system=[
+                {
+                    "type": "text",
+                    "text": system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        if message.stop_reason != "end_turn":
+            raise RuntimeError(f"Facial model response truncated: stop_reason={message.stop_reason}.")
+        return message.content[0].text.strip()
+
+    text = _retry_with_backoff(_call, label="Facial")
+
+    if expect_json:
+        return _parse_json_response(text)
+    return text
+
+
 # ---------------------------------------------------------------------------
 # Provider implementations
 # ---------------------------------------------------------------------------

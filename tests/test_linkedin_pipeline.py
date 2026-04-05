@@ -363,6 +363,64 @@ def test_restart_string_clears_history():
         assert url2 in remaining_urls
 
 
+def test_restart_strings_restarts_multiple_ids():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+
+        append_jsonl(p.snippets_path, _make_snippet(
+            profile_url="/talent/profile/string1-candidate",
+            source_string_id=1,
+        ).to_dict())
+        append_jsonl(p.snippets_path, _make_snippet(
+            profile_url="/talent/profile/string2-candidate",
+            source_string_id=2,
+            name="Second Person",
+        ).to_dict())
+
+        append_jsonl(p.history_path, {
+            "profile_url": "/talent/profile/string1-candidate",
+            "candidate_name": "Test Person",
+            "outcome": "REJECT",
+            "confidence": 0.9,
+            "source_string_id": 1,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        })
+        append_jsonl(p.history_path, {
+            "profile_url": "/talent/profile/string2-candidate",
+            "candidate_name": "Second Person",
+            "outcome": "SAVE",
+            "confidence": 0.95,
+            "source_string_id": 2,
+            "timestamp": "2026-01-01T00:00:00+00:00",
+        })
+
+        p._seen_urls = {"/talent/profile/string1-candidate", "/talent/profile/string2-candidate"}
+        p._prior_outcomes = {
+            "/talent/profile/string1-candidate": "REJECT",
+            "/talent/profile/string2-candidate": "SAVE",
+        }
+        p._in_flight_urls = set()
+
+        s1 = SearchString(id=1, name="one", boolean="a", status="done", pages_reviewed=3, saves=["A"], notes="Error")
+        s2 = SearchString(id=2, name="two", boolean="b", status="done", pages_reviewed=2, saves=["B"], notes="Error")
+        s3 = SearchString(id=3, name="three", boolean="c", status="queued", pages_reviewed=0, saves=[], notes="")
+        progress = Progress(brief_name="test", strings=[s1, s2, s3], current_string_id=2)
+        progress.save = MagicMock()
+
+        p._restart_strings(progress, [2, 1, 2])
+
+        assert s1.status == "queued"
+        assert s2.status == "queued"
+        assert s1.notes == ""
+        assert s2.notes == ""
+        assert s1.saves == []
+        assert s2.saves == []
+        assert "/talent/profile/string1-candidate" not in p._seen_urls
+        assert "/talent/profile/string2-candidate" not in p._seen_urls
+        assert "/talent/profile/string1-candidate" not in p._prior_outcomes
+        assert "/talent/profile/string2-candidate" not in p._prior_outcomes
+
+
 # ---------------------------------------------------------------------------
 # In-flight reset on dedup rebuild
 # ---------------------------------------------------------------------------
@@ -470,6 +528,96 @@ def test_extract_card_snippet_returns_none_when_card_text_missing():
             snippet = asyncio.run(p._extract_card_snippet(search_string, page_num=1, card_index=0))
 
         assert snippet is None
+
+
+def test_extract_card_snippet_returns_none_on_slot_rehydration_error():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.browser.focus_card_for_review = AsyncMock(
+            side_effect=TimeoutError("Locator.scroll_into_view_if_needed: Timeout 3000ms exceeded.")
+        )
+        p.browser.get_card_snapshot = AsyncMock()
+        p.browser.go_back_to_results = AsyncMock()
+
+        search_string = SearchString(id=16, name="seq", boolean="(test)")
+
+        with patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+            snippet = asyncio.run(p._extract_card_snippet(search_string, page_num=1, card_index=5))
+
+        assert snippet is None
+        p.browser.go_back_to_results.assert_awaited_once()
+        p.browser.get_card_snapshot.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Batch facial parity
+# ---------------------------------------------------------------------------
+
+def test_batch_full_failures_do_not_increment_facial_yes():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.brief_obj.has_v2_schema = True
+        p.brief_obj.employer_blacklist = []
+        p.browser.get_card_slot_count = AsyncMock(return_value=2)
+        p._extract_card_snippet = AsyncMock(side_effect=[
+            _make_snippet(name="Alice", profile_url="/talent/profile/alice"),
+            _make_snippet(name="Bob", profile_url="/talent/profile/bob"),
+        ])
+        p._full_evaluate = AsyncMock(side_effect=[
+            OpusDecision(
+                stage="full", decision="PARSE_FAILURE", path="none",
+                confidence=0.0, rationale="[PARSE_FAILURE: bad output]",
+                candidate_name="Alice", profile_url="/talent/profile/alice",
+            ),
+            OpusDecision(
+                stage="full", decision="JUDGMENT_FAILURE", path="none",
+                confidence=0.0, rationale="[JUDGMENT_FAILURE: timeout]",
+                candidate_name="Bob", profile_url="/talent/profile/bob",
+            ),
+        ])
+        p._checkpoint_progress = MagicMock()
+        p._bias_monitor = None
+        p._triage_tightened = False
+        p._tightening_prefix = ""
+
+        search_string = SearchString(id=1, name="batch", boolean="ml")
+        page_report = MagicMock()
+        all_candidates = []
+        string_stats = {
+            "pages": 1,
+            "candidates": 0,
+            "duplicates": 0,
+            "facial_yes": 0,
+            "facial_no": 0,
+            "saves": 0,
+            "rejects": 0,
+        }
+
+        with patch(
+            "shared.judger.facial_judge_batch",
+            return_value=[
+                OpusDecision(
+                    stage="facial", decision="FACIAL_YES", path="none",
+                    confidence=1.0, rationale="good signal",
+                    candidate_name="Alice", profile_url="/talent/profile/alice",
+                ),
+                OpusDecision(
+                    stage="facial", decision="FACIAL_YES", path="none",
+                    confidence=1.0, rationale="good signal",
+                    candidate_name="Bob", profile_url="/talent/profile/bob",
+                ),
+            ],
+        ):
+            asyncio.run(
+                p._review_page_batch(
+                    search_string, 1, 0, page_report, all_candidates, string_stats, None,
+                )
+            )
+
+        assert string_stats["facial_yes"] == 0
+        assert string_stats["saves"] == 0
+        assert string_stats["rejects"] == 0
+        assert [c["outcome"] for c in all_candidates] == ["error", "error"]
 
 
 # ---------------------------------------------------------------------------

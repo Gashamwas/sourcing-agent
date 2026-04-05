@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from linkedin.session_orchestrator import (
+    _parse_restart_strings_arg,
     _resume_has_pending_work,
 )
 from shared.governor import SessionGovernor
@@ -62,3 +63,11 @@ def test_governor_can_start_session_when_under_caps():
         ok, reason = governor.can_start_session(session_type="linkedin_sourcing")
         assert ok is True
         assert reason == "ok"
+
+
+def test_parse_restart_strings_arg_parses_csv():
+    assert _parse_restart_strings_arg("4, 11,12,16,27") == [4, 11, 12, 16, 27]
+
+
+def test_parse_restart_strings_arg_ignores_empty_chunks():
+    assert _parse_restart_strings_arg("4,, 11, ,27") == [4, 11, 27]

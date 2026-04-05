@@ -113,6 +113,12 @@ class BlockReport:
                     lines.append(f"    Notes: {sd['notes']}")
                 if sd.get('save_names'):
                     lines.append(f"    Saved: {', '.join(sd['save_names'])}")
+                if sd.get('saved_profiles'):
+                    saved_profiles = ", ".join(
+                        f"{p.get('name', '?')} ({p.get('title', '')} @ {p.get('company', '')})"
+                        for p in sd['saved_profiles'][:3]
+                    )
+                    lines.append(f"    Save profiles: {saved_profiles}")
         return "\n".join(lines)
 
 

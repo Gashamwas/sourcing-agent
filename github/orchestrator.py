@@ -37,7 +37,7 @@ from github.observability import SessionObserver
 from shared.contact_discovery import merge_profile_contact
 
 from shared.schemas import CandidateSnippet, CandidateProfileSummary, OpusDecision
-from shared.judger import facial_judge, full_judge, init_judger, github_facial_judge, github_full_judge, extract_priority_rank, is_failure_decision
+from shared.judger import facial_judge, full_judge, init_judger, github_facial_judge, github_facial_judge_batch, github_full_judge, extract_priority_rank, is_failure_decision
 from github.outreach import generate_outreach
 from shared.storage import append_jsonl, read_jsonl_set, log_event
 from shared.brief_loader import load_brief, Brief
@@ -50,6 +50,9 @@ _ADAPTATION_BATCH_SIZE = 10
 
 # Checkpoint frequency — save progress after this many enrichments
 _CHECKPOINT_EVERY = 10
+
+# GitHub V2 facial batching — keep batches modest to avoid oversized prompts.
+_GITHUB_FACIAL_BATCH_SIZE = 10
 
 
 class GitHubPipeline:
@@ -348,38 +351,84 @@ class GitHubPipeline:
 
         # Process each candidate with mid-query adaptation
         stats_before = {k: v for k, v in self.stats.items()}
-        for j, username in enumerate(usernames):
-            if self._shutdown_requested:
-                break
-            self._governor.check_limits_or_raise()
+        if self.brief_obj.has_v2_schema:
+            batch_candidates: list[tuple[str, GitHubCandidate]] = []
 
-            self._observer.on_candidate_discovered(username, query)
-
-            try:
-                await self._process_candidate(
-                    enricher, username, query, progress,
-                    result_rank=j + 1,
-                )
-            except GitHubGovernorLimitReached:
-                raise
-            except Exception as e:
-                self._observer.on_error("candidate", e, query)
-                continue
-
-            # Mid-query adaptation checkpoint every 25 candidates
-            processed = j + 1
-            if processed % 25 == 0 and processed < len(usernames):
-                query_stats = {
-                    k: self.stats[k] - stats_before.get(k, 0)
-                    for k in ("saved", "rejected", "facial_yes", "facial_no")
-                }
-                query_stats["processed"] = processed
-                query_stats["geo_filtered"] = self.stats.get("geo_filtered", 0) - stats_before.get("geo_filtered", 0)
-                if self._should_stop_query(query_stats):
-                    evaluated = processed - query_stats["geo_filtered"]
-                    reason = f"{evaluated} evaluated, {query_stats['saved']} saves, {query_stats['facial_yes']} facial_yes"
-                    self._observer.on_query_stopped_early(query, reason, processed, len(usernames))
+            for j, username in enumerate(usernames):
+                if self._shutdown_requested:
                     break
+                self._governor.check_limits_or_raise()
+
+                self._observer.on_candidate_discovered(username, query)
+
+                try:
+                    candidate = await self._prepare_candidate_for_evaluation(
+                        enricher, username, query, progress, result_rank=j + 1,
+                    )
+                except GitHubGovernorLimitReached:
+                    raise
+                except Exception as e:
+                    self._observer.on_error("candidate", e, query)
+                    continue
+
+                if candidate:
+                    batch_candidates.append((username, candidate))
+
+                processed = j + 1
+                should_flush = len(batch_candidates) >= _GITHUB_FACIAL_BATCH_SIZE
+                if processed % 25 == 0 or processed == len(usernames):
+                    should_flush = should_flush or bool(batch_candidates)
+
+                if should_flush and batch_candidates:
+                    await self._process_v2_candidates_batch(batch_candidates, query, progress)
+                    batch_candidates = []
+
+                # Mid-query adaptation checkpoint every 25 discovered candidates
+                if processed % 25 == 0 and processed < len(usernames):
+                    query_stats = {
+                        k: self.stats[k] - stats_before.get(k, 0)
+                        for k in ("saved", "rejected", "facial_yes", "facial_no")
+                    }
+                    query_stats["processed"] = processed
+                    query_stats["geo_filtered"] = self.stats.get("geo_filtered", 0) - stats_before.get("geo_filtered", 0)
+                    if self._should_stop_query(query_stats):
+                        evaluated = processed - query_stats["geo_filtered"]
+                        reason = f"{evaluated} evaluated, {query_stats['saved']} saves, {query_stats['facial_yes']} facial_yes"
+                        self._observer.on_query_stopped_early(query, reason, processed, len(usernames))
+                        break
+        else:
+            for j, username in enumerate(usernames):
+                if self._shutdown_requested:
+                    break
+                self._governor.check_limits_or_raise()
+
+                self._observer.on_candidate_discovered(username, query)
+
+                try:
+                    await self._process_candidate(
+                        enricher, username, query, progress,
+                        result_rank=j + 1,
+                    )
+                except GitHubGovernorLimitReached:
+                    raise
+                except Exception as e:
+                    self._observer.on_error("candidate", e, query)
+                    continue
+
+                # Mid-query adaptation checkpoint every 25 candidates
+                processed = j + 1
+                if processed % 25 == 0 and processed < len(usernames):
+                    query_stats = {
+                        k: self.stats[k] - stats_before.get(k, 0)
+                        for k in ("saved", "rejected", "facial_yes", "facial_no")
+                    }
+                    query_stats["processed"] = processed
+                    query_stats["geo_filtered"] = self.stats.get("geo_filtered", 0) - stats_before.get("geo_filtered", 0)
+                    if self._should_stop_query(query_stats):
+                        evaluated = processed - query_stats["geo_filtered"]
+                        reason = f"{evaluated} evaluated, {query_stats['saved']} saves, {query_stats['facial_yes']} facial_yes"
+                        self._observer.on_query_stopped_early(query, reason, processed, len(usernames))
+                        break
 
         # Per-query summary
         if usernames:
@@ -506,6 +555,227 @@ class GitHubPipeline:
     # Candidate processing
     # ------------------------------------------------------------------
 
+    async def _prepare_candidate_for_evaluation(
+        self,
+        enricher: GitHubEnricher,
+        username: str,
+        query: GitHubSearchQuery,
+        progress: GitHubProgress,
+        result_rank: int = 0,
+    ) -> GitHubCandidate | None:
+        """Run light/full enrichment and gating before any LLM evaluation."""
+        progress.candidates_discovered += 1
+        self.stats["candidates_discovered"] += 1
+
+        source_query = query.query or query.target_repo or query.target_org
+
+        candidate = await enricher.light_enrich(
+            username,
+            source_strategy=query.channel,
+            source_query=source_query,
+        )
+        if not candidate:
+            return None
+
+        if query.channel != "user_search":
+            if not self._passes_geography_check(candidate, query):
+                self.stats.setdefault("geo_filtered", 0)
+                self.stats["geo_filtered"] += 1
+                self.stats.setdefault("geo_filtered_light", 0)
+                self.stats["geo_filtered_light"] += 1
+                self._observer.on_geo_filtered(username, candidate.user.location or "no location", query, "light")
+                self._mark_terminal(username)
+                return None
+
+        prescreen = self._prescreen_light(candidate)
+        if prescreen == "hard_skip":
+            self.stats.setdefault("prescreen_filtered", 0)
+            self.stats["prescreen_filtered"] += 1
+            self._observer.on_prescreen_filtered(username, candidate, query)
+            self._mark_terminal(username)
+            return None
+
+        candidate = await enricher.full_enrich(candidate)
+
+        candidate.contact = merge_profile_contact(
+            candidate.contact,
+            candidate.user.email,
+            candidate.user.twitter_username,
+            candidate.user.blog,
+        )
+
+        self._governor.record_enrichment()
+        self._observer.on_enrichment()
+        progress.candidates_enriched += 1
+        self.stats["candidates_enriched"] += 1
+
+        append_jsonl(self.candidates_path, {
+            "username": candidate.user.username,
+            **candidate.to_dict(),
+        })
+
+        if not self._passes_geography_check(candidate, query):
+            self.stats.setdefault("geo_filtered", 0)
+            self.stats["geo_filtered"] += 1
+            self._observer.on_geo_filtered(username, candidate.user.location or "no location", query, "full")
+            self._mark_terminal(username)
+            return None
+
+        if candidate.data_sufficiency == "insufficient":
+            self.stats["insufficient"] += 1
+            progress.candidates_insufficient += 1
+            log_event(self.log_path, "insufficient_data", username=username)
+            self._observer.on_insufficient_data(username, query)
+            self._mark_terminal(username)
+            return None
+
+        return candidate
+
+    async def _process_v2_candidates_batch(
+        self,
+        batch_candidates: list[tuple[str, GitHubCandidate]],
+        query: GitHubSearchQuery,
+        progress: GitHubProgress,
+    ) -> None:
+        """Batch the GitHub V2 facial stage, then run full eval sequentially."""
+        portfolio_texts = [
+            (candidate.user.name or username, candidate.user.profile_url, candidate.to_portfolio_text())
+            for username, candidate in batch_candidates
+        ]
+        facial_decisions = github_facial_judge_batch(portfolio_texts, self.brief_obj)
+
+        for (username, candidate), facial_decision in zip(batch_candidates, facial_decisions):
+            try:
+                facial_decision.candidate_name = candidate.user.name or username
+                facial_decision.profile_url = candidate.user.profile_url
+                append_jsonl(self.facial_path, facial_decision.to_dict())
+
+                if self._bias_monitor:
+                    self._bias_monitor.record_decision(DecisionRecord(
+                        candidate_id=username,
+                        stage="facial",
+                        decision=facial_decision.decision,
+                        confidence=facial_decision.confidence,
+                        capability_area=None,
+                        string_id=str(query.id),
+                    ))
+
+                if is_failure_decision(facial_decision.decision):
+                    self.stats.setdefault("parse_failures", 0)
+                    self.stats["parse_failures"] += 1
+                    self._observer.on_facial_decision(username, facial_decision.decision, facial_decision.rationale, query)
+                    continue
+
+                if facial_decision.decision == "FACIAL_NO":
+                    self.stats["facial_no"] += 1
+                    self._observer.on_facial_decision(username, "FACIAL_NO", facial_decision.rationale, query)
+                    self._mark_terminal(username)
+                    continue
+
+                self.stats["facial_yes"] += 1
+                self._observer.on_facial_decision(username, "FACIAL_YES", "", query)
+
+                evidence_text = candidate.to_evidence_text()
+                try:
+                    full_decision = github_full_judge(evidence_text)
+                except Exception as e:
+                    full_decision = OpusDecision(
+                        stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
+                        rationale=f"[JUDGMENT_FAILURE: {e}]",
+                        candidate_name=candidate.user.name or username,
+                        profile_url=candidate.user.profile_url,
+                    )
+                full_decision.candidate_name = candidate.user.name or username
+                full_decision.profile_url = candidate.user.profile_url
+
+                append_jsonl(self.final_path, full_decision.to_dict())
+
+                if self._bias_monitor:
+                    self._bias_monitor.record_decision(DecisionRecord(
+                        candidate_id=username,
+                        stage="full",
+                        decision=full_decision.decision,
+                        confidence=full_decision.confidence,
+                        capability_area=getattr(full_decision, "path", None),
+                        string_id=str(query.id),
+                    ))
+
+                if is_failure_decision(full_decision.decision):
+                    self.stats.setdefault("parse_failures", 0)
+                    self.stats["parse_failures"] += 1
+                    continue
+
+                if full_decision.decision in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE", "SIGNAL_SAVE"):
+                    self.stats["saved"] += 1
+                    progress.candidates_saved += 1
+                    query.saves.append(candidate.user.name or username)
+
+                    self._observer.on_save(username, candidate, full_decision, query)
+
+                    log_event(self.log_path, "save",
+                              username=username,
+                              name=candidate.user.name,
+                              confidence=full_decision.confidence,
+                              decision_path=full_decision.path,
+                              contact_emails=candidate.contact.emails,
+                              query_id=query.id)
+
+                    outreach = await generate_outreach(candidate, self.brief_obj, full_decision)
+                    if outreach and outreach.get("message"):
+                        candidate.outreach_copy = outreach
+                        append_jsonl(self.outreach_path, outreach)
+                    else:
+                        self.stats.setdefault("outreach_failures", 0)
+                        self.stats["outreach_failures"] += 1
+                        self._observer.on_outreach_failure(username, query)
+
+                    priority_rank = extract_priority_rank(full_decision.path)
+                    append_jsonl(self.saves_path, {
+                        "username": username,
+                        "name": candidate.user.name,
+                        "github_url": candidate.user.profile_url,
+                        "location": candidate.user.location,
+                        "bio": candidate.user.bio,
+                        "company": candidate.user.company,
+                        "emails": candidate.contact.emails,
+                        "blog": candidate.user.blog,
+                        "twitter": candidate.user.twitter_username,
+                        "decision": full_decision.decision,
+                        "confidence": full_decision.confidence,
+                        "decision_path": full_decision.path,
+                        "priority_rank": priority_rank,
+                        "rationale": full_decision.rationale,
+                        "outreach": candidate.outreach_copy if candidate.outreach_copy else None,
+                        "source_query": query.name,
+                        "source_channel": query.channel,
+                        "expansion_seed": query.query if query.channel == "graph_expansion" else None,
+                    })
+
+                    if full_decision.confidence >= gc.GRAPH_EXPANSION_MIN_CONFIDENCE:
+                        progress.graph_expansion_queue.append({
+                            "username": username,
+                            "reason": full_decision.decision,
+                            "confidence": full_decision.confidence,
+                            "capability_area": full_decision.path,
+                            "added_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        })
+                        self._observer.on_graph_expansion_queued(
+                            username, full_decision.confidence, full_decision.path
+                        )
+                else:
+                    self.stats["rejected"] += 1
+                    progress.candidates_rejected += 1
+                    self._observer.on_reject(username, candidate, full_decision, query)
+
+                self._mark_terminal(username)
+
+                if (progress.candidates_enriched % _CHECKPOINT_EVERY) == 0:
+                    self._save_progress()
+            except GitHubGovernorLimitReached:
+                raise
+            except Exception as e:
+                self._observer.on_error("candidate", e, query)
+
     async def _process_candidate(
         self,
         enricher: GitHubEnricher,
@@ -521,80 +791,10 @@ class GitHubPipeline:
         check geography, and only do full enrichment if the candidate passes.
         This avoids wasting ~10 API calls per geo-filtered candidate.
         """
-        progress.candidates_discovered += 1
-        self.stats["candidates_discovered"] += 1
-
-        source_query = query.query or query.target_repo or query.target_org
-
-        # --- Light enrich + pre-screen for all channels ---
-        # For non-user_search: light enrich → geo gate → prescreen → full enrich
-        # For user_search: light enrich → prescreen → full enrich (API already geo-filters)
-        candidate = await enricher.light_enrich(
-            username,
-            source_strategy=query.channel,
-            source_query=source_query,
+        candidate = await self._prepare_candidate_for_evaluation(
+            enricher, username, query, progress, result_rank=result_rank,
         )
         if not candidate:
-            return
-
-        # Geography gate (skipped for user_search — API already handles it)
-        if query.channel != "user_search":
-            if not self._passes_geography_check(candidate, query):
-                self.stats.setdefault("geo_filtered", 0)
-                self.stats["geo_filtered"] += 1
-                self.stats.setdefault("geo_filtered_light", 0)
-                self.stats["geo_filtered_light"] += 1
-                self._observer.on_geo_filtered(username, candidate.user.location or "no location", query, "light")
-                self._mark_terminal(username)
-                return
-
-        # Rule-based pre-screen using light data only
-        prescreen = self._prescreen_light(candidate)
-        if prescreen == "hard_skip":
-            self.stats.setdefault("prescreen_filtered", 0)
-            self.stats["prescreen_filtered"] += 1
-            self._observer.on_prescreen_filtered(username, candidate, query)
-            self._mark_terminal(username)
-            return
-
-        # Full enrichment
-        candidate = await enricher.full_enrich(candidate)
-
-        # Merge contact info from profile
-        candidate.contact = merge_profile_contact(
-            candidate.contact,
-            candidate.user.email,
-            candidate.user.twitter_username,
-            candidate.user.blog,
-        )
-
-        self._governor.record_enrichment()
-        self._observer.on_enrichment()
-        progress.candidates_enriched += 1
-        self.stats["candidates_enriched"] += 1
-
-        # Save raw candidate data
-        append_jsonl(self.candidates_path, {
-            "username": candidate.user.username,
-            **candidate.to_dict(),
-        })
-
-        # Geography gate — catch any remaining edge cases (e.g. secondary proxy
-        # signals that only appear after full enrichment)
-        if not self._passes_geography_check(candidate, query):
-            self.stats.setdefault("geo_filtered", 0)
-            self.stats["geo_filtered"] += 1
-            self._observer.on_geo_filtered(username, candidate.user.location or "no location", query, "full")
-            self._mark_terminal(username)
-            return
-
-        # Check data sufficiency
-        if candidate.data_sufficiency == "insufficient":
-            self.stats["insufficient"] += 1
-            progress.candidates_insufficient += 1
-            log_event(self.log_path, "insufficient_data", username=username)
-            self._observer.on_insufficient_data(username, query)
-            self._mark_terminal(username)
             return
 
         # --- GitHub-native evaluation pipeline ---

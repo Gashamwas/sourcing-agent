@@ -14,6 +14,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from github.schemas import ContactInfo, GitHubCandidate, GitHubUser
 
 
 class _FakeExhaustionState:
@@ -71,6 +72,7 @@ def _import_pipeline_with_stubs():
             "full_judge",
             "init_judger",
             "github_facial_judge",
+            "github_facial_judge_batch",
             "github_full_judge",
             "extract_priority_rank",
         ):
@@ -170,6 +172,18 @@ def _make_query(**overrides) -> GitHubSearchQuery:
     )
     defaults.update(overrides)
     return GitHubSearchQuery(**defaults)
+
+
+def _make_candidate(username: str, name: str) -> GitHubCandidate:
+    return GitHubCandidate(
+        user=GitHubUser(
+            username=username,
+            name=name,
+            profile_url=f"https://github.com/{username}",
+        ),
+        contact=ContactInfo(),
+        portfolio_summary={"profile_summary": f"{name} builds ML systems"},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -294,6 +308,46 @@ class TestQueryErrorHandling:
             asyncio.run(pipeline._execute_queries(client, enricher, progress))
 
         adapt_mock.assert_not_called()
+
+    def test_v2_execute_single_query_batches_facial_triage(self):
+        """V2 GitHub flow should call the batch facial helper once per collected batch."""
+        pipeline = _make_pipeline()
+        query = _make_query()
+        progress = GitHubProgress(brief_name="test")
+
+        client = MagicMock()
+        enricher = MagicMock()
+
+        alice = _make_candidate("alice", "Alice")
+        bob = _make_candidate("bob", "Bob")
+
+        pipeline._search_users = AsyncMock(return_value=(2, ["alice", "bob"]))
+        pipeline._prepare_candidate_for_evaluation = AsyncMock(side_effect=[alice, bob])
+
+        with patch.object(
+            github_orchestrator,
+            "github_facial_judge_batch",
+            return_value=[
+                github_orchestrator.OpusDecision(
+                    stage="facial", decision="FACIAL_NO", path="none",
+                    confidence=1.0, rationale="out of scope",
+                    candidate_name="Alice", profile_url="https://github.com/alice",
+                ),
+                github_orchestrator.OpusDecision(
+                    stage="facial", decision="FACIAL_NO", path="none",
+                    confidence=1.0, rationale="out of scope",
+                    candidate_name="Bob", profile_url="https://github.com/bob",
+                ),
+            ],
+        ) as batch_mock, patch.object(
+            github_orchestrator,
+            "github_facial_judge",
+            side_effect=AssertionError("single-candidate GitHub facial should not run"),
+        ):
+            asyncio.run(pipeline._execute_single_query(client, enricher, query, progress))
+
+        batch_mock.assert_called_once()
+        assert pipeline.stats["facial_no"] == 2
 
 
 # ---------------------------------------------------------------------------

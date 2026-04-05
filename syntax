@@ -1,0 +1,415 @@
+#!/usr/bin/env bash
+# syntax — quick-reference cheat sheet for common bash commands
+# Usage: syntax [category]
+
+set -euo pipefail
+
+BOLD='\033[1m'
+DIM='\033[2m'
+CYAN='\033[36m'
+YELLOW='\033[33m'
+GREEN='\033[32m'
+RESET='\033[0m'
+
+_header() { printf "\n${BOLD}${CYAN}── %s ──${RESET}\n\n" "$1"; }
+_cmd()    { printf "  ${BOLD}${GREEN}%-8s${RESET} ${DIM}—${RESET} %s\n" "$1" "$2"; }
+_ex()     { printf "    ${YELLOW}%-42s${RESET} %s\n" "$1" "$2"; }
+_gap()    { echo ""; }
+
+# ── categories ───────────────────────────────────────────────────────
+
+cat_files() {
+  _header "FILES — creating, copying, moving, deleting"
+
+  _cmd "ls" "list files in a directory"
+  _ex "ls" "list files in current directory"
+  _ex "ls -la" "list all files (including hidden) with details"
+  _ex "ls *.csv" "list only CSV files"
+  _gap
+
+  _cmd "cd" "change directory (move into a folder)"
+  _ex "cd ~/Desktop" "go to Desktop"
+  _ex "cd .." "go up one folder"
+  _ex "cd -" "go back to the last directory you were in"
+  _gap
+
+  _cmd "pwd" "print where you are right now"
+  _ex "pwd" "/Users/sam.vangelos/Projects/..."
+  _gap
+
+  _cmd "cp" "copy files or directories"
+  _ex "cp file.txt backup.txt" "copy a file"
+  _ex "cp -r folder/ backup/" "copy a folder and everything in it"
+  _ex "cp *.csv ~/Desktop/" "copy all CSVs to Desktop"
+  _gap
+
+  _cmd "mv" "move or rename files"
+  _ex "mv old.txt new.txt" "rename a file"
+  _ex "mv file.txt ~/Desktop/" "move file to Desktop"
+  _ex "mv *.json config/" "move all JSON files into config/"
+  _gap
+
+  _cmd "rm" "delete files (permanent — no trash)"
+  _ex "rm file.txt" "delete a file"
+  _ex "rm -r folder/" "delete a folder and everything in it"
+  _ex "rm *.tmp" "delete all .tmp files"
+  _gap
+
+  _cmd "mkdir" "create a new directory"
+  _ex "mkdir output" "create a folder called output"
+  _ex "mkdir -p a/b/c" "create nested folders (creates a and b too)"
+  _gap
+
+  _cmd "touch" "create an empty file (or update its timestamp)"
+  _ex "touch notes.txt" "create an empty file"
+  _gap
+
+  _cmd "open" "open a file with its default app (macOS)"
+  _ex "open file.xlsx" "open spreadsheet in Excel"
+  _ex "open ." "open current folder in Finder"
+  _ex "open -a 'Google Chrome' file.html" "open file in a specific app"
+}
+
+cat_search() {
+  _header "SEARCH — finding files and content"
+
+  _cmd "find" "find files by name, type, or age"
+  _ex "find . -name '*.py'" "find all Python files under current dir"
+  _ex "find . -name '*.log' -mtime -1" "find logs modified in last 24 hours"
+  _ex "find ~/Downloads -name '*.csv'" "find CSVs in Downloads"
+  _gap
+
+  _cmd "grep" "search inside files for text"
+  _ex "grep 'error' log.txt" "find lines containing 'error'"
+  _ex "grep -r 'TODO' src/" "search for TODO in all files under src/"
+  _ex "grep -i 'save' *.jsonl" "case-insensitive search in JSONL files"
+  _ex "grep -c 'SAVE' file.jsonl" "count how many lines match"
+  _ex "grep -l 'pattern' *.py" "list only filenames that match"
+  _gap
+
+  _cmd "which" "find where a command lives"
+  _ex "which python3" "/usr/bin/python3"
+  _ex "which crew" "shows the path to the crew script"
+  _gap
+
+  _cmd "wc" "count lines, words, or characters"
+  _ex "wc -l file.jsonl" "count lines in a file"
+  _ex "wc -w essay.txt" "count words"
+  _ex "cat *.jsonl | wc -l" "count total lines across multiple files"
+}
+
+cat_text() {
+  _header "TEXT — reading and manipulating file contents"
+
+  _cmd "cat" "print the entire contents of a file"
+  _ex "cat file.txt" "print file to terminal"
+  _ex "cat a.txt b.txt > combined.txt" "combine two files into one"
+  _gap
+
+  _cmd "head" "show the first N lines of a file"
+  _ex "head file.txt" "first 10 lines (default)"
+  _ex "head -20 file.jsonl" "first 20 lines"
+  _gap
+
+  _cmd "tail" "show the last N lines of a file"
+  _ex "tail file.txt" "last 10 lines"
+  _ex "tail -50 log.txt" "last 50 lines"
+  _ex "tail -f log.txt" "live-follow a file as it grows"
+  _gap
+
+  _cmd "sort" "sort lines alphabetically or numerically"
+  _ex "sort names.txt" "sort alphabetically"
+  _ex "sort -n numbers.txt" "sort numerically"
+  _ex "sort -u file.txt" "sort and remove duplicates"
+  _gap
+
+  _cmd "uniq" "remove consecutive duplicate lines"
+  _ex "sort file.txt | uniq" "sort then dedupe"
+  _ex "sort file.txt | uniq -c" "sort, dedupe, and count occurrences"
+  _gap
+
+  _cmd "cut" "extract columns from text"
+  _ex "cut -d',' -f1 data.csv" "first column of a CSV"
+  _ex "cut -d',' -f1,3 data.csv" "first and third columns"
+  _gap
+
+  _cmd "sed" "find and replace text in files"
+  _ex "sed 's/old/new/' file.txt" "replace first 'old' per line"
+  _ex "sed 's/old/new/g' file.txt" "replace all 'old' with 'new'"
+  _ex "sed -i '' 's/old/new/g' file.txt" "edit the file in place (macOS)"
+  _gap
+
+  _cmd "awk" "process text by columns (powerful but complex)"
+  _ex "awk '{print \$1}' file.txt" "print first column"
+  _ex "awk -F',' '{print \$2}' data.csv" "print second column of CSV"
+  _gap
+
+  _cmd "diff" "compare two files line by line"
+  _ex "diff file1.txt file2.txt" "show differences"
+  _ex "diff -u old.py new.py" "unified diff (like git diff)"
+  _gap
+
+  _cmd "jq" "parse and query JSON files"
+  _ex "jq '.' file.json" "pretty-print JSON"
+  _ex "jq '.name' file.json" "extract the name field"
+  _ex "jq '.[] | .decision' f.jsonl" "extract decision from each line"
+}
+
+cat_git() {
+  _header "GIT — version control basics"
+
+  _cmd "status" "see what's changed"
+  _ex "git status" "show modified, staged, and untracked files"
+  _gap
+
+  _cmd "diff" "see the actual changes"
+  _ex "git diff" "unstaged changes"
+  _ex "git diff --staged" "staged changes (about to be committed)"
+  _ex "git diff main..branch" "changes between two branches"
+  _gap
+
+  _cmd "add" "stage files for commit"
+  _ex "git add file.py" "stage one file"
+  _ex "git add ." "stage everything"
+  _ex "git add *.py" "stage all Python files"
+  _gap
+
+  _cmd "commit" "save a snapshot of staged changes"
+  _ex "git commit -m 'fix bug'" "commit with a message"
+  _gap
+
+  _cmd "log" "see commit history"
+  _ex "git log --oneline -10" "last 10 commits, one line each"
+  _ex "git log --oneline --all" "all branches"
+  _gap
+
+  _cmd "branch" "manage branches"
+  _ex "git branch" "list local branches"
+  _ex "git branch new-feature" "create a new branch"
+  _ex "git branch -d old-branch" "delete a branch"
+  _gap
+
+  _cmd "checkout" "switch branches or restore files"
+  _ex "git checkout main" "switch to main"
+  _ex "git checkout -b new-feature" "create and switch to new branch"
+  _ex "git checkout -- file.py" "discard changes to a file"
+  _gap
+
+  _cmd "pull" "download and merge remote changes"
+  _ex "git pull" "pull from the tracked remote branch"
+  _ex "git pull origin main" "pull main from origin"
+  _gap
+
+  _cmd "push" "upload your commits to remote"
+  _ex "git push" "push to tracked remote branch"
+  _ex "git push -u origin new-feature" "push new branch and set tracking"
+  _gap
+
+  _cmd "stash" "temporarily shelve changes"
+  _ex "git stash" "stash uncommitted changes"
+  _ex "git stash pop" "bring stashed changes back"
+  _gap
+
+  _cmd "blame" "see who changed each line"
+  _ex "git blame file.py" "annotate file with commit info per line"
+}
+
+cat_pipes() {
+  _header "PIPES & REDIRECTION — connecting commands together"
+
+  _cmd "|" "pipe: send one command's output into another"
+  _ex "cat file.txt | grep 'error'" "find error lines in a file"
+  _ex "ls | wc -l" "count files in a directory"
+  _ex "sort data.txt | uniq -c | sort -rn" "frequency count, most common first"
+  _gap
+
+  _cmd ">" "write output to a file (overwrites)"
+  _ex "echo 'hello' > file.txt" "create file with 'hello'"
+  _ex "ls > filelist.txt" "save file listing to a file"
+  _gap
+
+  _cmd ">>" "append output to a file (doesn't overwrite)"
+  _ex "echo 'new line' >> file.txt" "add a line to end of file"
+  _gap
+
+  _cmd "<" "feed a file as input to a command"
+  _ex "sort < unsorted.txt" "sort the contents of a file"
+  _gap
+
+  _cmd "2>&1" "combine error output with normal output"
+  _ex "python3 script.py > log.txt 2>&1" "capture both output and errors"
+  _gap
+
+  _cmd "tee" "send output to both screen and a file"
+  _ex "ls | tee filelist.txt" "show listing AND save it"
+  _gap
+
+  _cmd "xargs" "turn lines of input into arguments for a command"
+  _ex "find . -name '*.tmp' | xargs rm" "delete all .tmp files found"
+  _ex "cat urls.txt | xargs curl" "fetch every URL in a file"
+  _gap
+
+  _cmd "&&" "run next command only if previous succeeded"
+  _ex "mkdir out && cd out" "create dir, then enter it"
+  _gap
+
+  _cmd "||" "run next command only if previous failed"
+  _ex "cd mydir || mkdir mydir" "enter dir, or create it if missing"
+  _gap
+
+  _cmd ";" "run next command regardless"
+  _ex "echo 'start'; sleep 2; echo 'done'" "run three commands in sequence"
+}
+
+cat_process() {
+  _header "PROCESSES — managing running programs"
+
+  _cmd "ps" "list running processes"
+  _ex "ps aux" "show all processes with details"
+  _ex "ps aux | grep python" "find running Python processes"
+  _gap
+
+  _cmd "kill" "stop a process by ID"
+  _ex "kill 12345" "gracefully stop process 12345"
+  _ex "kill -9 12345" "force kill (when graceful doesn't work)"
+  _gap
+
+  _cmd "top" "live view of system resource usage"
+  _ex "top" "interactive process monitor (q to quit)"
+  _gap
+
+  _cmd "jobs" "list background jobs in this terminal"
+  _ex "jobs" "see what's running in the background"
+  _gap
+
+  _cmd "bg / fg" "move jobs between background and foreground"
+  _ex "ctrl+z" "pause current process"
+  _ex "bg" "resume it in the background"
+  _ex "fg" "bring it back to the foreground"
+  _gap
+
+  _cmd "nohup" "keep a command running after you close terminal"
+  _ex "nohup python3 long_job.py &" "run in background, survives logout"
+  _gap
+
+  _cmd "lsof" "list open files / see what's using a port"
+  _ex "lsof -i :8080" "what process is using port 8080?"
+}
+
+cat_network() {
+  _header "NETWORK — fetching, transferring, connecting"
+
+  _cmd "curl" "make HTTP requests / download files"
+  _ex "curl https://example.com" "fetch a webpage"
+  _ex "curl -o file.zip https://url.com/f.zip" "download and save as file.zip"
+  _ex "curl -s url | jq '.'" "fetch JSON API and pretty-print"
+  _gap
+
+  _cmd "wget" "download files (simpler than curl for downloads)"
+  _ex "wget https://url.com/file.zip" "download a file"
+  _gap
+
+  _cmd "ssh" "connect to a remote machine"
+  _ex "ssh user@server.com" "log into a remote server"
+  _gap
+
+  _cmd "scp" "copy files to/from a remote machine"
+  _ex "scp file.txt user@server:~/." "upload file to server's home dir"
+  _ex "scp user@server:~/data.csv ." "download file from server"
+  _gap
+
+  _cmd "ping" "check if a host is reachable"
+  _ex "ping google.com" "test connectivity (ctrl+c to stop)"
+}
+
+cat_permissions() {
+  _header "PERMISSIONS — who can read, write, execute"
+
+  _cmd "chmod" "change file permissions"
+  _ex "chmod +x script.sh" "make a file executable"
+  _ex "chmod 755 script.sh" "owner: full, others: read+execute"
+  _ex "chmod 644 file.txt" "owner: read+write, others: read only"
+  _gap
+
+  _cmd "chown" "change file owner"
+  _ex "chown sam file.txt" "make sam the owner"
+  _ex "chown -R sam:staff folder/" "change owner of folder and contents"
+  _gap
+
+  _cmd "ls -la" "see permissions on files"
+  _ex "ls -la" "drwxr-xr-x = dir, owner rwx, group rx, others rx"
+  _ex "" "first char: d=directory, -=file, l=symlink"
+  _ex "" "then 3 groups of rwx: owner, group, everyone"
+}
+
+cat_variables() {
+  _header "VARIABLES & ENVIRONMENT — config that persists"
+
+  _cmd "echo" "print text or variable values"
+  _ex "echo \$PATH" "show your PATH"
+  _ex "echo \$HOME" "show your home directory"
+  _ex "echo \$SHELL" "show which shell you're using"
+  _gap
+
+  _cmd "export" "set an environment variable (current session)"
+  _ex "export MY_VAR='hello'" "set a variable"
+  _ex "export PATH=\"\$HOME/bin:\$PATH\"" "add a folder to PATH"
+  _gap
+
+  _cmd ".zshrc" "your shell config file — runs every new terminal"
+  _ex "open ~/.zshrc" "edit your shell config"
+  _ex "source ~/.zshrc" "reload config without opening new terminal"
+  _gap
+
+  _cmd "env" "list all environment variables"
+  _ex "env" "dump everything"
+  _ex "env | grep PATH" "find PATH-related variables"
+  _gap
+
+  _cmd "alias" "create a shortcut for a command"
+  _ex "alias ll='ls -la'" "ll now runs ls -la"
+  _ex "alias gs='git status'" "gs now runs git status"
+  _ex "" "add to ~/.zshrc to make permanent"
+  _gap
+
+  _cmd "which" "find where a command lives on your PATH"
+  _ex "which python3" "shows /usr/bin/python3 (or wherever)"
+  _ex "which crew" "confirms crew is findable on PATH"
+}
+
+# ── dispatch ─────────────────────────────────────────────────────────
+
+case "${1:-help}" in
+  files|file)           cat_files ;;
+  search|find)          cat_search ;;
+  text|txt)             cat_text ;;
+  git)                  cat_git ;;
+  pipes|pipe|redirect)  cat_pipes ;;
+  process|proc|ps)      cat_process ;;
+  network|net|curl)     cat_network ;;
+  permissions|perm)     cat_permissions ;;
+  variables|var|env)    cat_variables ;;
+  all)
+    cat_files; cat_search; cat_text; cat_git
+    cat_pipes; cat_process; cat_network; cat_permissions; cat_variables
+    ;;
+  help|--help|-h)
+    printf "${BOLD}syntax${RESET} — quick-reference cheat sheet for bash commands\n\n"
+    printf "Usage: ${GREEN}syntax${RESET} ${YELLOW}<category>${RESET}\n\n"
+    printf "Categories:\n"
+    printf "  ${BOLD}files${RESET}         ls, cp, mv, rm, mkdir, touch, open\n"
+    printf "  ${BOLD}search${RESET}        find, grep, which, wc\n"
+    printf "  ${BOLD}text${RESET}          cat, head, tail, sort, uniq, cut, sed, awk, jq\n"
+    printf "  ${BOLD}git${RESET}           status, diff, add, commit, log, branch, push, pull\n"
+    printf "  ${BOLD}pipes${RESET}         |, >, >>, <, &&, ||, tee, xargs\n"
+    printf "  ${BOLD}process${RESET}       ps, kill, top, jobs, bg/fg, lsof\n"
+    printf "  ${BOLD}network${RESET}       curl, wget, ssh, scp, ping\n"
+    printf "  ${BOLD}permissions${RESET}   chmod, chown, ls -la\n"
+    printf "  ${BOLD}variables${RESET}     echo, export, .zshrc, env, alias, which\n"
+    printf "  ${BOLD}all${RESET}           everything at once\n"
+    ;;
+  *)
+    echo "Unknown category: $1 (try: syntax help)" >&2
+    exit 1
+    ;;
+esac

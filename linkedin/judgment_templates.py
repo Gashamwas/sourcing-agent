@@ -273,6 +273,65 @@ SUMMARY: [one-line evaluation a hiring manager could act on]"""
 # The judger calls these — never constructs prompts directly.
 # ---------------------------------------------------------------------------
 
+def assemble_facial_system(brief: Brief) -> str:
+    """Return the cacheable system prompt for facial triage (all brief context, no candidate data)."""
+    return FACIAL_TRIAGE_TEMPLATE.format(
+        role_title=brief.role_title,
+        role_level=brief.role_level,
+        role_summary=brief.role_summary,
+        fast_exit_block=brief.fast_exit_block(),
+        trajectory_yes_patterns=brief.trajectory_yes_block(),
+        trajectory_ambiguous_patterns=brief.trajectory_ambiguous_block(),
+        trajectory_no_patterns=brief.trajectory_no_block(),
+        non_fit_block=brief.non_fit_block(),
+        capability_area_names="\n".join(f"  - {name}" for name in brief.capability_area_names()),
+        candidate_snippet="[provided in user message]",
+    )
+
+
+def assemble_full_evaluation_system(brief: Brief) -> str:
+    """Return the cacheable system prompt for full evaluation (all brief context, no candidate data)."""
+    return FULL_EVALUATION_TEMPLATE.format(
+        role_title=brief.role_title,
+        role_level=brief.role_level,
+        role_summary=brief.role_summary,
+        minimum_years_experience=brief.minimum_years_experience,
+        minimum_bar_description=brief.minimum_bar_description,
+        capability_area_block=brief.capability_area_block(),
+        depth_block=brief.depth_block(),
+        non_fit_block=brief.non_fit_block(),
+        non_fit_override_rule=brief.non_fit_override_rule_block(),
+        employer_signal_block=brief.employer_signal_block(),
+        inferential_save_block=brief.inferential_save_block(),
+        discriminating_skills_examples=brief.discriminating_skills_examples(),
+        seniority_calibration_block=brief.seniority_calibration_block(),
+        executive_builder_block=brief.executive_builder_block(),
+        decision_matrix_block=brief.decision_matrix_block(),
+        post_evaluation_safety_net=brief.post_evaluation_safety_net(),
+        post_save_modifiers_block=brief.post_save_modifiers_block(),
+        calibration_block=brief.calibration_block(),
+        instructions_block=brief.instructions_block(),
+        capability_area_stack_rank_guidance=brief.capability_area_stack_rank_guidance(),
+        candidate_profile="[provided in user message]",
+    )
+
+
+def assemble_facial_batch_system(brief: Brief) -> str:
+    """Return the cacheable system prompt for batch facial triage (no candidate data)."""
+    return FACIAL_TRIAGE_TEMPLATE_BATCH.format(
+        role_title=brief.role_title,
+        role_level=brief.role_level,
+        role_summary=brief.role_summary,
+        fast_exit_block=brief.fast_exit_block(),
+        trajectory_yes_patterns_compact=brief.trajectory_yes_compact(),
+        trajectory_ambiguous_patterns_compact=brief.trajectory_ambiguous_compact(),
+        trajectory_no_patterns_compact=brief.trajectory_no_compact(),
+        non_fit_compact=brief.non_fit_compact(),
+        capability_area_names_inline=brief.capability_area_names_inline(),
+        candidate_snippets_numbered="[provided in user message]",
+    )
+
+
 def assemble_facial_prompt(brief: Brief, candidate_snippet: str) -> str:
     """Assemble a facial triage prompt for a single candidate."""
     return FACIAL_TRIAGE_TEMPLATE.format(
@@ -341,6 +400,7 @@ def assemble_full_evaluation_prompt(brief: Brief, candidate_profile: str) -> str
 # Strict parsers that flag failures explicitly rather than defaulting silently.
 # ---------------------------------------------------------------------------
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -397,6 +457,38 @@ def parse_facial_response(raw: str) -> FacialResult:
 
     # Parse failure — non-terminal, candidate can be retried
     return FacialResult("PARSE_FAILURE", "could not parse facial decision", raw_stripped)
+
+
+def parse_facial_batch_response(raw: str, count: int) -> list[FacialResult]:
+    """Parse a batch facial triage response.
+
+    Expected format per candidate: [N] FACIAL_YES or FACIAL_NO | reason
+    Returns one FacialResult per candidate, PARSE_FAILURE for missing/malformed entries.
+    """
+    raw_stripped = raw.strip()
+    parsed: dict[int, FacialResult] = {}
+
+    for line in raw_stripped.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        m = re.match(r'\[(\d+)\]\s*(FACIAL_YES|FACIAL_NO)\s*\|\s*(.*)', line, re.IGNORECASE)
+        if m:
+            idx = int(m.group(1))
+            decision = "FACIAL_YES" if "YES" in m.group(2).upper() else "FACIAL_NO"
+            reason = m.group(3).strip()
+            parsed[idx] = FacialResult(decision, reason, line)
+
+    results = []
+    for i in range(1, count + 1):
+        if i in parsed:
+            results.append(parsed[i])
+        else:
+            results.append(FacialResult(
+                "PARSE_FAILURE", f"missing batch response for candidate {i}", raw_stripped,
+            ))
+
+    return results
 
 
 def parse_full_evaluation_response(raw: str) -> FullEvaluationResult:

@@ -87,6 +87,43 @@ DECISION: FACIAL_YES or FACIAL_NO
 REASON: One sentence — what portfolio signal you see (if YES) or why the full portfolio is clearly outside scope (if NO)."""
 
 
+GITHUB_FACIAL_TRIAGE_TEMPLATE_BATCH = """You are triaging candidate profiles from GitHub search results.
+
+ROLE: {role_title} ({role_level}) — {role_summary}
+
+YOUR TASK: For each candidate, decide whether the GitHub portfolio warrants a full profile review. You are deciding whether to spend tokens on a full read, not whether to save.
+
+WHAT YOU HAVE: For each candidate, a username, bio, profile README (if any), public repo list with names/descriptions/topics/stars/languages, and a toolchain summary listing detected frameworks and libraries across their repos. You do NOT have full repo contents, commit history, or code quality analysis yet.
+
+FAST EXITS — reject ONLY if the profile clearly indicates work outside scope:
+{fast_exit_block}
+
+PORTFOLIO READ — read ALL of: toolchain_detected, repo_summaries, frontier_contributions, website_papers, profile_summary.
+
+YES patterns:
+{portfolio_yes_patterns}
+
+AMBIGUOUS patterns (default YES — let the full evaluation resolve):
+{portfolio_ambiguous_patterns}
+
+NO patterns (only if consistent across the ENTIRE portfolio):
+{portfolio_no_patterns}
+
+CAPABILITY AREAS for this role:
+{capability_area_names}
+
+GitHub profiles can be misleading — a user with mostly forks may have significant private work, and repo names alone do not reveal depth. Do NOT try to make depth calls at this stage.
+
+- FACIAL_YES: Any repo, toolchain signal, contribution, or bio element COULD connect to a capability area. Ambiguity favors YES.
+- FACIAL_NO: The ENTIRE portfolio clearly indicates work outside all capability areas. Every repo, topic, and toolchain signal points away from relevance. No single element creates doubt.
+
+CANDIDATE PORTFOLIOS:
+{candidate_portfolios_numbered}
+
+Respond with EXACTLY this format for each candidate, one per line:
+[candidate_number] FACIAL_YES or FACIAL_NO | one-sentence reason citing the portfolio signal"""
+
+
 # ---------------------------------------------------------------------------
 # GITHUB FULL EVALUATION TEMPLATE
 # ---------------------------------------------------------------------------
@@ -313,6 +350,104 @@ _DEFAULT_PORTFOLIO_NO_PATTERNS = [
 # These inject Brief content into template slots at runtime.
 # The GitHub judger calls these — never constructs prompts directly.
 # ---------------------------------------------------------------------------
+
+def assemble_github_facial_system(brief: Brief) -> str:
+    """Return the cacheable system prompt for GitHub facial triage (no candidate data)."""
+    # GitHub-specific fast exits
+    github_fast_exits = getattr(brief, "github_fast_exit_patterns", None)
+    if github_fast_exits:
+        fast_exit_block = "\n".join(f"- {p}" for p in github_fast_exits)
+    else:
+        fast_exit_block = "\n".join(f"- {p}" for p in _DEFAULT_GITHUB_FAST_EXITS)
+
+    portfolio_yes = getattr(brief, "github_portfolio_yes_patterns", None)
+    if portfolio_yes:
+        portfolio_yes_block = "\n".join(f"- {p}" for p in portfolio_yes)
+    else:
+        portfolio_yes_block = "\n".join(f"- {p}" for p in _DEFAULT_PORTFOLIO_YES_PATTERNS)
+
+    portfolio_ambiguous = getattr(brief, "github_portfolio_ambiguous_patterns", None)
+    if portfolio_ambiguous:
+        portfolio_ambiguous_block = "\n".join(f"- {p}" for p in portfolio_ambiguous)
+    else:
+        portfolio_ambiguous_block = "\n".join(f"- {p}" for p in _DEFAULT_PORTFOLIO_AMBIGUOUS_PATTERNS)
+
+    portfolio_no = getattr(brief, "github_portfolio_no_patterns", None)
+    if portfolio_no:
+        portfolio_no_block = "\n".join(f"- {p}" for p in portfolio_no)
+    else:
+        portfolio_no_block = "\n".join(f"- {p}" for p in _DEFAULT_PORTFOLIO_NO_PATTERNS)
+
+    return GITHUB_FACIAL_TRIAGE_TEMPLATE.format(
+        role_title=brief.role_title,
+        role_level=brief.role_level,
+        role_summary=brief.role_summary,
+        fast_exit_block=fast_exit_block,
+        portfolio_yes_patterns=portfolio_yes_block,
+        portfolio_ambiguous_patterns=portfolio_ambiguous_block,
+        portfolio_no_patterns=portfolio_no_block,
+        capability_area_names="\n".join(f"  - {name}" for name in brief.capability_area_names()),
+        candidate_portfolio="[provided in user message]",
+    )
+
+
+def assemble_github_facial_batch_system(brief: Brief) -> str:
+    """Return the cacheable system prompt for GitHub batch facial triage."""
+    github_fast_exits = getattr(brief, "github_fast_exit_patterns", None)
+    if github_fast_exits:
+        fast_exit_block = "\n".join(f"- {p}" for p in github_fast_exits)
+    else:
+        fast_exit_block = "\n".join(f"- {p}" for p in _DEFAULT_GITHUB_FAST_EXITS)
+
+    portfolio_yes = getattr(brief, "github_portfolio_yes_patterns", None)
+    if portfolio_yes:
+        portfolio_yes_block = "\n".join(f"- {p}" for p in portfolio_yes)
+    else:
+        portfolio_yes_block = "\n".join(f"- {p}" for p in _DEFAULT_PORTFOLIO_YES_PATTERNS)
+
+    portfolio_ambiguous = getattr(brief, "github_portfolio_ambiguous_patterns", None)
+    if portfolio_ambiguous:
+        portfolio_ambiguous_block = "\n".join(f"- {p}" for p in portfolio_ambiguous)
+    else:
+        portfolio_ambiguous_block = "\n".join(f"- {p}" for p in _DEFAULT_PORTFOLIO_AMBIGUOUS_PATTERNS)
+
+    portfolio_no = getattr(brief, "github_portfolio_no_patterns", None)
+    if portfolio_no:
+        portfolio_no_block = "\n".join(f"- {p}" for p in portfolio_no)
+    else:
+        portfolio_no_block = "\n".join(f"- {p}" for p in _DEFAULT_PORTFOLIO_NO_PATTERNS)
+
+    return GITHUB_FACIAL_TRIAGE_TEMPLATE_BATCH.format(
+        role_title=brief.role_title,
+        role_level=brief.role_level,
+        role_summary=brief.role_summary,
+        fast_exit_block=fast_exit_block,
+        portfolio_yes_patterns=portfolio_yes_block,
+        portfolio_ambiguous_patterns=portfolio_ambiguous_block,
+        portfolio_no_patterns=portfolio_no_block,
+        capability_area_names="\n".join(f"  - {name}" for name in brief.capability_area_names()),
+        candidate_portfolios_numbered="[provided in user message]",
+    )
+
+
+def assemble_github_full_evaluation_system(brief: Brief) -> str:
+    """Return the cacheable system prompt for GitHub full evaluation (no candidate data)."""
+    return GITHUB_FULL_EVALUATION_TEMPLATE.format(
+        role_title=brief.role_title,
+        role_level=brief.role_level,
+        role_summary=brief.role_summary,
+        minimum_years_experience=brief.minimum_years_experience,
+        minimum_bar_description=brief.minimum_bar_description,
+        capability_area_block=brief.capability_area_block(),
+        depth_block=brief.depth_block(),
+        non_fit_block=brief.non_fit_block(),
+        non_fit_override_rule=brief.non_fit_override_rule_block(),
+        employer_signal_block=brief.employer_signal_block(),
+        inferential_save_block=brief.inferential_save_block(),
+        discriminating_skills_examples=brief.discriminating_skills_examples(),
+        candidate_evidence="[provided in user message]",
+    )
+
 
 def assemble_github_facial_prompt(brief: Brief, portfolio_text: str) -> str:
     """Assemble a GitHub facial triage prompt for a single candidate.

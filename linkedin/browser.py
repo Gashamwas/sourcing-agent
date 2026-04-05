@@ -574,14 +574,49 @@ class LinkedInBrowser:
         slots = self.page.locator("ol.profile-list > li")
         return await slots.count()
 
+    async def _wait_for_result_slot(self, card_index: int, timeout_ms: int = 8000):
+        """Wait for a specific results-list slot to exist after DOM re-hydration.
+
+        Recruiter occasionally tears down and rebuilds the results list while the
+        slide-in closes or while the viewport is being repositioned. During that
+        window, `nth(card_index)` can temporarily stop resolving even though the
+        page is still healthy. We wait for the slot count to recover instead of
+        failing the whole string on a transient list rebuild.
+        """
+        list_root = self.page.locator("ol.profile-list").first
+        await list_root.wait_for(state="visible", timeout=timeout_ms)
+
+        slots = self.page.locator("ol.profile-list > li")
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + (timeout_ms / 1000.0)
+        last_count = 0
+        last_error: Exception | None = None
+
+        while loop.time() < deadline:
+            try:
+                count = await slots.count()
+                last_count = count
+                if count > card_index:
+                    li = slots.nth(card_index)
+                    await li.wait_for(state="attached", timeout=1000)
+                    return li
+            except Exception as e:
+                last_error = e
+
+            await self.page.wait_for_timeout(200)
+
+        details = f"Result slot {card_index + 1} unavailable after waiting (saw {last_count} slots)"
+        if last_error:
+            details = f"{details}: {last_error}"
+        raise TimeoutError(details)
+
     async def get_card_count(self) -> int:
         cards = self.page.locator("ol.profile-list article.profile-list-item")
         return await cards.count()
 
     async def focus_card_for_review(self, card_index: int) -> None:
         """Bring a result card into a readable viewport position with visible scrolling."""
-        li = self.page.locator("ol.profile-list > li").nth(card_index)
-        await li.wait_for(state="attached", timeout=5000)
+        li = await self._wait_for_result_slot(card_index)
 
         try:
             rect = await li.evaluate("""el => {
@@ -605,13 +640,16 @@ class LinkedInBrowser:
             article = li.locator("article.profile-list-item").first
             await article.wait_for(state="visible", timeout=3000)
         except Exception:
+            li = await self._wait_for_result_slot(card_index)
             await li.scroll_into_view_if_needed(timeout=3000)
             await self.page.wait_for_timeout(600)
+            article = li.locator("article.profile-list-item").first
+            await article.wait_for(state="visible", timeout=4000)
 
     async def get_card_snapshot(self, card_index: int) -> dict:
         """Read one result card's rendered text plus stable DOM metadata."""
         async def _do():
-            li = self.page.locator("ol.profile-list > li").nth(card_index)
+            li = await self._wait_for_result_slot(card_index)
             article = li.locator("article.profile-list-item").first
             await article.wait_for(state="visible", timeout=5000)
 
@@ -795,7 +833,7 @@ class LinkedInBrowser:
         target card's links exist in the DOM.
         """
         try:
-            li = self.page.locator("ol.profile-list > li").nth(card_index)
+            li = await self._wait_for_result_slot(card_index)
             await li.scroll_into_view_if_needed(timeout=3000)
             await self.page.wait_for_timeout(600)  # Let article render
         except Exception as e:
@@ -1244,9 +1282,30 @@ class LinkedInBrowser:
         button changed from 'Save to pipeline' to 'Change stage'.
         """
         async def _do():
+            if await self.is_already_saved():
+                return True
+
+            slidein = self.page.locator("div.profile-slidein__container").first
+            await slidein.wait_for(state="visible", timeout=5000)
+
             selector = "div.profile-slidein__container button.save-to-pipeline__button"
             save_btn = self.page.locator(selector).first
-            await save_btn.wait_for(state="visible", timeout=5000)
+            try:
+                await save_btn.wait_for(state="visible", timeout=5000)
+            except Exception:
+                if await self.is_already_saved():
+                    return True
+                # The slide-in occasionally lands mid-scroll after profile review.
+                # Scroll back to the top-level action bar once before giving up.
+                try:
+                    container = self.page.locator("div.profile__main-container").first
+                    await container.evaluate("el => { el.scrollTop = 0; }")
+                    await self.page.wait_for_timeout(300)
+                except Exception:
+                    pass
+                if await self.is_already_saved():
+                    return True
+                await save_btn.wait_for(state="visible", timeout=3000)
             # Ghost-cursor first (generates mouse trajectory), JS click as fallback
             if not await self._ghost_click(selector):
                 await save_btn.evaluate("el => el.click()")
@@ -1258,6 +1317,11 @@ class LinkedInBrowser:
         try:
             return await _retry(_do)
         except Exception as e:
+            try:
+                if await self.is_already_saved():
+                    return True
+            except Exception:
+                pass
             print(f"  [warn] Failed to save candidate: {e}")
             return False
 

@@ -1,0 +1,1371 @@
+sam.vangelos@samvangelos-GQNP4VT027 sourcing-agent % ./launch-chrome.sh
+Chrome ready on CDP port 9222.
+Open linkedin.com/talent in Chrome, then run ./run-search.sh
+sam.vangelos@samvangelos-GQNP4VT027 sourcing-agent % python3 run_linkedin.py --brief config/brief-forward-deployed-engineer-us-v1.json --full-run
+
+[console] Mirroring stdout/stderr to /Users/sam.vangelos/Projects/recruiting-tools/sourcing-agent/output/live-console.log
+============================================================
+FULL RUN: Autonomous Search Evolution
+Brief: Forward Deployed Engineer
+Kit URL: 
+============================================================
+  Connected to browser (ghost-cursor active). Active page: https://www.linkedin.com/talent/hire/1990251114/discover/recruiterSearch?searchContextId=e1382c9e-506f-4999-8fb7-8b972760a744&searchHistoryId=20962196794&searchRequestId=b4d4de06-1c40-4ce6-8e50-03019d97750b&start=0
+  Archived snippets.jsonl → snippets-20260401-142717.jsonl
+  Archived facial_judgments.jsonl → facial_judgments-20260401-142717.jsonl
+  Archived profile_summaries.jsonl → profile_summaries-20260401-142717.jsonl
+  Archived final_judgments.jsonl → final_judgments-20260401-142717.jsonl
+  [cleanup] Removed old archive: snippets-20260326-205510.jsonl
+  [cleanup] Removed old archive: facial_judgments-20260326-205510.jsonl
+  [cleanup] Removed old archive: profile_summaries-20260326-172355.jsonl
+  [cleanup] Removed old archive: final_judgments-20260326-172355.jsonl
+
+--- Phase 1: Kit Extraction ---
+  No kit URL provided — strategy will generate strings from JD context only.
+
+--- Phase 2: Strategy Formation (Opus) ---
+  Strategizing... (Opus is synthesizing compound search strings)
+  Architecture: negative_space — The prior run data shows this market has been heavily worked for months with 66 strings across sniper, company_first, an
+  Strategy complete.
+  Strategy: This is a completely different role from the prior run (IC FDE at 5-10 years vs Head of FDE in life sciences). The prior...
+  25 compound strings synthesized from JD context
+  5 coverage gaps identified (4 with executable strings)
+
+  Compound strings (25):
+    #1: ("agentic workflow" OR "agentic workflows" OR "agentic system" OR "agentic systems" OR "tool calling" OR "function calling" OR "agent orchestration") AND ("production" OR "deployed" OR "shipped" OR "enterprise") NOT ("Solutions Architect" OR "Product Manager" OR "Product Management" OR "Account Executive" OR "Business Development" OR "VP of" OR "Vice President of" OR "Head of" OR "Director of" OR "Chief" OR "Partner" OR "Managing Director" OR "Customer Success Manager")
+        → Targets the HARD GATE capability — production agentic delivery — using precise agentic vocabulary (t
+    #2: ("LangGraph" OR "PydanticAI" OR "DSPy" OR "CrewAI" OR "AutoGen" OR "Semantic Kernel") AND ("built" OR "architected" OR "deployed" OR "shipped" OR "production" OR "implemented")
+        → Ultra-precision Type B string. These specific agentic framework names are practitioner-only signals 
+    #3: ("copilot" OR "co-pilot" OR "copilots" OR "internal copilot" OR "AI copilot" OR "AI assistant" OR "AI assistants") AND ("built" OR "architected" OR "shipped" OR "deployed" OR "production") AND ("Senior Engineer" OR "Senior Software Engineer" OR "Staff Engineer" OR "Staff Software Engineer" OR "Principal Engineer" OR "Tech Lead" OR "Technical Lead" OR "Senior Backend" OR "Founding Engineer" OR "Lead Engineer" OR "Software Architect") NOT ("Product Manager" OR "Product Management" OR "Solutions Architect" OR "Account" OR "Customer Success" OR "Sales Engineer")
+        → Targets staff/senior engineers who built internal copilots — a high-signal edge-case population per 
+    #4: ("MCP" OR "Model Context Protocol" OR "browser-use" OR "Playwright") AND ("LLM" OR "large language model" OR "large language models" OR "GenAI" OR "generative AI" OR "agentic")
+        → Ultra-precision Type B string using bleeding-edge agentic tooling vocabulary. MCP (Model Context Pro
+    #5: ("RAG" OR "retrieval augmented generation" OR "retrieval-augmented generation" OR "RAG pipeline" OR "RAG pipelines" OR "retrieval pipeline" OR "retrieval pipelines") AND ("FastAPI" OR "Temporal" OR "event-driven" OR "event driven" OR "microservices" OR "API design") AND ("Senior" OR "Staff" OR "Principal" OR "Lead" OR "Founding" OR "Architect") NOT ("Solutions Architect" OR "Enterprise Architect" OR "Product Manager" OR "Data Analyst" OR "Business Analyst" OR "VP" OR "Vice President" OR "Director" OR "Head of")
+        → Crosses GenAI application delivery (RAG) with enterprise architecture signals (FastAPI, Temporal, ev
+    #6: ("LiteLLM" OR "LangSmith" OR "RAGAS" OR "DeepEval" OR "Guardrails AI" OR "NeMo Guardrails") AND ("engineer" OR "engineering" OR "built" OR "deployed" OR "production")
+        → Type B precision string using evaluation and operationalization tool names that only active GenAI pr
+    #7: ("GenAI" OR "generative AI" OR "LLM" OR "large language model" OR "large language models") AND ("customer" OR "client" OR "customer-facing" OR "customer facing" OR "client-facing" OR "client facing") AND ("deployed" OR "shipped" OR "production" OR "delivery" OR "implementation") AND ("Senior Engineer" OR "Senior Software Engineer" OR "Staff Engineer" OR "Staff Software Engineer" OR "Principal Engineer" OR "Tech Lead" OR "Technical Lead" OR "Founding Engineer" OR "Lead Engineer" OR "Applied Scientist" OR "ML Engineer" OR "AI Engineer" OR "Software Architect") NOT ("Product Manager" OR "Product Management" OR "Solutions Architect" OR "Account Executive" OR "Account Manager" OR "Customer Success" OR "Business Development" OR "VP" OR "Vice President" OR "Director" OR "Head of" OR "Managing Director" OR "Partner" OR "Consultant")
+        → Type A recall string targeting the core FDE profile: GenAI builders with customer-facing delivery ex
+    #8: ("forward deployed" OR "forward-deployed" OR "customer engineer" OR "customer engineering" OR "implementation engineer" OR "implementation engineering" OR "delivery engineer" OR "delivery engineering" OR "solutions engineer" OR "solutions engineering" OR "field engineer" OR "field engineering") AND ("LLM" OR "large language model" OR "GenAI" OR "generative AI" OR "RAG" OR "retrieval augmented" OR "agentic" OR "AI agent" OR "AI agents") NOT ("Manager" OR "Director" OR "VP" OR "Vice President" OR "Head of" OR "Account Executive" OR "Business Development")
+        → Directly targets the forward-deployed/solutions/customer engineering archetype with GenAI depth, at 
+    #9: ("Palantir" OR "Scale AI" OR "Anduril" OR "C3 AI" OR "C3.ai" OR "Dataiku" OR "DataRobot" OR "Weights & Biases" OR "Weights and Biases" OR "Cohere" OR "Anthropic" OR "OpenAI" OR "Turing" OR "Cognition" OR "Cursor") AND ("Senior" OR "Staff" OR "Principal" OR "Lead" OR "Founding" OR "engineer" OR "engineering") AND ("deployed" OR "production" OR "customer" OR "client" OR "enterprise" OR "built" OR "shipped") NOT ("Intern" OR "Associate" OR "Junior" OR "Product Manager" OR "Recruiter" OR "Marketing" OR "Sales")
+        → Company-first string targeting enterprise AI platform companies known for forward-deployed engineeri
+    #10: ("evals" OR "evaluation harness" OR "eval harness" OR "evaluation framework" OR "eval framework" OR "evaluation pipeline" OR "eval pipeline" OR "LLM evals" OR "LLM evaluation" OR "LLM evaluations") AND ("production" OR "deployed" OR "shipped" OR "enterprise" OR "built" OR "implemented") NOT ("Product Manager" OR "Product Management" OR "Research Scientist" OR "Research Engineer" OR "PhD student" OR "Postdoc" OR "Professor")
+        → Precision string targeting GenAI evaluation practitioners — a key capability area. The term 'evals' 
+    #11: ("AI agent" OR "AI agents" OR "multi-agent" OR "multi agent" OR "agent framework" OR "agent frameworks" OR "agentic") AND ("API" OR "microservices" OR "microservice" OR "event-driven" OR "event driven" OR "backend" OR "infrastructure" OR "system design") AND ("Senior" OR "Staff" OR "Principal" OR "Lead" OR "Founding" OR "Architect") NOT ("Solutions Architect" OR "Enterprise Architect" OR "Product Manager" OR "VP" OR "Vice President" OR "Director" OR "Head of" OR "Chief")
+        → Crosses agentic AI delivery with backend/architecture vocabulary at IC seniority. This intersection 
+    #12: ("semantic cache" OR "semantic caching" OR "human in the loop" OR "human-in-the-loop" OR "workflow engine" OR "workflow engines" OR "agent routing" OR "agent router") AND ("LLM" OR "large language model" OR "GenAI" OR "generative AI" OR "agentic" OR "RAG")
+        → Ultra-precision Type B string using niche practitioner vocabulary that only hands-on GenAI system bu
+    #13: ("applied scientist" OR "applied scientists" OR "ML engineer" OR "ML engineers" OR "machine learning engineer" OR "machine learning engineers" OR "AI engineer" OR "AI engineers") AND ("production" OR "deployed" OR "shipped" OR "productionized" OR "productionize" OR "productionization" OR "operationalized") AND ("LLM" OR "large language model" OR "large language models" OR "GenAI" OR "generative AI" OR "RAG" OR "retrieval augmented" OR "agentic") NOT ("Intern" OR "Junior" OR "Associate" OR "Research Scientist" OR "Research Engineer" OR "PhD student" OR "Postdoc" OR "VP" OR "Vice President" OR "Director" OR "Head of")
+        → Targets the DS/ML-shaped path — applied scientists and ML engineers who owned productization of GenA
+    #14: ("founding engineer" OR "founding engineers" OR "first engineer" OR "early engineer" OR "employee #" OR "engineer #" OR "CTO" OR "co-founder" OR "cofounder") AND ("LLM" OR "large language model" OR "GenAI" OR "generative AI" OR "RAG" OR "agentic" OR "AI agent" OR "AI agents" OR "copilot" OR "co-pilot") AND ("enterprise" OR "B2B" OR "SaaS" OR "customer" OR "client" OR "deployed" OR "production") NOT ("VP of" OR "Vice President of" OR "Director of" OR "Head of" OR "Managing Director" OR "Partner" OR "Advisor" OR "Board")
+        → Targets founding engineers and hands-on CTOs at small AI startups selling agentic or workflow produc
+    #15: ("accelerator" OR "accelerators" OR "reference architecture" OR "reference architectures" OR "deployment toolkit" OR "deployment toolkits" OR "reusable module" OR "reusable modules" OR "scaffold" OR "scaffolding" OR "template" OR "templates" OR "boilerplate") AND ("LLM" OR "large language model" OR "GenAI" OR "generative AI" OR "RAG" OR "agentic") AND ("built" OR "created" OR "developed" OR "authored" OR "open-sourced" OR "open sourced") NOT ("Product Manager" OR "Product Management" OR "Marketing" OR "Sales" OR "VP" OR "Vice President" OR "Director")
+        → Targets Archetype 3 — engineers who build reusable delivery tooling and accelerators for GenAI deplo
+    #16: ("fine-tuning" OR "fine tuning" OR "fine-tuned" OR "fine tuned" OR "finetuning" OR "finetuned" OR "LoRA" OR "QLoRA" OR "PEFT") AND ("production" OR "deployed" OR "enterprise" OR "customer" OR "client") AND ("engineer" OR "engineering" OR "built" OR "architected" OR "Senior" OR "Staff" OR "Principal" OR "Lead") NOT ("Research Scientist" OR "Research Engineer" OR "PhD student" OR "Postdoc" OR "Professor" OR "VP" OR "Vice President" OR "Director" OR "Head of")
+        → Targets engineers with hands-on fine-tuning experience who deployed models into production/enterpris
+    #17: ("GenAI" OR "generative AI" OR "LLM" OR "large language model" OR "large language models") AND ("Terraform" OR "Pulumi" OR "infrastructure as code" OR "infrastructure-as-code" OR "IaC") AND ("Senior" OR "Staff" OR "Principal" OR "Lead" OR "Architect" OR "engineer") NOT ("DevOps Engineer" OR "Site Reliability" OR "SRE" OR "Infrastructure Engineer" OR "Platform Engineer" OR "Cloud Engineer" OR "VP" OR "Vice President" OR "Director" OR "Head of")
+        → Crosses GenAI with IaC tooling — a JD preferred qualification. This intersection surfaces full-stack
+    #18: ("technical discovery" OR "solution design" OR "solutions delivery" OR "technical advisor" OR "trusted advisor" OR "requirements gathering" OR "technical consulting") AND ("LLM" OR "large language model" OR "GenAI" OR "generative AI" OR "RAG" OR "agentic" OR "AI agent") AND ("built" OR "architected" OR "deployed" OR "implemented" OR "shipped" OR "production") NOT ("Product Manager" OR "Account Manager" OR "Account Executive" OR "Business Development" OR "VP" OR "Vice President" OR "Director" OR "Head of" OR "Partner" OR "Managing Director" OR "Consultant")
+        → Targets people who combine requirements-to-implementation ownership (technical discovery, solution d
+    #19: ("Deloitte" OR "Accenture" OR "McKinsey" OR "BCG" OR "Slalom" OR "Thoughtworks" OR "Capgemini" OR "Cognizant" OR "Infosys" OR "Wipro" OR "TCS" OR "EY" OR "PwC" OR "KPMG" OR "Booz Allen") AND ("LLM" OR "large language model" OR "GenAI" OR "generative AI" OR "RAG" OR "agentic" OR "LangChain" OR "LangGraph") AND ("Senior Engineer" OR "Senior Software Engineer" OR "Staff Engineer" OR "Tech Lead" OR "Technical Lead" OR "Lead Engineer" OR "Principal Engineer" OR "Senior Consultant" OR "Manager" OR "Senior Manager") AND ("built" OR "architected" OR "deployed" OR "implemented" OR "delivered" OR "production") NOT ("Partner" OR "Managing Director" OR "VP" OR "Vice President" OR "Director" OR "Senior Director" OR "Account" OR "Sales")
+        → Company-first string targeting consultancy ICs who built customer GenAI systems. Per sourcing instru
+    #20: ("embeddings" OR "embedding" OR "vector search" OR "vector database" OR "vector databases" OR "vector store" OR "vector stores" OR "Pinecone" OR "Weaviate" OR "Qdrant" OR "ChromaDB" OR "Chroma" OR "Milvus") AND ("production" OR "deployed" OR "enterprise" OR "shipped" OR "customer" OR "client") AND ("engineer" OR "engineering" OR "built" OR "architected" OR "Senior" OR "Staff" OR "Principal") NOT ("Data Analyst" OR "Business Analyst" OR "Product Manager" OR "VP" OR "Vice President" OR "Director" OR "Head of" OR "Solutions Architect")
+        → Precision string targeting RAG/retrieval infrastructure practitioners who deployed vector search sys
+    #21: ("orchestration" OR "orchestrator" OR "workflow orchestration" OR "agent loop" OR "agent loops" OR "chain of thought" OR "chain-of-thought" OR "multi-step" OR "multi step" OR "tool use") AND ("LLM" OR "large language model" OR "GenAI" OR "generative AI" OR "agentic" OR "AI agent") AND ("production" OR "deployed" OR "shipped" OR "enterprise" OR "customer") NOT ("Product Manager" OR "Solutions Architect" OR "VP" OR "Vice President" OR "Director" OR "Head of" OR "DevOps" OR "Kubernetes")
+        → Targets the orchestration layer of agentic systems — multi-step execution, tool use, agent loops. Th
+    #22: ("guardrails" OR "guardrail" OR "content filter" OR "content filtering" OR "safety filter" OR "output validation" OR "input validation" OR "prompt injection" OR "prompt injections" OR "jailbreak" OR "jailbreaking") AND ("LLM" OR "large language model" OR "GenAI" OR "generative AI" OR "agentic" OR "RAG") AND ("built" OR "implemented" OR "deployed" OR "production" OR "enterprise")
+        → Precision string targeting GenAI safety/guardrails practitioners. Guardrails, prompt injection defen
+    #23: ("Palantir" OR "Foundry" OR "forward deployed" OR "forward-deployed" OR "FDE" OR "FDSE") AND ("engineer" OR "engineering" OR "software" OR "built" OR "deployed") NOT ("Intern" OR "Associate" OR "Junior" OR "Director" OR "VP" OR "Vice President" OR "Head of")
+        → Direct Palantir/FDE archetype string. Palantir is the canonical source of forward-deployed engineers
+    #24: ("GenAI" OR "generative AI" OR "LLM" OR "large language model" OR "large language models" OR "agentic") AND ("reusable" OR "repeatable" OR "playbook" OR "playbooks" OR "standardized" OR "framework" OR "frameworks" OR "modular") AND ("deployment" OR "deployments" OR "delivery" OR "delivered" OR "implementation" OR "implementations") NOT ("Product Manager" OR "Program Manager" OR "VP" OR "Vice President" OR "Director" OR "Head of" OR "Partner" OR "Managing Director")
+        → Targets Archetype 3 — people who built reusable delivery patterns across multiple GenAI deployments.
+    #25: ("LLM" OR "large language model" OR "large language models" OR "GenAI" OR "generative AI") AND ("observability" OR "tracing" OR "LLM tracing" OR "prompt logging" OR "token usage" OR "latency optimization" OR "cost optimization") AND ("engineer" OR "engineering" OR "built" OR "implemented" OR "production")
+        → Precision string targeting GenAI operationalization practitioners. Observability, tracing, prompt lo
+
+  Coverage gaps (4):
+    #1: ("document processing" OR "contract analysis" OR "knowledge management" OR "intelligent search" OR "semantic search" OR "document understanding" OR "document intelligence") AND ("Senior" OR "Staff" OR "Principal" OR "Lead" OR "Founding") AND ("built" OR "architected" OR "deployed" OR "production") NOT ("Product Manager" OR "Business Analyst" OR "Data Analyst" OR "VP" OR "Vice President" OR "Director")
+        → Gap: Engineers who describe their GenAI work using product/feature language rather than technology names 
+    #2: ("Harvey" OR "Casetext" OR "Ironclad" OR "Robin AI" OR "EvenUp" OR "Notion" OR "Glean" OR "Moveworks" OR "Adept" OR "Jasper" OR "Writer" OR "Tome" OR "Hebbia" OR "Vellum") AND ("Senior" OR "Staff" OR "Principal" OR "Lead" OR "Founding" OR "engineer" OR "engineering") AND ("LLM" OR "GenAI" OR "generative AI" OR "RAG" OR "agentic" OR "copilot" OR "AI" OR "production")
+        → Gap: Engineers at vertical SaaS companies (legal tech, fintech, healthcare IT, compliance tech) who built
+    #3: ("prompt engineering" OR "prompt engineer" OR "prompt engineers") AND ("production" OR "deployed" OR "shipped" OR "enterprise" OR "customer") AND ("architecture" OR "API" OR "backend" OR "microservices" OR "infrastructure" OR "system design") NOT ("Freelance" OR "Contractor" OR "Consultant" OR "VP" OR "Director")
+        → Gap: Candidates who use 'prompt engineering' as their primary descriptor rather than 'GenAI engineer' — s
+    #4: ("Google" OR "Meta" OR "Amazon" OR "Microsoft" OR "Apple" OR "Netflix" OR "Uber" OR "Airbnb" OR "Stripe" OR "Shopify" OR "Salesforce" OR "Bloomberg") AND ("LLM" OR "large language model" OR "GenAI" OR "generative AI" OR "RAG" OR "agentic" OR "copilot" OR "AI agent") AND ("Senior" OR "Staff" OR "Principal" OR "Lead" OR "Tech Lead") AND ("built" OR "shipped" OR "deployed" OR "production" OR "launched") NOT ("VP" OR "Vice President" OR "Director" OR "Head of" OR "Product Manager" OR "Program Manager" OR "Research Scientist")
+        → Gap: Candidates at large tech companies (Google, Meta, Amazon, Microsoft, Apple) who built internal GenAI
+  25 compound strings + 4 coverage gap strings queued
+
+--- Execution (29 strings) ---
+
+────────────────────────────────────────────────────────────
+  String #1: Compound / Targets the HARD GATE capability — production agentic delive
+  [Compound Batch 1 / Compound / Precision]
+────────────────────────────────────────────────────────────
+  Entering Boolean: ("agentic workflow" OR "agentic workflows" OR "agentic system" OR "agentic syste...
+  Results: 655 (parsed: 655)
+  [phase] PAGINATE — 655 results, proceeding directly
+
+  --- Page 1 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Shawn Adams — AI Automation Engineer | Security Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The career trajectory shows IT operations and cybersecurity engineering with a very recent pivot to "AI Automation Engineer" at Roboflow, but only ~5 months in role, no prior backend/ML/GenAI delivery experience, and the automation/workflow integration framing suggests lightweight integrations rather than production agentic/GenAI architecture at the IC5-IC6 level required.
+    [card 2/25] Sebastian Rosales — Senior Full-Stack AI Engineer & Agentic Systems Architect
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite strong GenAI/agentic vocabulary in the headline, the candidate has fewer than 5 years of relevant engineering experience (career history starts in 2024 with ML/AI roles), with a background in Industrial Engineering and no visible prior backend, platform, or software engineering trajectory — the profile lacks the depth and production enterprise delivery track record expected at IC5-IC6 level.
+    [card 3/25] Logan E. — Senior II AI & Agentic Systems Advisor
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career trajectory at UiPath progresses through consultant/advisor roles with no engineering IC titles, and the current "Advisor" title combined with "Specialist" and "Consultant" history indicates a pre-sales/advisory pattern rather than hands-on production engineering authorship.
+    [card 4/25] Armenak Petrosyan, Ph.D. — Lead Data Scientist (GenAI)
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows an academic mathematician (visiting professor until 2024) who recently transitioned into a Lead Data Scientist (GenAI) role at ADP with only ~1 year in industry — insufficient evidence of production agentic/GenAI delivery, enterprise architecture, or customer-facing engineering work, and the overall profile leans classical DS/ML rather than hands-on forward-deployed engineering.
+    [card 5/25] Johann Ko — U.S. Enterprise Tech Lead
+    Facial judgment (Opus)...
+    [FACIAL_YES] Palantir Forward Deployed Engineer trajectory (Tech Lead roles across commercial and enterprise verticals) directly maps to production delivery of complex data/AI systems with enterprise customers, and Palantir's recent AIP platform work involves agentic/GenAI application delivery — strong signal across multiple capability areas.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (14 chunks) → Pattern: section_hopper
+    [profile] Expanded 4 collapsed section(s)
+    Profile text size: 11 KB
+    Final judgment (Opus)...
+    [REJECT] Strong Palantir FDE pedigree and GenAI vocabulary, but recent trajectory is team/division leadership (15+ reports, $72M deals) rather than hands-on IC building — too senior and too far from code for this IC5-IC6 builder role.
+    [profile-read] REJECT verdict → closing in 0.5s
+    [card 6/25] Sruthi R. — Senior Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Headline explicitly signals "Applied AI Systems | LLM-Powered Platforms | Distributed Systems" combined with a Senior Software Engineer role at Microsoft since 2019, suggesting plausible production GenAI/LLM delivery experience with strong backend foundations — worth a full profile review to verify build depth.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (11 chunks) → Pattern: skipper
+    [profile] Expanded 2 collapsed section(s)
+    Profile text size: 9 KB
+    Final judgment (Opus)...
+    [SAVE] Strong distributed systems builder at Microsoft with recent agentic platform and AI-diagnostic tooling work; solid architecture depth but LLM-specific orchestration and delivery evidence is thin — worth a screen to probe the depth of the agentic platform work and whether it involves genuine LLM orchestration.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 8.0s, scrolled back 3 chunks
+    [card 7/25] Nabaz Maaruf — Sr Principal Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] While the headline mentions "Enterprise AI Infrastructure & LLMOps," the trajectory is a single large enterprise (PepsiCo) with no client-facing or consulting delivery signals, and the work appears to be internal platform/infrastructure-oriented ("Architecting Enterprise AI Infrastructure & LLMOps," "Scaling Intelligent Systems") rather than customer-facing production agentic/GenAI application delivery — closer to the pure MLOps/platform non-fit pattern without evidence of application-layer ownership or forward-deployed customer engagement.
+    [card 8/25] Aadesh Upadhyay — Data Analytics Engineer - AI Team
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (graduated recently, first industry role started 2024), and the "Data Analytics Engineer" title at a pharma company lacks clear production agentic/GenAI delivery signal.
+  [glance] proceed (0.60): 1/3 noise signals but LLM says proceed.
+    [card 9/25] Tom Mathew — Senior Software Development Engineer - AWS Billing
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career is backend software engineering focused on AWS Billing with no visible AI, GenAI, LLM, agentic, or customer-facing solution delivery signals anywhere in the trajectory.
+    [card 10/25] Shiva Sai Bathini — Applied Research Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (Bachelor's 2023, Master's in progress until 2025), no production GenAI delivery evidence, and current role is a university research/IT position — insufficient seniority and no enterprise delivery signal for an IC5-IC6 role.
+    [card 11/25] William Hubenschmidt — Senior Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows a senior software engineer at a small/unknown company combined with audio engineering and a brief integration consulting role, with no specific signal of production GenAI/LLM/agentic application delivery, and the headline's "AI Developer" is too generic without supporting trajectory evidence to warrant a full review.
+    [card 12/25] Jack Y. — Staff Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows internal developer platforms at CoreWeave, autonomous vehicle engineering at Cruise, and a long tenure as an escalation engineer at Microsoft — this is a DevOps/platform/support infrastructure career with no visible GenAI application delivery, agentic system building, or customer-facing solution architecture signal.
+    [card 13/25] Taixing Bi — AI infra Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Headline explicitly describes production LLM systems including RAG, multi-agent orchestrators, MCP tool-calling, evaluation pipelines, and RLHF, combined with an AI infra Engineer title and backend engineering background, directly connecting to the hard gate of production agentic/GenAI delivery and applied LLM adaptation.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (8 chunks) → Pattern: skimmer
+    [profile] Expanded 4 collapsed section(s)
+    Profile text size: 5 KB
+    Final judgment (Opus)...
+    [SAVE] Strong production GenAI builder with ~9 years experience who personally architected and shipped multi-agent orchestration, RAG, LLM eval pipelines, and fine-tuning (PPO/DPO/GRPO) at production scale; lacks explicit client-facing delivery evidence but technical depth and architectural ownership are well above bar.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 8.0s, scrolled back 3 chunks
+    [card 14/25] Sai Tarun Sathyan — AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The candidate has fewer than 5 years of professional experience (graduated Master's in 2023, career history starts 2023), placing them well below the IC5-IC6 seniority bar required for this role, and the trajectory lacks evidence of enterprise customer-facing production delivery.
+    [card 15/25] Krishan Sharma — Senior Software Engineer – Platform / Backend
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows a backend/platform engineer at a large enterprise with no visible GenAI, LLM, or agentic application delivery experience — "AI-Augmented Dev" in the headline suggests using AI tools for development rather than building AI systems, and the career history lacks any AI/ML application ownership or customer-facing solution delivery signal.
+    [card 16/25] Shravan Chintha — Senior Machine Learning Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory is classical DS/ML (RecSys, Ranking, MLOps at a retailer and ad agency) with no evidence of production agentic/GenAI application delivery or customer-facing solution engineering; the "Agentic AI | LLMs" headline keywords lack supporting trajectory evidence and the career pattern fits the classical DS/ML non-fit pattern.
+    [card 17/25] Herak Sen — Principal Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Long tenure at Amazon as a Principal Engineer with no visible AI, GenAI, LLM, or agentic delivery signal in the headline or trajectory, and no client-facing or solutions delivery pattern — the profile reads as a pure internal platform/product engineer without evidence connecting to any required capability area.
+    [card 18/25] Annie Cushing — AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows "Senior AI Strategist" (strategy, not engineering authorship) at EPAM, a long-running analytics consultancy (Annielytics since 2010), and a very recent AI Engineer role at a utility company with no evidence of production agentic/GenAI delivery, enterprise architecture depth, or the IC5-IC6 caliber builder pattern required — the "AI Strategist" title triggers the AI strategy/transformation non-fit pattern.
+    [card 19/25] Robert Karen — Lead Developer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The career history shows a single long tenure as Lead Developer/Lead Software Engineer at one company with no visible AI, GenAI, LLM, agentic, or applied ML signal anywhere in the trajectory, and no client-facing delivery or enterprise architecture indicators.
+    [card 20/25] Shashanka Sharma — Agentic AI Engineer (Senior Associate)
+    Facial judgment (Opus)...
+    [FACIAL_NO] Only ~2 years of total experience visible (all at Kyndryl starting 2023), which falls well below the 5-year minimum and the IC5-IC6 seniority bar; the "Agentic AI Engineer" title is recent but the thin trajectory suggests early-career work without the architectural maturity or production delivery depth required.
+    [card 21/25] Trent Charlton — Senior Software Developer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience — graduated recently with only internships and one junior role, well below the IC5-IC6 seniority bar.
+    [card 22/25] Anku . — Senior Software - AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Current role as "Senior Software - AI Engineer" at CVS Health (enterprise) combined with headline signals of GenAI, LLMs, RAG, LangChain, and a backend stack (FastAPI, microservices, Docker, Kubernetes) suggests plausible production GenAI delivery in an enterprise context, though the ~5 years of experience is on the lighter side for IC5-IC6.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (13 chunks) → Pattern: section_hopper
+    [profile] Expanded 1 collapsed section(s)
+    Profile text size: 16 KB
+    Final judgment (Opus)...
+    [SAVE] Credible production GenAI builder with hands-on RAG, agentic orchestration, and enterprise backend architecture at CVS Health, but at the experience floor, lacking client-facing delivery evidence, and with some bullet inflation risk — worth a screen to validate depth and customer engagement readiness.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 7.1s, scrolled back 3 chunks
+    [card 23/25] Jeremy C. — Forward Deployed Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Currently a Forward Deployed Engineer at Snorkel AI — the exact role title and company directly signal production GenAI delivery with enterprise customers, plus prior AI Engineer Consultant roles at EY suggest client-facing build experience, though the relatively early career (BS 2023, ~3 years experience) is a concern worth verifying in full review.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (11 chunks) → Pattern: skipper
+    [profile] Expanded 3 collapsed section(s)
+    Profile text size: 6 KB
+    Final judgment (Opus)...
+    [REJECT] Strong title and domain alignment (FDE at Snorkel AI, GenAI consulting at EY) but only ~3 years of professional experience, well below the 5-year minimum bar; sparse bullets prevent verification of production ownership depth or architectural maturity expected at IC5-IC6.
+    [profile-read] REJECT verdict → closing in 0.6s
+    [card 24/25] Roman Gutin — Solutions Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career is sales engineering at Snowflake (a cloud vendor), which matches the cloud-vendor/pre-sales solutions architect non-fit pattern — no evidence of hands-on production GenAI application delivery or backend engineering IC work.
+    [card 25/25] LinkedIn Member — Senior AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite strong headline keywords (LLM, RAG, Agents, Production AI Systems), the career history shows only one visible position at a VPN company with no prior trajectory, suggesting fewer than 5 years of visible experience and insufficient evidence of enterprise-grade production GenAI delivery or architectural depth at the IC5-IC6 level.
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 1 | 655 results
+  ──────────────────────────────────────────────────
+
+  SAVED (3):
+    + Sruthi R. — Senior Software Engineer at Microsoft
+      Path: ADJACENT:1. Production Agentic / GenAI Application Delivery + 2. Enterprise Architecture & Systems Integration | Confidence: 0.62
+      Strong distributed systems builder at Microsoft with recent agentic platform and AI-diagnostic tooling work; solid architecture depth but LLM-specific orchestration and delivery evidence is thin — worth a screen to probe the depth of the agentic platform work and whether it involves genuine LLM orchestration.
+    + Taixing Bi — AI infra Engineer at Saks
+      Path: DIRECT:1. Production Agentic / GenAI Application Delivery | Confidence: 0.88
+      Strong production GenAI builder with ~9 years experience who personally architected and shipped multi-agent orchestration, RAG, LLM eval pipelines, and fine-tuning (PPO/DPO/GRPO) at production scale; lacks explicit client-facing delivery evidence but technical depth and architectural ownership are well above bar.
+    + Anku . — Senior Software - AI Engineer at CVS Health
+      Path: DIRECT:1. Production Agentic / GenAI Application Delivery | Confidence: 0.68
+      Credible production GenAI builder with hands-on RAG, agentic orchestration, and enterprise backend architecture at CVS Health, but at the experience floor, lacking client-facing delivery evidence, and with some bullet inflation risk — worth a screen to validate depth and customer engagement readiness.
+
+  SKIPPED — profiles opened (2):
+    - Johann Ko — U.S. Enterprise Tech Lead at Palantir Technologies
+      Strong Palantir FDE pedigree and GenAI vocabulary, but recent trajectory is team/division leadership (15+ reports, $72M deals) rather than hands-on IC building — too senior and too far from code for this IC5-IC6 builder role.
+    - Jeremy C. — Forward Deployed Engineer at Snorkel AI
+      Strong title and domain alignment (FDE at Snorkel AI, GenAI consulting at EY) but only ~3 years of professional experience, well below the 5-year minimum bar; sparse bullets prevent verification of production ownership depth or architectural maturity expected at IC5-IC6.
+
+  Skipped from preview (20):
+    FACIAL_NO: 20 candidates
+
+  Running totals — Saved: 3 | Facial YES: 5
+  [adapt] Opus (paginate): continue — Page 1 is performing well. 3 saves out of 25 candidates gives a 12% save rate, which is excellent for this brief. The 5 Facial YES (20%) is also healthy, indicating the string is surfacing relevant profiles. The saves (Sruthi R. at Microsoft, Taixing Bi at Saks, Anku at CVS Health) demonstrate the string is finding production GenAI builders with strong engineering backgrounds — exactly the target archetype. The facial NO rate of 80% is within the expected 65-85% range for strict triage. The 655 result count gives plenty of runway for pagination. No reason to narrow or stop — signal is strong and fresh.
+
+  --- Page 2 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Wei Fang — Senior SDE AWS Agentic AI | AmazonQ | Kiro
+    Facial judgment (Opus)...
+    [FACIAL_YES] Current role as Senior SDE on AWS Agentic AI / AmazonQ / Kiro directly signals production agentic GenAI application delivery experience, with a solid backend engineering foundation (5 years backend dev) and progression through Amazon AI — though the AWS employer raises some pre-sales/platform risk, the "SDE" title and product names (AmazonQ, Kiro) indicate product engineering authorship rather than solutions architecture.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (7 chunks) → Pattern: skimmer
+    [profile] Expanded 3 collapsed section(s)
+    Profile text size: 4 KB
+    Final judgment (Opus)...
+    [SAVE] Strong production agentic/GenAI builder at AWS (Kiro agent, Q CLI/MCP, CodeWhisperer/RAG) with deep architectural ownership; lacks explicit customer-facing delivery experience but technical depth and production GenAI breadth are well above bar — high-confidence save pending interview validation of client-facing translation skills.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 4.3s, scrolled back 3 chunks
+    [card 2/25] Mordechai Newmark — Founder
+    Facial judgment (Opus)...
+    [FACIAL_NO] Career history shows fewer than 5 years of experience (starting 2018 education, with visible roles only from 2024), and the trajectory is thin — a brief Applied AI Engineer stint plus test automation lead, with a just-founded startup, lacking evidence of production agentic/GenAI delivery at enterprise scale or strong architectural judgment.
+    [card 3/25] Rithwik Raj M. — Software Engineer II - AI Agents and LLM Systems
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a career starting in 2022 (approximately 3 years of experience), this profile falls below the 5-year experience threshold expected for an IC5-IC6 level Forward Deployed Engineer role, despite the relevant current title in AI Agents and LLM Systems at Walmart.
+    [card 4/25] Abhav vohra — AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a master's degree completed in 2024 and career history starting in 2025, this candidate has fewer than 5 years of experience and lacks the senior IC-level (IC5-IC6) production GenAI delivery depth required for the role.
+    [card 5/25] Abrar Zahin — Senior AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Headline explicitly signals production agentic/GenAI systems (LangChain, LangGraph, RAG, LLM Systems at Scale) with a backend stack (FastAPI, AWS, Kubernetes), current Senior AI Engineer at Meta, and prior Senior Software Engineer role suggesting a backend-to-GenAI trajectory directly relevant to the hard gate.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (13 chunks) → Pattern: focused_reader
+    [profile] Expanded 2 collapsed section(s)
+    Profile text size: 9 KB
+    Final judgment (Opus)...
+    [SAVE] Strong production agentic/GenAI builder with three shipped systems (Meta MetaMate, Loudegg RAG platform, Caesars Digital AI assistant), deep architectural ownership across orchestration, retrieval, and cloud deployment, and ~7 years experience with clear upward slope — high-confidence fit pending validation of client-facing comfort in a screen.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 3.2s, scrolled back 1 chunks
+    [card 6/25] Rasal Ahmed — Senior Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows a mid-senior backend Java engineer with no production GenAI, LLM, or agentic delivery evidence — "Exploring AI Automation and Agentic Workflows" in the headline signals interest rather than build experience, and the career history lacks any AI application ownership or customer-facing solution delivery.
+    [card 7/25] Anthony Santana — Automation Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The entire trajectory is systems/automation engineering focused on IAM, SaaS workflows, and infrastructure automation with no evidence of production GenAI/agentic application delivery, and the candidate has fewer than 5 years of experience.
+    [card 8/25] Abdelrahman Zeidan — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With only ~4 years of experience (and a master's completed in 2024), the candidate falls below the 5-year minimum experience threshold required for an IC5-IC6 level role, and the very short tenures at each position provide no evidence of production agentic/GenAI delivery at the required seniority.
+  [glance] proceed (0.95): No noise signals detected.
+    [card 9/25] Tejas Polakam — GenAI, Team Lead Forward Deployed Engineering
+    Facial judgment (Opus)...
+    [FACIAL_YES] Current role is literally "GenAI, Team Lead Forward Deployed Engineering" at Scale AI — a direct match to the role's core function of forward-deployed GenAI delivery — with a backend engineering foundation at Bloomberg.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (7 chunks) → Pattern: skimmer
+    [profile] Expanded 1 collapsed section(s)
+    Profile text size: 6 KB
+    Final judgment (Opus)...
+    [SAVE] Strong GenAI builder currently in an FDE role at Scale AI with real agentic infrastructure and eval system ownership, plus solid enterprise systems background from Bloomberg; primary concern is falling slightly below the 5-year experience floor, which the hiring manager should weigh against an unusually high-slope trajectory.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 2.5s, scrolled back 1 chunks
+    [card 10/25] Isaac Moothart — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career engineer (~3 years experience) with no visible AI, GenAI, LLM, or agentic delivery signals anywhere in the trajectory, falling below the 5-year experience threshold and lacking any connection to required capability areas.
+    [card 11/25] Ami Sathish — Founder/ Coder
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with a bachelor's degree completed in 2025 and only internship-level engineering experience, falling well below the 5+ years of experience required for an IC5-IC6 role.
+    [card 12/25] Liam Carroll — AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a 2016-2020 bachelor's and career starting in 2021, this is roughly 4-5 years of experience — below the 5+ year bar expected for IC5-IC6 leveling — and the trajectory (junior software engineer roles into a current AI Engineer title at a small/unknown company) lacks the architectural seniority, enterprise delivery, or production agentic/GenAI signals needed to justify a full review.
+    [card 13/25] Vedant Asthana — Software Engineer 2
+    Facial judgment (Opus)...
+    [FACIAL_NO] Career trajectory shows a relatively early-career engineer (~5 years including internship, just finished MS in 2025) with distributed systems and infrastructure focus but no visible GenAI/agentic application delivery signal, client-facing experience, or senior IC-level architectural judgment; current employer is an unknown small company with no AI delivery indicators.
+    [card 14/25] Jason Wang — Co-Founder
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a career starting around 2023 and only ~3 years of visible experience (two SWE roles and a fresh YC startup), this is an early-career profile that falls below the 5-year experience threshold required for an IC5-IC6 level role.
+    [card 15/25] Albert Chen — AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a 2022 bachelor's graduation and only ~3 years of experience (one professional role plus a course assistant position), this candidate falls below the 5-year experience threshold and lacks the seniority expected for an IC5-IC6 level role.
+    [card 16/25] Yurik Valderrama — Platform Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Only ~3 years of experience at a single company (Vanguard) in platform/full-stack roles with no visible AI, GenAI, LLM, or agentic delivery signals anywhere in the trajectory, falling below both the experience threshold and the hard gate for production GenAI work.
+    [card 17/25] Soubhagya Shankar Das — Software Engineer I
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (graduated 2023, master's 2025, currently Software Engineer I), which falls well below the IC5-IC6 seniority bar required for this role.
+    [card 18/25] Ido Moriah — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate (BS 2025) with fewer than 5 years of experience — only internship-level and new-grad positions visible, well below the IC5-IC6 seniority bar.
+    [card 19/25] Rushir Bhavsar — Machine Learning Researcher
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate profile with MS completed in 2025 and only internship experience — fewer than 5 years of professional experience, well below the IC5-IC6 seniority bar despite relevant headline keywords.
+    [card 20/25] Bryan Mejia — G-SWEP Mentee
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate (BA expected 2025) with fewer than 5 years of professional engineering experience — career history shows a mentee role, an operations assistant, and a junior position at a stealth startup, which is clearly early-career and well below the IC5-IC6 seniority bar.
+    [card 21/25] Rafi Alam — Senior Software Developer / Senior Unity Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career trajectory is focused on game development, Unity/VR/XR engineering with no backend, enterprise, or production GenAI/agentic application delivery signals; headline mentions OpenAI/Gemini but the roles are all game design/development, placing this outside scope.
+    [card 22/25] Zimo Si — Software Development Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience — currently a student with only internship-level positions and no production GenAI or agentic delivery evidence.
+    [card 23/25] Basel H. — Senior Software Engineer, AIML
+    Facial judgment (Opus)...
+    [FACIAL_NO] Career history shows only ~2 years of post-graduation experience at Nike in AIML software engineering with no visible client-facing, enterprise delivery, or agentic/GenAI production deployment signals — too early-career and lacking evidence of the required production GenAI delivery, architectural judgment, or customer-facing work.
+    [card 24/25] Hamza Khan — Software engineering Resident
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (Bachelor's 2023, Master's in progress), no production enterprise delivery evidence, and roles suggest early-stage/student-level work rather than the IC5-IC6 seniority required.
+    [card 25/25] Brandon Igiehon — Service Desk Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career is IT support/service desk/systems administration with no software engineering, AI/ML, backend development, or GenAI delivery signals anywhere in the trajectory.
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 2 | 655 results
+  ──────────────────────────────────────────────────
+
+  SAVED (3):
+    + Wei Fang — Senior SDE AWS Agentic AI | AmazonQ | Kiro at Amazon Web Services (AWS)
+      Path: DIRECT:Production Agentic / GenAI Application Delivery | Confidence: 0.82
+      Strong production agentic/GenAI builder at AWS (Kiro agent, Q CLI/MCP, CodeWhisperer/RAG) with deep architectural ownership; lacks explicit customer-facing delivery experience but technical depth and production GenAI breadth are well above bar — high-confidence save pending interview validation of client-facing translation skills.
+    + Abrar Zahin — Senior AI Engineer at Meta
+      Path: DIRECT:1. Production Agentic / GenAI Application Delivery | Confidence: 0.88
+      Strong production agentic/GenAI builder with three shipped systems (Meta MetaMate, Loudegg RAG platform, Caesars Digital AI assistant), deep architectural ownership across orchestration, retrieval, and cloud deployment, and ~7 years experience with clear upward slope — high-confidence fit pending validation of client-facing comfort in a screen.
+    + Tejas Polakam — GenAI, Team Lead Forward Deployed Engineering at Scale AI
+      Path: DIRECT:Production Agentic / GenAI Application Delivery | Confidence: 0.68
+      Strong GenAI builder currently in an FDE role at Scale AI with real agentic infrastructure and eval system ownership, plus solid enterprise systems background from Bloomberg; primary concern is falling slightly below the 5-year experience floor, which the hiring manager should weigh against an unusually high-slope trajectory.
+
+  Skipped from preview (22):
+    FACIAL_NO: 22 candidates
+
+  Running totals — Saved: 6 | Facial YES: 8
+  [adapt] Opus (paginate): continue — The string is performing well with a 12% save rate across 50 candidates (6 saves), which is strong for this brief. The facial YES rate of 16% (8/50) is also healthy. Saves have appeared on both pages, including 3 saves on page 2 (Wei Fang, Abrar Zahin, Tejas Polakam — all strong fits). The high facial NO rate (~84%) is within the expected 65-85% range for this brief and reflects the strict triage criteria, not string quality. Many facial NOs are early-career candidates (<5 years) who happen to use agentic vocabulary — this is expected noise for this search space. With 655 results and only 50 evaluated, there's substantial runway remaining. Signal is fresh and consistent across both pages. Continue paginating.
+
+  --- Page 3 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Genius M. — Sr. Python AI/ML Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Headline explicitly lists GenAI, RAG, LangChain alongside production enterprise platforms in finance and healthcare, with a trajectory from Python developer to Sr. AI/ML Engineer at major enterprises (UnitedHealth Group, Bank of America), directly connecting to Production Agentic/GenAI Application Delivery and Enterprise Architecture — though the relatively short career (~4-5 years visible) and lack of senior IC architectural titles warrant scrutiny in full review.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (19 chunks) → Pattern: focused_reader
+    [profile] Expanded 2 collapsed section(s)
+    Profile text size: 21 KB
+    Final judgment (Opus)...
+    [SAVE] Production GenAI builder with RAG/agentic workflow delivery at major enterprises, but anachronistic technology claims in earlier roles and unusually broad skill lists raise credibility concerns that warrant careful screening — recommend probing specific system ownership and timeline accuracy in interview.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 5.1s, scrolled back 3 chunks
+    [card 2/25] Atharva D. — AI Forward Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a master's degree completing in 2025 and only ~2 years of professional experience (one short stint at CVS Health and one at a small company), this is an early-career profile that falls well below the IC5-IC6 seniority bar requiring deep production architectural judgment and enterprise delivery experience.
+    [card 3/25] Tejashwini M. — Generative AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite relevant GenAI keywords in the headline, the candidate has fewer than 5 years of professional engineering experience (graduated 2014 but career history shows only roles from 2022 onward with a teaching assistantship), indicating insufficient seniority for an IC5-IC6 level role requiring deep architectural judgment and production delivery maturity.
+    [card 4/25] Sheetal Prasad — Graduate Teaching Assistant (MG-GY 9503)
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (current MS student graduating 2026 with only one internship), well below the IC5-IC6 seniority bar required for this role.
+    [card 5/25] Garipally Sai Manikanth — GenAI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (bachelor's 2023, master's 2025), insufficient seniority for an IC5-IC6 role requiring deep architectural judgment and production delivery maturity.
+    [card 6/25] Jack Yang — AI Fellow, Global Health Office of the President
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience — career history shows only 2025-dated internships and fellowships with no evidence of production engineering, GenAI delivery, or senior IC work.
+    [card 7/25] Botuka Vinay Yadav — Senior Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Only ~4 years of visible experience across relatively junior roles (Software Engineer, Senior Consultant) with no evidence of production agentic/GenAI delivery, enterprise architecture leadership, or client-facing solution building at the IC5-IC6 level; the headline is keyword-heavy but the trajectory lacks the depth and seniority required.
+    [card 8/25] Tilak S. — Co-Founder
+    Facial judgment (Opus)...
+    [FACIAL_NO] Only three visible positions all starting in 2025 with no prior career history, suggesting an early-career profile with fewer than 5 years of experience and no evidence of production GenAI delivery at enterprise scale.
+  [glance] proceed (0.95): No noise signals detected.
+    [card 9/25] Abdusamed A. — Senior Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The career trajectory shows a single-company tenure at State Street (a large financial institution) with a standard software engineer progression and no visible evidence of production GenAI/agentic application delivery, customer-facing solution work, or architectural leadership; the "Applied AI in Finance" headline is too generic without supporting trajectory signals to warrant a full review.
+    [card 10/25] Jonathan Buss — Integration Engineer Developer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile (graduated 2022, ~3 years of experience) with no visible AI, GenAI, LLM, or agentic delivery signals anywhere in the trajectory — falls below the 5-year experience threshold and lacks any connection to required capability areas.
+    [card 11/25] Isshwaryaa Sankaran — Senior RPA Developer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory is centered on RPA development and business analysis with no evidence of production GenAI/LLM application delivery, backend/platform engineering depth, or enterprise architecture work at the IC5-IC6 level required for this role; "Agentic AI" in the headline appears aspirational rather than backed by visible build experience.
+    [card 12/25] Giuseppe Sambataro — Generative AI & Microsoft Power Platform Architect, Project Manager, SAP BPC Expert
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory is predominantly SAP BPC consulting and project management over 10+ years, with "Generative AI" appearing only as a recent addition to a broad architect/PM title at a services company — no evidence of production agentic/GenAI delivery, and the profile pattern suggests thin GenAI overlay on a legacy ERP consulting career.
+    [card 13/25] Balaji Jegadeesh V — Software Developer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of professional experience (graduated BE in 2021, currently pursuing MS through 2026), with no evidence of production enterprise GenAI delivery or senior IC-level work.
+    [card 14/25] Rehan R. — Data Analyst
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite the GenAI-heavy headline, the entire visible career history is a single Data Analyst role at an unknown company since 2023, indicating insufficient experience (fewer than 5 years) and no evidence of production agentic/GenAI engineering delivery; the headline reads as aspirational keywords rather than demonstrated build evidence.
+    [card 15/25] Fabián del Valle — Senior Associate AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite strong headline keywords (LLM Systems, Multi-Agent Architectures), the candidate has fewer than 5 years of experience — graduating with a Master's in 2025, with only an internship and a brand-new role — placing them well below the IC5-IC6 seniority bar required for this role.
+    [early-exit] 14/15 facial_no (93%) — breaking page
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 3 | 655 results
+  ──────────────────────────────────────────────────
+
+  SAVED (1):
+    + Genius M. — Sr. Python AI/ML Engineer at UnitedHealth Group
+      Path: DIRECT:1. Production Agentic / GenAI Application Delivery | Confidence: 0.62
+      Production GenAI builder with RAG/agentic workflow delivery at major enterprises, but anachronistic technology claims in earlier roles and unusually broad skill lists raise credibility concerns that warrant careful screening — recommend probing specific system ownership and timeline accuracy in interview.
+
+  Skipped from preview (14):
+    FACIAL_NO: 14 candidates
+
+  Running totals — Saved: 7 | Facial YES: 9
+  [adapt] Opus (paginate): continue — The string is performing well with a 10.8% save rate (7 saves across 65 candidates), which is strong for this brief. The facial YES rate is 13.8% (9/65) and the facial NO rate is 86%, which is at the upper end of the expected range but consistent with the strict triage criteria noted in the brief. Importantly, saves have been consistent across all three pages (3 on p1, 4 on p2, 1 on p3), and the most recent page still produced a save (Genius M.). The main source of noise is early-career candidates with fewer than 5 years of experience — a very large proportion of facial NOs fall into this bucket. However, the string continues to surface strong production GenAI builders at companies like Microsoft, AWS, Meta, Scale AI, and UnitedHealth Group. The 655 result count means there are many more pages to paginate through. Signal has not dried up, so continuing is the right call before considering narrowing.
+
+  [cadence] 34min of activity — pausing 124s to look human...
+[rebrowser-patches][frames._context] cannot get world, error: ProtocolError: Protocol error (Page.createIsolatedWorld): Internal server error, session closed.
+    at /Users/sam.vangelos/homebrew/lib/python3.14/site-packages/rebrowser_playwright/driver/package/lib/server/chromium/crConnection.js:116:57
+    at new Promise (<anonymous>)
+    at CRSession.send (/Users/sam.vangelos/homebrew/lib/python3.14/site-packages/rebrowser_playwright/driver/package/lib/server/chromium/crConnection.js:115:12)
+    at CRSession.__re__getMainWorld (/Users/sam.vangelos/homebrew/lib/python3.14/site-packages/rebrowser_playwright/driver/package/lib/server/chromium/crConnection.js:260:54)
+    at async CRSession.__re__emitExecutionContext (/Users/sam.vangelos/homebrew/lib/python3.14/site-packages/rebrowser_playwright/driver/package/lib/server/chromium/crConnection.js:220:28)
+    at async Frame.evaluateExpression (/Users/sam.vangelos/homebrew/lib/python3.14/site-packages/rebrowser_playwright/driver/package/lib/server/frames.js:645:21) {
+  type: 'closed',
+  method: 'Page.createIsolatedWorld',
+  logs: undefined
+}
+  [cadence] Resuming.
+
+  --- Page 4 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Ting-Hsuan Cho — Machine Learning Engineer Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (current master's student with internship-level roles), falling well below the IC5-IC6 seniority bar.
+    [card 2/25] John Steer — Manager, AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Only ~5 years of experience (graduated 2020), career trajectory is primarily data analyst roles with a very recent jump to "Manager, AI Engineer" — insufficient seniority for IC5-IC6 and no evidence of production GenAI/agentic delivery, backend engineering, or enterprise architecture.
+    [card 3/25] Swati . — AI Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The candidate has approximately 5 years of experience (mostly at Infosys as a general SWE/ML engineer), is currently mid-MS program, and the trajectory shows classical ML/banking systems work with no visible production GenAI, agentic, or LLM delivery signal — insufficient seniority and no specific connection to the hard-gate capability area.
+    [card 4/25] Paden Gayle 🧸 — Software Engineer III
+    Facial judgment (Opus)...
+    [FACIAL_NO] Only ~3 years of experience visible (graduated 2019, but career history starts 2023), with a generic SWE III role at Google and a data platform role at Bloomberg — no evidence of production GenAI/agentic delivery, and the "AI Engineer" side project at "PadenBuilds" (2025) looks like a personal/freelance venture without production enterprise signals, falling into the thin GenAI wrapper concern.
+    [card 5/25] Yulan Qiao — Founder & Product Lead
+    Facial judgment (Opus)...
+    [FACIAL_NO] Profile is a product/UX-focused founder with fewer than 5 years of experience, no engineering IC titles, and headline explicitly indicates PM and UI/UX orientation rather than hands-on backend or GenAI engineering delivery.
+    [early-exit] 5/5 facial_no (100%) — breaking page
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 4 | 655 results
+  ──────────────────────────────────────────────────
+
+  Skipped from preview (5):
+    FACIAL_NO: 5 candidates
+
+  Running totals — Saved: 7 | Facial YES: 9
+  [adapt] Opus (paginate): continue — The string is performing well with a 10% save rate (7 saves across 70 candidates), which is strong for this brief. Saves have been distributed across all 4 pages so far (3 on p1, 3 on p2, 1 on p3), showing sustained signal. The facial NO rate of 87% is slightly above the expected 65-85% range, largely driven by a high volume of early-career candidates (<5 years) who don't meet the minimum bar. However, the save rate is excellent and the quality of saves is high — we're finding production GenAI builders at Microsoft, AWS, Meta, Scale AI, CVS Health, Saks, and UnitedHealth Group. With 655 total results, we still have substantial pagination runway. The most recent page (p4) only showed 5 candidates evaluated so far with no saves yet, but that's too small a sample to call signal exhaustion. Continue paginating to capture more saves from the remaining ~585 results.
+
+  --- Page 5 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Natalia Paiz — QA Lead
+    Facial judgment (Opus)...
+    [FACIAL_NO] The entire career trajectory is QA engineering with only 3-4 years of experience; the AI/automation keywords in the headline appear to reference QA automation tooling and lightweight n8n/API integrations rather than production agentic GenAI system delivery, falling short of the hard gate and the 5-year experience minimum.
+    [card 2/25] SHANKAR NAYAK — AI/ML Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite strong GenAI keywords in the headline (Perplexity AI, agentic systems, RAG, LangGraph), the candidate has only ~3 years of visible experience (career starts 2022), falling below the 5-year minimum threshold for this IC5-IC6 level role.
+    [card 3/25] Sonal Mogra — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (graduated 2021, all positions starting 2024-2025), and despite GenAI/agentic keywords in the headline, there is no evidence of production enterprise delivery at scale or sufficient seniority for an IC5-IC6 role.
+    [card 4/25] Anoop G — Sr AI/ML Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a Master's completed in 2024 and career starting in 2019 as a Python Developer, this profile has roughly 6 years of experience but the trajectory suggests classical ML/Python development rather than production agentic/GenAI delivery with architectural judgment at IC5-IC6 level; the "Sr AI/ML Engineer" titles are recent and likely reflect traditional ML work at large enterprises without evidence of the customer-facing, solution-architecting, production GenAI delivery the role demands.
+    [card 5/25] JJ Wen — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows a general software engineer at large tech companies (Meta, Amazon) with no visible AI, GenAI, LLM, agentic, or customer-facing delivery signals, and approximately 4 years of experience which is below the IC5-IC6 seniority expectation.
+    [early-exit] 5/5 facial_no (100%) — breaking page
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 5 | 655 results
+  ──────────────────────────────────────────────────
+
+  Skipped from preview (5):
+    FACIAL_NO: 5 candidates
+
+  Running totals — Saved: 7 | Facial YES: 9
+  [adapt] Opus (paginate): continue — This string is performing well with a 9.3% save rate across 5 pages (7 saves out of 75 candidates), which is strong for this brief. The facial YES rate (9/75 = 12%) is also healthy, and the gap between facial YES and saves is small (9 vs 7), indicating good calibration rather than over-strict evaluation. The 88% facial NO rate is within the expected range for this brief's strict triage.
+
+The primary pattern in facial NOs is early-career candidates with <5 years experience — this is expected noise from the search terms attracting recent graduates who've adopted agentic/GenAI vocabulary. The saves are high-quality: production GenAI builders at Microsoft, AWS, Meta, Scale AI, CVS Health, Saks, and UnitedHealth Group — exactly the profile we want.
+
+With 655 results and only 75 evaluated (5 pages), there's substantial runway remaining. Saves have appeared on every page so far (pages 1-3), and while pages 4-5 had no saves, this is a small sample (only ~7 candidates shown on those pages). The string still has signal worth extracting before stopping or narrowing. Narrowing to filter out junior candidates would risk losing senior profiles who happen to not have certain seniority keywords. Continuing is the right call.
+
+  --- Page 6 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Abhipsha Das — Machine Learning Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of industry experience (graduated MS in 2024, first industry ML role in 2024), research-heavy background without evidence of production GenAI/agentic delivery or enterprise architecture experience.
+    [card 2/25] Chaitanya N. — Machine Learning Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] ~5 years total experience (mostly as a Data Analyst at Accenture), with recent ML roles at NVIDIA and Scale AI focused on LLM evaluation and RLHF — this is closer to classical ML/evaluation work than production agentic GenAI delivery, and the profile lacks the seniority (IC5-IC6) and enterprise architecture/customer-facing delivery signals the role requires.
+    [card 3/25] Chad Hietala — Sr. Staff Engineer - Client Quality Domain Owner
+    Facial judgment (Opus)...
+    [FACIAL_YES] Sr. Staff Engineer - GenAI & Agent Systems at LinkedIn (2023–2024) is a direct signal for production agentic/GenAI delivery at a major enterprise, combined with deep platform and architecture experience from the preceding Web Platform & Architecture role.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (12 chunks) → Pattern: section_hopper
+    [profile] Expanded 5 collapsed section(s)
+    Profile text size: 8 KB
+    Final judgment (Opus)...
+    ℹ BIAS INFO: String 1: Facial YES rate 13% below expected range (15%–35%). Possible triage-stage avoidance or off-target string.
+    [SAVE] Exceptional production agentic builder at Sr. Staff level with patent-level GenAI architecture at LinkedIn scale; strong technical fit but zero client-facing delivery experience and slightly over-leveled for the IC5-IC6 band — worth screening with focus on willingness to do external customer-facing work and hands-on IC execution.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 7.4s, scrolled back 1 chunks
+    [card 4/25] Haowen Xia — AI Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate (Bachelor's 2024, Master's in progress) with fewer than 5 years of experience and only short-stint early-career AI roles, falling well below the IC5-IC6 seniority bar.
+    [card 5/25] Dhruv Agarwal — Software Engineer II
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with only ~3 years of experience (Master's 2023), no GenAI/agentic/LLM signals in headline or trajectory, and insufficient seniority for an IC5-IC6 role.
+    [card 6/25] Nikhil Soni — AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate with fewer than 5 years of professional experience (graduated BTech 2023, MSCS 2025), with only short-stint internship-level roles visible, falling well below the IC5-IC6 seniority bar.
+    [card 7/25] Ishan Kawathekar — Co-Founder
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (graduated BE in 2021, MS in 2025), no evidence of production agentic/GenAI delivery, and the trajectory shows brief internships and a very early-stage startup in radiology AI rather than enterprise delivery work.
+    [card 8/25] Sahas Thyarala — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate with fewer than 5 years of experience (graduated 2024), with no visible AI, GenAI, or LLM signal in the trajectory.
+  [glance] proceed (0.95): No noise signals detected.
+    [card 9/25] Matthew A. — Tech Services Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience, no visible AI/GenAI/LLM signal anywhere in the trajectory, and roles focused on tech services and trading systems engineering without connection to any required capability area.
+    [card 10/25] Karishma Muni — Climate Fresk Facilitator
+    Facial judgment (Opus)...
+    [FACIAL_YES] The candidate holds a "Forward Deployed Engineer" title at ActiveViam (an enterprise analytics/data platform company) for ~5 years, which directly maps to the role's FDE function and suggests customer-facing engineering delivery experience, warranting a full profile review to assess GenAI depth and seniority level.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (6 chunks) → Pattern: skipper
+    [profile] Expanded 2 collapsed section(s)
+    Profile text size: 3 KB
+    Final judgment (Opus)...
+    [REJECT] Fullstack FDE with no GenAI, LLM, or ML evidence whatsoever — title match is superficial; does not meet the production agentic delivery hard gate or the depth test.
+    [profile-read] REJECT verdict → closing in 0.6s
+    [card 11/25] Grishma Deshmukh — AI Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (graduated undergrad 2023, currently in master's program), with no evidence of production GenAI delivery or senior IC-level work.
+    [card 12/25] Travis Cloney — Founding Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite AI-relevant titles (Founding Engineer at AI startups), the candidate graduated in 2020 giving roughly 5 years of experience, and the visible career history shows only three very short-tenure founding engineer stints (one evenings/weekends) with no evidence of production enterprise GenAI delivery, enterprise architecture, or systems integration — the trajectory is too thin and early-career to meet the IC5-IC6 bar.
+    [card 13/25] Anwar Mujeeb — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate (BS 2024) with fewer than 5 years of experience — career consists entirely of internships and a single junior SWE role, far below the IC5-IC6 seniority required.
+    [card 14/25] Khwaab Thareja — Python Specialist - Data services
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience — graduated BTech in 2022, currently pursuing an MS, with only intern-level positions and no production engineering or GenAI delivery evidence.
+    [card 15/25] Matthieu Bonnardot — Forward Deployed AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Current title is literally "Forward Deployed AI Engineer" at BCG X, which directly signals production GenAI delivery in an enterprise consulting context — the exact role profile sought — though the relatively short career history (graduated 2020) raises a leveling concern that warrants a full profile check.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (9 chunks) → Pattern: focused_reader
+	    [profile] Expanded 2 collapsed section(s)
+    Profile text size: 7 KB
+    Final judgment (Opus)...
+    [SAVE] Production agentic/RAG builder at BCG X with multi-client enterprise deployment evidence and hands-on architectural ownership; slight concern on total years of experience being at or just below the 5-year floor, but trajectory and depth of GenAI delivery work are strong for the role.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 6.2s, scrolled back 3 chunks
+    [card 16/25] Shresth Kapoor — Computer Vision Research Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (graduated BTech 2023, currently pursuing Master's through 2026), which triggers the fast exit criterion for insufficient seniority for an IC5-IC6 role.
+    [card 17/25] Mani Prasanth — SR Python Developer- Gen AI
+    Facial judgment (Opus)...
+    [FACIAL_NO] Only ~3 years of visible experience (graduated 2021-2023 with MCA), with a trajectory of progressive "Python Developer" titles that suggest relatively junior contract/consulting work rather than the IC5-IC6 level production agentic/GenAI architecture and delivery experience required.
+    [card 18/25] Butchi Venkatesh Adari — Founding Machine Learning Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite a highly relevant headline mentioning production LLM, multi-agent, RAG, and evaluation, the candidate has fewer than 5 years of professional experience (career starts 2023 as a graduate research assistant, with only brief 2025 roles), placing them well below the IC5-IC6 seniority bar required for this role.
+    [card 19/25] Masud Ahmed — Founder
+    Facial judgment (Opus)...
+    [FACIAL_NO] The profile shows a backend SDE role at Amazon (2020-2023) followed by founding small startups with no visible GenAI/agentic production delivery signal, and the overall experience (~5 years post-graduation) is thin for IC5-IC6 leveling with no specific enterprise architecture or applied LLM delivery indicators.
+    [card 20/25] Haocheng Shen — Full Stack Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a Bachelor's degree in 2022 and Master's in 2023, the candidate has fewer than 5 years of professional experience (approximately 2 years), falling below the early-career fast exit threshold, and the trajectory shows junior full-stack/web development roles without evidence of production agentic/GenAI delivery at the IC5-IC6 level required.
+    [card 21/25] Ayaz Naeem — Security Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate (2025) with fewer than 5 years of experience, entire career is cybersecurity/IT support/data analytics with no AI, GenAI, backend engineering, or ML delivery signals.
+    [card 22/25] Avinash Rajaraman Swaminathan — GenAI Lead Data Scientist
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite GenAI/Agentic AI headline keywords, the trajectory shows only ~2 years of post-graduate data science at Infosys (a large consultancy where "Lead Data Scientist" is likely advisory/analytics-heavy rather than production engineering), with fewer than 5 years of total experience and no evidence of backend engineering, systems architecture, or production agentic application delivery ownership.
+    [card 23/25] Rishav Chakravarti — Staff Applied AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Staff Applied AI Engineer at Scale AI (a leading enterprise AI company) with "Enterprise" in the headline, combined with a strong ML engineering trajectory (AWS, IBM Research) and CMU education, directly signals production GenAI delivery in enterprise contexts — a near-exact match for the role's core requirements.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (11 chunks) → Pattern: focused_reader
+    [profile] Expanded 6 collapsed section(s)
+    Profile text size: 9 KB
+    Final judgment (Opus)...
+    [SAVE] Strong production GenAI builder with end-to-end LLM delivery at AWS QuickSight, deep ML depth from IBM Research, and now Staff Applied AI Engineer at Scale AI; primary gap is limited evidence of external customer-facing bespoke delivery, but technical depth and new Scale AI role make this a strong screen.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 7.2s, scrolled back 1 chunks
+    [card 24/25] Jeyson M. — Senior Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows ~5 years of general software/frontend engineering with no visible AI, GenAI, LLM, agentic, or ML delivery signals anywhere in the career history, and the experience depth is borderline insufficient for IC5-IC6 leveling.
+    [card 25/25] Ethan Liu — Data Science R&D Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate with fewer than 5 years of experience — only two internship positions visible, no production engineering or GenAI delivery evidence.
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 6 | 655 results
+  ──────────────────────────────────────────────────
+
+  SAVED (3):
+    + Chad Hietala — Sr. Staff Engineer - Client Quality Domain Owner at LinkedIn
+      Path: DIRECT:1. Production Agentic / GenAI Application Delivery | Confidence: 0.72
+      Exceptional production agentic builder at Sr. Staff level with patent-level GenAI architecture at LinkedIn scale; strong technical fit but zero client-facing delivery experience and slightly over-leveled for the IC5-IC6 band — worth screening with focus on willingness to do external customer-facing work and hands-on IC execution.
+    + Matthieu Bonnardot — Forward Deployed AI Engineer at BCG X
+      Path: DIRECT:1. Production Agentic / GenAI Application Delivery | Confidence: 0.78
+      Production agentic/RAG builder at BCG X with multi-client enterprise deployment evidence and hands-on architectural ownership; slight concern on total years of experience being at or just below the 5-year floor, but trajectory and depth of GenAI delivery work are strong for the role.
+    + Rishav Chakravarti — Staff Applied AI Engineer at Scale AI
+      Path: DIRECT:Production Agentic / GenAI Application Delivery | Confidence: 0.78
+      Strong production GenAI builder with end-to-end LLM delivery at AWS QuickSight, deep ML depth from IBM Research, and now Staff Applied AI Engineer at Scale AI; primary gap is limited evidence of external customer-facing bespoke delivery, but technical depth and new Scale AI role make this a strong screen.
+
+  SKIPPED — profiles opened (1):
+    - Karishma Muni — Climate Fresk Facilitator at Climate Fresk
+      Fullstack FDE with no GenAI, LLM, or ML evidence whatsoever — title match is superficial; does not meet the production agentic delivery hard gate or the depth test.
+
+  Skipped from preview (21):
+    FACIAL_NO: 21 candidates
+
+  Running totals — Saved: 10 | Facial YES: 13
+  [adapt] Opus (paginate): continue — The string is performing well with a 10% save rate (10 saves out of 100 candidates) across 6 pages, which is strong for this brief. The facial NO rate of 87% is within the expected range given strict triage criteria — most rejections are early-career candidates who don't meet the 5+ year bar, which is expected noise. Importantly, saves are still appearing on the most recent page (page 6 produced 3 saves: Chad Hietala, Matthieu Bonnardot, Rishav Chakravarti), indicating the string still has strong signal. The 655 result count means there are substantial pages remaining to explore. The quality of saves has been consistently high — production agentic builders at Microsoft, AWS, Meta, Scale AI, BCG X, LinkedIn. No reason to narrow or stop while saves are still flowing at this rate on recent pages.
+
+  --- Page 7 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Srikanthreddy M — AI/ML Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Only ~5 years of relevant experience (Data Analyst → AI/ML Engineer), with a master's degree completing in 2025, indicating an early-career profile that falls below the IC5-IC6 seniority bar and lacks evidence of production agentic/GenAI delivery or enterprise architecture work.
+	    [card 2/25] Michiel Huisman — Manager, Applied AI
+    Facial judgment (Opus)...
+    [FACIAL_NO] The entire trajectory at Celonis progresses from Value Engineer to Manager of Value Engineering to Manager of Applied AI — "Value Engineering" at Celonis is a customer-facing consulting/pre-sales function, and the recent "Applied AI" manager title is a leadership role without any visible IC engineering authorship, fitting the non-fit patterns of implementation/delivery without engineering authorship and potentially too-senior leadership without build evidence.
+    [card 3/25] Jared Fowler — Senior Android Performance Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career trajectory is Android/mobile engineering with no visible AI, GenAI, LLM, backend architecture, or customer-facing solution delivery signals.
+    [card 4/25] Gherman B. — Machine Learning Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite relevant headline keywords (LLMs, Agents), the career history shows only ~3 years of experience across relatively unknown companies with no enterprise-scale delivery, architectural seniority, or client-facing engineering signals — falling short of the IC5-IC6 level requirement and lacking evidence of production agentic/GenAI delivery at meaningful scale.
+    [card 5/25] Ajay K. — Data Scientist
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with only ~3 years of experience as a self-employed Data Scientist (graduated MS in 2024), no visible production engineering roles, enterprise delivery, or GenAI application deployment evidence — falls below the 5+ year experience bar and lacks any specific signal connecting to required capability areas.
+    [early-exit] 5/5 facial_no (100%) — breaking page
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 7 | 655 results
+  ──────────────────────────────────────────────────
+
+  Skipped from preview (5):
+    FACIAL_NO: 5 candidates
+
+  Running totals — Saved: 10 | Facial YES: 13
+  [adapt] Opus (paginate): continue — The string is performing well with a 9.5% save rate (10 saves across 105 candidates over 7 pages), which is strong for this brief. Saves have been distributed throughout the pagination — page 1 (3 saves), page 2 (3 saves), page 3 (1 save), page 6 (3 saves). The most recent page (7) has yielded no saves across only 5 candidates evaluated so far, which is too small a sample to conclude signal exhaustion. The facial NO rate of ~88% is slightly above the expected 65-85% range, driven heavily by early-career/insufficient-experience candidates, but the save rate more than compensates. The string continues to surface strong production GenAI builders at credible companies (Scale AI, Meta, AWS, LinkedIn, BCG X, Microsoft, CVS Health, UnitedHealth Group). There are still ~550 remaining results in the 655-result pool, so there is substantial runway. I'll continue paginating to capture more saves.
+
+  --- Page 8 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Keith Low — AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With only ~5 years of experience (graduated 2019), a solo founder/AI Engineer at what appears to be a personal venture, and no senior IC or enterprise delivery signals, the profile falls short of the IC5-IC6 seniority bar and lacks evidence of production enterprise GenAI delivery at scale.
+    [card 2/25] Drew Das — Staff AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Staff AI Engineer at Sixfold AI with explicit multi-agent systems, agentic workflows, and production-scale signals (100B+ tokens processed), progressing from Senior SWE at Jasper (GenAI company) — directly maps to the hard gate of production agentic/GenAI application delivery.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (14 chunks) → Pattern: section_hopper
+    [profile] Expanded 6 collapsed section(s)
+    Profile text size: 11 KB
+    Final judgment (Opus)...
+    [SAVE] Staff AI Engineer currently building production multi-agent orchestration and eval infrastructure at an enterprise AI startup — strong direct match on all four capability areas with clear builder depth; minor gap in explicit client-facing delivery experience.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 4.2s, scrolled back 3 chunks
+    [card 3/25] Yash Modi — AI/ML Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a master's degree completed in 2024 and a bachelor's in 2022, the candidate has fewer than 5 years of professional experience (effectively ~1 year of post-graduation industry work), placing them well below the IC5-IC6 seniority bar required for this role.
+    [card 4/25] Asghar Kazmi — Software Engineer Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career undergraduate student (expected graduation 2027) with internship-level experience only, falling well below the 5+ years minimum for an IC5-IC6 senior role.
+    [card 5/25] Mahesh Y. — AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a Master's completed in 2023 and career starting in 2019 as a Data Scientist, the trajectory suggests ~6 years of experience but the progression from classical data science to AI/ML Engineer lacks specific signals of production agentic/GenAI delivery, enterprise architecture, or senior IC-level (IC5-IC6) work — the roles and companies don't provide strong enough positive signal to justify a full review.
+    [card 6/25] Ayush Sharma — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (graduated MS in 2024), no visible production GenAI/agentic delivery signals, and the trajectory (Data Analyst, junior Software Engineer) lacks the seniority and specialization required for an IC5-IC6 Forward Deployed Engineer role.
+    [card 7/25] Satyan Pai — Founding Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows a long tenure as a founding engineer at a small startup and senior SWE roles with no visible AI, GenAI, LLM, or agentic delivery signal anywhere in the career history, and the headline is generic with no connection to any required capability area.
+    [card 8/25] Regita Zakia — Data Science & Analytics
+    Facial judgment (Opus)...
+    [FACIAL_YES] "Founding AI Engineer at Legali AI" (2024–Present) is a direct signal of hands-on AI/GenAI application building at an early-stage startup, which warrants a full profile review to assess production depth and agentic delivery evidence despite the otherwise thin and early-career trajectory.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (16 chunks) → Pattern: skimmer
+    [profile] Expanded 4 collapsed section(s)
+    Profile text size: 12 KB
+    Final judgment (Opus)...
+
+    ⚠ BIAS PAUSE: String 1: 73% save rate over last 15 evaluations. Threshold: 60%. String is likely too broad.
+    [REJECT] Classical data scientist and analytics professional with no evidence of production GenAI/agentic system delivery, LLM architecture ownership, or relevant technical depth for the FDE role.
+    [profile-read] REJECT verdict → closing in 1.1s
+  [glance] proceed (0.95): No noise signals detected.
+    [card 9/25] Vikasni Senthil — Software Engineer Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (currently an undergraduate expected to graduate in 2026), which triggers the fast exit criterion.
+    [card 10/25] Zichen Fan — Associate DS/ML Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience — graduated master's in 2024, currently in an associate-level role, with no evidence of production GenAI/agentic delivery or senior IC-level work.
+    [card 11/25] Mamatha Singh — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of professional experience (graduated BTech 2021), no senior/staff-level roles, and no specific evidence of production GenAI/agentic system delivery — the AI/ML headline keywords are generic and unsupported by the visible trajectory.
+    [card 12/25] Charlotte Lypen — Senior Data Scientist
+    Facial judgment (Opus)...
+    [FACIAL_NO] The entire visible trajectory is classical data science (Airbnb, Chartboost/Zynga, Citadel Securities) with no signals of production GenAI/LLM/agentic application delivery, backend/platform engineering, or customer-facing solution architecture.
+    [card 13/25] Nan Xiao — AI Engineer (Founding Team)
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate with fewer than 5 years of experience (graduated undergrad 2024, currently in master's program), with only short internship-length stints and no evidence of production-level engineering delivery.
+    [card 14/25] Rishabh Diwan — Python/AI Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Currently an intern with fewer than 5 years of relevant engineering experience, no production GenAI delivery evidence, and a career history of junior data analyst and Python developer roles — clearly early-career and below the IC5-IC6 seniority bar.
+    [card 15/25] Dhruv Suraj Singh — Founder/Builder
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of visible experience — career history starts in 2024 with a student assistant role, followed by a brief software engineer stint and a very recent AI startup founding, well below the IC5-IC6 seniority bar.
+    [card 16/25] Tanmay Agrawal — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a BS in 2022 and an MS starting in 2025 (expected 2027), the candidate has only ~3 years of professional experience, falling well below the 5-year minimum for this IC5-IC6 level role.
+    [card 17/25] Vamsi Kamatham — Sr. Assoc. Data Scientist
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (MS completed 2023, career starts with 2023 internship), and the trajectory shows classical data science at a consultancy with no visible production GenAI, agentic, or LLM delivery signal.
+    [card 18/25] Dmitriy Tyutyunik — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory is primarily frontend/full-stack web development (React, Next.js) with no visible backend architecture, ML engineering, or production GenAI delivery experience; "AI Agents" in the headline appears to be keyword decoration rather than evidence of production agentic system building, and education is bootcamp certificates from 2018-2019 indicating ~5-6 years experience at the junior-to-mid level, below the IC5-IC6 bar.
+    [card 19/25] Vedant Jagtap — NLP Research Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate / early-career profile with fewer than 5 years of experience (Master's expected 2026, career history starts 2024), which is a fast exit criterion.
+    [card 20/25] Ankamma Rao Bandi — Software Engineer - AI/ML
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a bachelor's degree from 2022 and master's from 2024, this candidate has fewer than 5 years of professional experience (only an internship and one current role), placing them firmly in the early-career category below the IC5-IC6 seniority bar.
+    [card 21/25] Teja Nemana — Senior Machine Learning Engineer (Staff)
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows classical ML/DS work (supply chain optimization at Amazon, BI background, ML engineer at ZoomInfo) with no visible GenAI, LLM, agentic, or production generative AI delivery signal; the founder role appears to be a small data science venture, and overall the profile reads as classical DS/ML for business metrics rather than applied GenAI delivery.
+    [card 22/25] Abhisek Kumar — Senior Data Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The entire career trajectory is data engineering and data science focused on traditional healthcare data pipelines with no visible GenAI, LLM, agentic, or applied AI application delivery signals anywhere in the history.
+    [card 23/25] Changyuan Yu — Research Assistant
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile (current Research Assistant, M.S. student at Columbia) with fewer than 5 years of professional experience and no production engineering roles — independent projects and a research assistantship do not constitute production GenAI delivery evidence.
+    [card 24/25] Fangfang Lee — Developer Advocate
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows Developer Advocate (DevRel) at IBM, AI Consultant/Cloud Architect at Google (likely a cloud-vendor pre-sales/advisory role), and a teaching role — no evidence of hands-on production GenAI application engineering or IC builder work.
+    [card 25/25] Shashank Dugad — Gen Ai Developer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (Bachelor's 2023, Master's expected 2026), lacking the senior IC depth (IC5-IC6) required for the role despite relevant GenAI keywords.
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 8 | 655 results
+  ──────────────────────────────────────────────────
+
+  SAVED (1):
+    + Drew Das — Staff AI Engineer at Sixfold AI
+      Path: DIRECT:1. Production Agentic / GenAI Application Delivery | Confidence: 0.91
+      Staff AI Engineer currently building production multi-agent orchestration and eval infrastructure at an enterprise AI startup — strong direct match on all four capability areas with clear builder depth; minor gap in explicit client-facing delivery experience.
+
+  SKIPPED — profiles opened (1):
+    - Regita Zakia — Data Science & Analytics at United Nations
+      Classical data scientist and analytics professional with no evidence of production GenAI/agentic system delivery, LLM architecture ownership, or relevant technical depth for the FDE role.
+
+  Skipped from preview (23):
+    FACIAL_NO: 23 candidates
+
+  Running totals — Saved: 11 | Facial YES: 15
+  [adapt] Opus (paginate): continue — The string continues to produce saves at a healthy rate. Across 8 pages (130 candidates), we have 11 saves (8.5% save rate) and 15 Facial YES (11.5%). Recent pages are still producing quality saves — page 8 yielded Drew Das (Staff AI Engineer at Sixfold AI), and page 6 was particularly productive with 3 saves (Chad Hietala, Matthieu Bonnardot, Rishav Chakravarti). The pattern of noise is predominantly early-career candidates with fewer than 5 years of experience, which is expected given the broad nature of agentic/GenAI vocabulary attracting recent graduates. However, the saves that do land are high-quality — production agentic builders at strong companies (Scale AI, Meta, AWS, LinkedIn, BCG X, Microsoft). The facial NO rate of ~88% is slightly above the expected 65-85% range, but the consistent save production (11 saves across 8 pages, with saves appearing on pages 1, 2, 3, 6, and 8) indicates the string still has signal. With 655 total results and only 130 evaluated, there's substantial runway remaining. I'll continue paginating to capture more of these strong-signal candidates.
+
+  --- Page 9 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Rayid Ali — Founder at Cinechrony
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of visible experience (research assistant in 2023, first industry role in 2024), falling below the seniority bar for an IC5-IC6 role.
+    [card 2/25] Prem Babu Kanaparthi — Generative AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate/early-career profile with fewer than 5 years of experience — bachelor's completed 2024, currently pursuing MS, with only internships and one short-term role, far below the IC5-IC6 seniority bar.
+    [card 3/25] Abhishek Kumar — Applied Scientist II
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career is Applied Scientist at AWS/Amazon (Alexa, AGI) — this is likely an internal research/modeling role without evidence of customer-facing deployment, enterprise integration, or agentic GenAI application delivery, and the AWS employer combined with scientist title suggests internal ML work rather than the hands-on forward-deployed builder profile needed.
+    [card 4/25] Abrar Mahi — Solutions Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Graduated 2023 with fewer than 5 years of experience, and the current Solutions Engineer role at Squirro (an enterprise AI search company) lacks sufficient seniority or clear production agentic/GenAI delivery signal to meet the IC5-IC6 bar.
+    [card 5/25] Shasanka Nudurupati — Cybersecurity Course Instructor
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience, focused on cybersecurity academia/research with no visible AI/GenAI, backend engineering, or production delivery signals.
+    [early-exit] 5/5 facial_no (100%) — breaking page
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 9 | 655 results
+  ──────────────────────────────────────────────────
+
+  Skipped from preview (5):
+    FACIAL_NO: 5 candidates
+
+  Running totals — Saved: 11 | Facial YES: 15
+  [adapt] Opus (paginate): continue — The string is still productive. Across 9 pages (135 candidates), we have 11 saves (8.1% save rate) and 15 facial YES (11.1% facial pass rate). This is a strong performer — well above the ~3% threshold. Saves have continued to appear on recent pages: page 6 produced 3 saves (Chad Hietala, Matthieu Bonnardot, Rishav Chakravarti) and page 8 produced 1 save (Drew Das). Page 9 had zero saves from only 5 candidates evaluated, which is too small a sample to conclude signal exhaustion. The primary noise pattern is early-career candidates with <5 years experience — this accounts for the majority of facial NOs. However, the strong saves (Staff/Sr. Staff engineers at LinkedIn, Scale AI, Sixfold AI, Meta, AWS, BCG X) continue to appear interspersed among the noise at a healthy rate. The 88.9% facial NO rate is slightly above the expected 65-85% band but the save rate remains excellent at 8.1%, confirming the string is productive. Continue paginating to extract more saves before signal thins.
+
+  --- Page 10 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Amirarsalan Rajabi — Senior Data Scientist
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career is classical data science at an ad-tech company (IAS) focused on business metrics like ad fraud/viewability, with no visible GenAI, LLM, agentic, or production application delivery signals, fitting the "Classical DS/ML for business metrics" non-fit pattern.
+    [card 2/25] Prachi Chatur — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite the GenAI-relevant headline keywords (LLM, RAG, Agentic AI), the candidate has fewer than 5 years of post-graduation experience (Master's 2025, started at Stripe 2025), and the actual career history shows only general software engineering roles at Stripe and Goldman Sachs with no visible production GenAI delivery evidence — the headline reads more as aspirational/learning keywords than proven IC5-IC6 level delivery experience.
+    [card 3/25] Krishan Rajaratnam — Senior Machine Learning Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Headline explicitly references "Agentic AI & LLM Systems" with production delivery language, current roles as Senior MLE and Generative AI Consultant suggest hands-on building of GenAI systems in finance — though the thin career history (only ~1-2 years of visible ML engineering plus freelance) is a concern, the direct agentic AI signal warrants a full profile review to assess production depth.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (18 chunks) → Pattern: section_hopper
+    [profile] Expanded 5 collapsed section(s)
+    Profile text size: 13 KB
+    Final judgment (Opus)...
+    [SAVE] Credible production GenAI builder with hands-on RAG, agentic routing, and model fine-tuning at Sunia, but lacks client-facing delivery evidence, enterprise architecture depth, and reusable tooling patterns expected for an FDE role — moderate-confidence save worth a screen to probe architecture judgment and customer-facing readiness.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 6.1s, scrolled back 3 chunks
+    [card 4/25] Rigved Shirvalkar — AI Developer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience — career history shows only internship and student/research positions starting in 2024, well below the IC5-IC6 seniority bar.
+    [card 5/25] Syed F. — Senior Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The entire trajectory is senior full-stack/serverless engineering at non-AI companies with no visible AI, GenAI, LLM, or agentic delivery signal anywhere in the career history.
+    [card 6/25] Shreyash Parajuli — Artificial Intelligence Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate (Bachelor's 2021–2025) with fewer than 5 years of experience and only short-stint early-career roles, falling below the IC5-IC6 seniority bar.
+    [card 7/25] Saba K. — Data Engineer III
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career is data engineering with no visible AI/GenAI, LLM, agentic, or customer-facing solution delivery signals anywhere in the trajectory.
+    [card 8/25] Pradeep Raj Nagarajan — Machine Learning Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows a backend/ML engineer at Bloomberg with no visible GenAI, LLM, agentic, or customer-facing delivery signals — the ML Engineer title likely involves classical ML for financial data (classical DS/ML for business metrics pattern), and the career lacks any consulting, solutions, or applied GenAI language to suggest production agentic system delivery.
+  [glance] proceed (0.95): No noise signals detected.
+    [card 9/25] Fahad Shaikh — Data Scientist (People Analytics)
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career is classical data science and people analytics with no production GenAI, LLM, agentic, or backend engineering signals, and fewer than 5 years of experience.
+    [card 10/25] Hasini Sirigari — Graduate Teaching Assistant
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate/early-career profile with fewer than 5 years of experience — BTech completed 2025, currently in MS program with no professional industry engineering roles.
+    [card 11/25] Lokesh Shanmugam — Software Development Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of visible experience (career starts 2024), falling below the seniority threshold for an IC5-IC6 role.
+    [card 12/25] Georg Ulrich — AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Career history shows roughly 3 years of experience as a Data Scientist in finance (Morgan Stanley, Janus Henderson) with a recent move to AI Engineer at Cedar, but total professional experience appears to be around 5-6 years with the bulk in classical DS/ML for financial services, and there is no visible signal of production agentic/GenAI delivery, enterprise architecture, or systems integration work — the trajectory is too thin and too rooted in classical DS to warrant a full review.
+    [card 13/25] Yuhao Ma — AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience — currently a master's student graduating in 2026 with only internship-level and part-time positions, well below the IC5-IC6 seniority bar.
+    [card 14/25] Christopher B. — Ambassador at CUNY Tech Prep
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate (BS '25) with fewer than 5 years of experience — entirely early-career with no production engineering or GenAI delivery signal.
+    [card 15/25] Niv Ben Farin — Co-Founder & CTO
+    Facial judgment (Opus)...
+    [FACIAL_NO] Graduated in 2023 with fewer than 3 years of professional experience, making this an early-career profile well below the IC5-IC6 seniority bar, and no visible AI/GenAI/LLM signal anywhere in the trajectory.
+    [early-exit] 14/15 facial_no (93%) — breaking page
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 10 | 655 results
+  ──────────────────────────────────────────────────
+
+  SAVED (1):
+    + Krishan Rajaratnam — Senior Machine Learning Engineer at Freelance
+      Path: DIRECT:1. Production Agentic / GenAI Application Delivery + 4. Applied LLM Adaptation, Evaluation & Retrieval | Confidence: 0.62
+      Credible production GenAI builder with hands-on RAG, agentic routing, and model fine-tuning at Sunia, but lacks client-facing delivery evidence, enterprise architecture depth, and reusable tooling patterns expected for an FDE role — moderate-confidence save worth a screen to probe architecture judgment and customer-facing readiness.
+
+  Skipped from preview (14):
+    FACIAL_NO: 14 candidates
+
+  Running totals — Saved: 12 | Facial YES: 16
+  [adapt] Opus (paginate): continue — The string is performing well with a healthy 8.0% save rate (12 saves across 150 candidates). This is well above the ~3% threshold for concern. Saves have been distributed across nearly all pages — page 1 (3), page 2 (3), page 3 (1), page 6 (3), page 8 (1), page 10 (1) — showing consistent signal rather than front-loaded results that have dried up. The most recent page (10) produced a save (Krishan Rajaratnam), confirming the string still has signal. The facial NO rate of ~89% is slightly above the expected 65-85% range, driven heavily by early-career/junior candidates who lack the 5+ year minimum, but this is a filtering issue not a string quality issue. The 655 result count means we've only covered ~23% of results through 10 pages. Strong saves include profiles at Scale AI, Meta, AWS, LinkedIn, BCG X, and Sixfold AI — exactly the archetype we want. No reason to narrow or stop while saves continue appearing.
+
+  [cadence] 33min of activity — pausing 204s to look human...
+  [cadence] Resuming.
+
+  --- Page 11 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Indranil Biswas — Graduate Research Assistant
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of industry experience — MS completed in 2025, current role is a graduate research assistant, and visible work history consists of academic research and a single data science internship, far below the IC5-IC6 seniority bar.
+    [card 2/25] Billy C. — Founding Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Graduated in 2022 with fewer than 5 years of experience, no visible AI/GenAI/LLM signal in the trajectory, and the career history is too early-stage for an IC5-IC6 role.
+    [card 3/25] Dhruv Limbani — Data Scientist
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate (MS 2024-2025, BTech 2020-2024) with fewer than 5 years of experience and only intern-to-junior data scientist positions at a single company, falling well short of the IC5-IC6 seniority bar despite relevant headline keywords.
+    [card 4/25] Vijay Reddy — Generative AI Lead
+    Facial judgment (Opus)...
+    [FACIAL_YES] Headline explicitly signals multi-agent systems, RAG architecture, LangChain, DSPy, and LLM platforms, combined with a trajectory progressing from AI/ML Engineer through Generative AI Engineer to Generative AI Lead at major enterprises (Goldman Sachs, Walmart), directly connecting to production agentic/GenAI delivery and enterprise architecture capabilities.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (8 chunks) → Pattern: focused_reader
+    [profile] Expanded 1 collapsed section(s)
+    Profile text size: 9 KB
+    Final judgment (Opus)...
+    [SAVE] Strong production GenAI builder with deep hands-on agentic workflow, RAG, and evaluation framework experience across two major enterprises; the anachronistic LLM references in pre-2020 roles warrant a quick probe in screen, but the Goldman Sachs and Walmart work is compelling and directly on-target for the FDE role.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 8.0s, scrolled back 1 chunks
+    [card 5/25] Jose M. Bande Serrano — Assurance Technical Resource
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows a senior developer background with no visible AI, GenAI, LLM, or agentic delivery signals anywhere, and the current "Assurance Technical Resource" title suggests QA/testing rather than production GenAI application building.
+    [card 6/25] Judy Yun — Associate Consultant
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career trajectory is consulting operations and strategy at Gartner with no engineering, software development, ML, or AI building roles; headline signals AI strategy and transformation leadership rather than hands-on engineering, matching the "AI strategy, transformation, or product leadership" non-fit pattern.
+    [card 7/25] Ashar R. — Founding Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a 2021-2024 bachelor's degree and career starting around 2022, this candidate has fewer than 5 years of experience, making them early-career and below the IC5-IC6 seniority bar required for this role.
+    [card 8/25] Revanth Meenugu — Associate AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (graduated BTech 2020, Master's 2024-2025), currently an Associate AI Engineer, which falls well below the IC5-IC6 seniority bar required for this role.
+  [glance] proceed (0.95): No noise signals detected.
+    [card 9/25] Nishit Bade — Gen AI SWE III
+    Facial judgment (Opus)...
+    [FACIAL_YES] Current role is explicitly "Gen AI SWE III" at Bank of America, indicating hands-on engineering work on GenAI applications in an enterprise setting, which directly connects to Production Agentic/GenAI Application Delivery; however, the relatively short career (6 years, single employer) and lack of client-facing or architectural signals temper enthusiasm — but the explicit GenAI engineering title warrants a full read.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (8 chunks) → Pattern: section_hopper
+    [profile] Expanded 2 collapsed section(s)
+    Profile text size: 7 KB
+    Final judgment (Opus)...
+    [REJECT] Strong frontend engineer building GenAI UI surfaces at enterprise scale, but lacks evidence of backend LLM system architecture, orchestration ownership, or end-to-end agentic system delivery required for this role.
+    [profile-read] REJECT verdict → closing in 0.8s
+    [card 10/25] Marcus G. — Data Analyst
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of relevant technical experience — career is predominantly non-technical (Social Security Administration), current role is Data Analyst, and the single short training program in MLOps/Agentic engineering does not constitute production GenAI delivery evidence.
+    [card 11/25] Shweta Smriti Tripathi — Teaching Assistant
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience, currently a master's student seeking internships, which falls well below the IC5-IC6 seniority bar required for this role.
+    [card 12/25] Shengfeng Wu — Frontend Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career is frontend-only engineering with no backend, AI, GenAI, or architecture signals, and fewer than 5 years of experience.
+    [card 13/25] Daniel Sobolev — Senior Associate Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Career history shows only ~3 years of general software engineering experience at small/unknown companies with no visible AI, GenAI, LLM, or agentic signals, and insufficient seniority for an IC5-IC6 role.
+    [card 14/25] Nolan Burke — Principal Consultant
+    Facial judgment (Opus)...
+    [FACIAL_NO] The entire career trajectory is classical data science in real estate/finance with no visible GenAI, LLM, agentic, backend engineering, or production AI application delivery signals, and the experience is relatively thin (under 10 years with only a few positions).
+    [card 15/25] Adesh Swapnil — Python AI/LLM Developer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The career trajectory shows ~6 years of experience progressing from Software Engineer to ML Developer to "Python AI/LLM Developer," but the titles and companies lack signals of enterprise-scale production agentic/GenAI delivery, architectural leadership, or client-facing solution engineering at IC5-IC6 level — the profile reads as a mid-level developer without evidence of the senior architectural judgment or customer-facing delivery scope required.
+    [card 16/25] YuXuan Huang — Infrastructure Engineering
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career is infrastructure engineering at a bank and academic research with no visible AI/GenAI application delivery, no client-facing solution work, and no agentic or LLM production signals — falls under pure DevOps/platform infrastructure without application ownership.
+    [card 17/25] Hossain Pazooki — Co-Founder
+    Facial judgment (Opus)...
+    [FACIAL_YES] Headline explicitly states "I build agentic AI for domains where you have to prove it works," combined with a Tech Lead role (2024–2026) and ML/Product Engineer background at startups, directly signaling production agentic GenAI delivery and hands-on IC build work.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (6 chunks) → Pattern: skipper
+    [profile] Expanded 2 collapsed section(s)
+    Profile text size: 3 KB
+    Final judgment (Opus)...
+    [SAVE] Tech lead with direct production agentic delivery (PydanticAI agents, compliance pipelines, measurable outcomes) and practitioner-grade tooling knowledge; moderate confidence due to thin detail outside the Orawell role, but the core builder evidence is credible and in the ideal seniority band.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 4.8s, scrolled back 1 chunks
+    [card 18/25] Nitish Ramaraj — Engineering - Early Team
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate with a bachelor's degree in 2025 and master's starting 2025, with fewer than 5 years of experience and no visible AI/GenAI production delivery signals in the career history.
+    [card 19/25] Navid M. — Researcher
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (BS 2024, MS 2024), with no visible GenAI, LLM, or agentic delivery signals in the trajectory.
+    [card 20/25] Aniruth Ramesh — Senior AI Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite the directly relevant headline ("Building Agentic Platform"), the candidate graduated with their MS in 2024 and has fewer than 5 years of professional experience (career starts ~2024), placing them well below the IC5-IC6 seniority bar required for this role.
+    [card 21/25] April Cao — Research Assistant
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (BS 2025, currently in MS program), no production engineering roles, and no GenAI/agentic delivery signals anywhere in the trajectory.
+    [card 22/25] Pushkar Taday — Applied AI Researcher Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate (2021–2025 undergrad) with only intern and research assistant positions, clearly below the 5-year experience threshold required for an IC5-IC6 level role.
+    [card 23/25] Nicholas O'Brien — Co-Founder & CTO
+    Facial judgment (Opus)...
+    [FACIAL_YES] Member of Technical Staff at Harvey (a leading legal GenAI company) directly signals production LLM/agentic application delivery, combined with founding engineer experience and current CTO role at an AI startup, indicating strong hands-on build capability in the GenAI space.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (8 chunks) → Pattern: skipper
+    [profile] Expanded 2 collapsed section(s)
+    Profile text size: 5 KB
+    Final judgment (Opus)...
+    [SAVE] Strong hands-on builder with direct production agentic/GenAI delivery at Harvey and miso.com, plus deep backend architecture chops — high-confidence fit for the FDE role, though enterprise client-facing consulting experience is unproven.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 2.5s, scrolled back 3 chunks
+    [card 24/25] Brendan Bennett — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate with fewer than 5 years of experience (graduated 2023, only ~2 years at Moody's Analytics) and no visible AI, GenAI, or agentic delivery signal in the trajectory.
+    [card 25/25] Nicholas H. — Forward Deployed Data Scientist – AI Agents & GenAI Solutions
+    Facial judgment (Opus)...
+    [FACIAL_YES] Current title "Forward Deployed Data Scientist – AI Agents & GenAI Solutions" directly mirrors the role's forward-deployed, agentic/GenAI delivery focus, and prior R&D Engineer role at ModuleQ (an AI company) suggests hands-on building experience, though the profile is relatively early-career (PhD track, ~4-5 years of work experience) which warrants a closer look to confirm sufficient seniority and production depth.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (10 chunks) → Pattern: skipper
+    [profile] Expanded 3 collapsed section(s)
+    Profile text size: 9 KB
+    Final judgment (Opus)...
+    [REJECT] Strong role-title match in current FDE position with real agentic delivery work, but likely falls short of the 5+ year hands-on engineering minimum bar — professional engineering experience (excluding academic research) appears to be approximately 3-4 years, and prior roles lack the production software systems ownership expected at IC5-IC6 seniority.
+    [profile-read] REJECT verdict → closing in 0.6s
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 11 | 655 results
+  ──────────────────────────────────────────────────
+
+  SAVED (3):
+    + Vijay Reddy — Generative AI Lead at Goldman Sachs
+      Path: DIRECT:1. Production Agentic / GenAI Application Delivery | Confidence: 0.82
+      Strong production GenAI builder with deep hands-on agentic workflow, RAG, and evaluation framework experience across two major enterprises; the anachronistic LLM references in pre-2020 roles warrant a quick probe in screen, but the Goldman Sachs and Walmart work is compelling and directly on-target for the FDE role.
+    + Hossain Pazooki — Co-Founder at Engager Inc.
+      Path: DIRECT:Production Agentic / GenAI Application Delivery | Confidence: 0.72
+      Tech lead with direct production agentic delivery (PydanticAI agents, compliance pipelines, measurable outcomes) and practitioner-grade tooling knowledge; moderate confidence due to thin detail outside the Orawell role, but the core builder evidence is credible and in the ideal seniority band.
+    + Nicholas O'Brien — Co-Founder & CTO at miso.com
+      Path: DIRECT:Production Agentic / GenAI Application Delivery | Confidence: 0.87
+      Strong hands-on builder with direct production agentic/GenAI delivery at Harvey and miso.com, plus deep backend architecture chops — high-confidence fit for the FDE role, though enterprise client-facing consulting experience is unproven.
+
+  SKIPPED — profiles opened (2):
+    - Nishit Bade — Gen AI SWE III at Bank of America Merrill Lynch
+      Strong frontend engineer building GenAI UI surfaces at enterprise scale, but lacks evidence of backend LLM system architecture, orchestration ownership, or end-to-end agentic system delivery required for this role.
+    - Nicholas H. — Forward Deployed Data Scientist – AI Agents & GenAI Solutions at Unique
+      Strong role-title match in current FDE position with real agentic delivery work, but likely falls short of the 5+ year hands-on engineering minimum bar — professional engineering experience (excluding academic research) appears to be approximately 3-4 years, and prior roles lack the production software systems ownership expected at IC5-IC6 seniority.
+
+  Skipped from preview (20):
+    FACIAL_NO: 20 candidates
+
+  Running totals — Saved: 15 | Facial YES: 21
+  [adapt] Opus (paginate): continue — This string is performing well with a sustained 8.6% save rate (15 saves across 175 candidates over 11 pages). The most recent page (p11) produced 3 saves (Vijay Reddy, Hossain Pazooki, Nicholas O'Brien), which is one of the strongest pages yet. The facial NO rate of ~88% is slightly above the expected 65-85% range, driven largely by the high volume of early-career/fresh graduate candidates that don't meet the 5+ year bar, but the save rate remains strong and well above the 3% threshold. Signal is clearly not exhausted — the last page was actually one of the most productive. With 655 total results and only 175 evaluated, there are roughly 480 more candidates in this pool. The combination of recent strong saves and healthy overall save rate warrants continued pagination.
+
+  --- Page 12 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Aditya Kapoor — Software Engineer Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience — current student with only internship positions visible.
+    [card 2/25] Tal Klap — Gen AI Team Manager
+    Facial judgment (Opus)...
+    [FACIAL_YES] Headline explicitly references "Agentic AI | From Concept to Production LLM Systems" and current role as GenAI Team Manager at Deloitte — a consultancy with enterprise clients — directly connects to production agentic/GenAI delivery and client-facing work, though the "Manager" title and relatively thin career history (3 positions) introduce some risk of being too managerial or too senior for an IC role; worth a full read to assess hands-on build evidence.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (12 chunks) → Pattern: skipper
+    [profile] Expanded 3 collapsed section(s)
+    Profile text size: 7 KB
+    Final judgment (Opus)...
+    [SAVE] Production GenAI builder at Deloitte with strong agentic delivery evidence (LangGraph multi-agent systems, production RAG at scale, hybrid search with reranking) and deep prior ML career; management title is offset by explicit 50/50 IC split and hands-on build language — strong fit if still willing to operate as a senior IC.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 2.6s, scrolled back 3 chunks
+    [card 3/25] Hallie Ricci — AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Graduated in 2023 with fewer than 3 years of full-time experience (early-career), falling well short of the 5+ year minimum needed for an IC5-IC6 level role.
+    [card 4/25] Atharva B. — Founding Engineer - Gen AI & Infrastructure
+    Facial judgment (Opus)...
+    [FACIAL_NO] Despite a headline that matches perfectly, the candidate graduated with their MS in 2024 and has fewer than 2 years of professional experience (Data Analyst in 2024, brief AI Engineer stint in 2025, and current founding engineer role starting 2025), falling well below the 5-year experience threshold required and lacking evidence of the production delivery maturity expected at IC5-IC6 level.
+    [card 5/25] Maaz Shaikh — Lead AI Data Scientist
+    Facial judgment (Opus)...
+    [FACIAL_NO] The candidate graduated in 2023 with only ~2 years of post-graduation experience across data science roles (clinical research, university consulting, and a recent lead title at Blend), falling well below the 5+ years of experience needed for an IC5-IC6 level role, and the trajectory is rooted in classical data science/analytics rather than production agentic GenAI system delivery.
+    [card 6/25] Alessandra Serrano — PTA Treasurer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with less than 1 year of experience, no visible production engineering history, and no AI/GenAI/agentic delivery signals anywhere in the trajectory.
+    [card 7/25] Aagam Bakliwal — Software Engineer Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Current Master's student (2024–2026) with only internship experience, clearly falling below the 5-year experience threshold required for an IC5-IC6 level role.
+    [card 8/25] Michael Seltenreich, PhD — Member of Technical Staff
+    Facial judgment (Opus)...
+    [FACIAL_YES] Member of Technical Staff at Anthropic (a leading LLM company) plus Senior Software Engineer (Agentic AI) at UiPath directly signals production agentic/GenAI application delivery experience, which is the hard gate capability for this role.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (14 chunks) → Pattern: focused_reader
+    [profile] Expanded 5 collapsed section(s)
+    Profile text size: 11 KB
+    Final judgment (Opus)...
+    [SAVE] Production agentic systems builder with architectural ownership at UiPath (HITL, multimodal agents, Temporal orchestration), YC founding engineer background, and now Anthropic MTS — strong technical depth in the ideal seniority band, though profile skews product-IC rather than client-facing deployment.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 4.4s, scrolled back 1 chunks
+  [glance] proceed (0.95): No noise signals detected.
+    [card 9/25] Eric Lin — Software Engineering Fellow
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience, no visible senior IC leveling, and no specific GenAI, LLM, or agentic delivery signals in the trajectory.
+    [card 10/25] Rastsislau Matusevich — Staff Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows a solid backend software engineer (Microsoft → StubHub → GEICO Tech) with no visible AI, GenAI, LLM, agentic, or applied ML signal anywhere in the career history, and no client-facing or solutions delivery indicators relevant to the role.
+    [card 11/25] Guillaume Caron — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Very early-career software engineer (business school background, only recent 2025 engineering roles with no visible AI/GenAI/LLM signal anywhere in the trajectory) — insufficient experience and no connection to any required capability area.
+    [card 12/25] Jonathan Scotto — CX Data Analyst
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career is BI/analytics/reporting (CX Data Analyst, Marketing Analytics, Business Analyst) with no software engineering, ML engineering, AI, or backend development positions visible anywhere in the trajectory.
+    [card 13/25] Yashwanth T. — Senior AI/ML Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows ~4-5 years of ML engineering at large enterprises with no visible GenAI, agentic, or LLM-specific signal in titles or companies, and the experience level is borderline insufficient for IC5-IC6; this reads as classical ML engineering without evidence of production GenAI delivery or client-facing solution architecture.
+    [card 14/25] Blake Chang — Dev team member - programmer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career student (expected graduation 2027) with fewer than 5 years of experience — fast exit applies.
+    [card 15/25] Chelse Tsai-Simek — Member of Technical Staff
+    Facial judgment (Opus)...
+    [FACIAL_YES] Member of Technical Staff at Basis (an AI startup) combined with a strong backend engineering trajectory (Staff SWE → Senior EM at Celonis, now back to IC at an AI company) suggests a hands-on senior engineer who recently transitioned into AI application building, warranting a full profile review.
+    Opening profile for full evaluation...
+    [profile-read] Medium profile (5 chunks) → Pattern: section_hopper
+    [profile] Expanded 3 collapsed section(s)
+    Profile text size: 8 KB
+    Final judgment (Opus)...
+    [SAVE] Currently hands-on architecting and shipping a production multi-agent system with full orchestration, state management, and model-agnostic LLM infrastructure — strong direct fit for the FDE role with excellent architectural judgment and ideal seniority band.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 5.3s, scrolled back 1 chunks
+    [card 16/25] Alon Kedem — Founder
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience, no visible production engineering roles, and no signals of GenAI/agentic application delivery or enterprise architecture work.
+    [card 17/25] KAVYA K — Data Scientist
+    Facial judgment (Opus)...
+    [FACIAL_NO] Classical DS/ML trajectory (Data Scientist at Oracle and Goldman Sachs, ML Engineer at Amazon) with no visible GenAI, LLM, or agentic application signals, and relatively early career (~5 years with a 2023-2024 master's degree suggesting limited total experience).
+    [card 18/25] Nick Stillman — Senior Full-Stack Software Developer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The entire career history shows full-stack web development at a single company with no visible AI, GenAI, LLM, agentic, or ML delivery signals anywhere in the trajectory, and insufficient seniority/experience breadth for the IC5-IC6 level required.
+    [card 19/25] Emre Erhan — Computational Biologist
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career trajectory is computational biology and bioinformatics software engineering with no visible AI/GenAI, LLM, agentic, enterprise architecture, or customer-facing delivery signals relevant to the role.
+    [card 20/25] Berkay Baris Turan — Graduate Teaching Assistant
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (BS 2024, currently a graduate TA), and the brief Deloitte consulting stint lacks evidence of production GenAI engineering delivery.
+    [card 21/25] vijay Gottipati — Information Technology Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (currently pursuing MS, graduated undergrad in 2023, only intern positions visible), which is a fast exit criterion.
+    [card 22/25] dinesh sathunuri — Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (graduated BTech 2021, Master's 2025), no senior IC signals, and no evidence of production agentic/GenAI delivery — the trajectory is too junior for an IC5-IC6 role.
+    [card 23/25] Sanyukta Shandilya — Business Systems Analyst 2
+    Facial judgment (Opus)...
+    [FACIAL_NO] Entire career trajectory is BI, analytics, and business systems analysis with no software engineering, ML engineering, backend, or GenAI delivery signals anywhere in the history.
+    [card 24/25] Qin Du — Software Engineer Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (currently a master's student with intern and junior roles), well below the IC5-IC6 seniority bar required.
+    [card 25/25] Matthew Q. — Data Scientist (Analyst II)
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career data scientist/analyst with fewer than 5 years of professional experience, no visible AI/GenAI/LLM/agentic delivery signals, and a trajectory entirely within analytics rather than production engineering.
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 12 | 655 results
+  ──────────────────────────────────────────────────
+
+  SAVED (3):
+    + Tal Klap — Gen AI Team Manager at Deloitte
+      Path: DIRECT:Production Agentic / GenAI Application Delivery | Confidence: 0.82
+      Production GenAI builder at Deloitte with strong agentic delivery evidence (LangGraph multi-agent systems, production RAG at scale, hybrid search with reranking) and deep prior ML career; management title is offset by explicit 50/50 IC split and hands-on build language — strong fit if still willing to operate as a senior IC.
+    + Michael Seltenreich, PhD — Member of Technical Staff at Anthropic
+      Path: DIRECT:1. Production Agentic / GenAI Application Delivery | Confidence: 0.82
+      Production agentic systems builder with architectural ownership at UiPath (HITL, multimodal agents, Temporal orchestration), YC founding engineer background, and now Anthropic MTS — strong technical depth in the ideal seniority band, though profile skews product-IC rather than client-facing deployment.
+    + Chelse Tsai-Simek — Member of Technical Staff at Basis
+      Path: DIRECT:1. Production Agentic / GenAI Application Delivery | Confidence: 0.88
+      Currently hands-on architecting and shipping a production multi-agent system with full orchestration, state management, and model-agnostic LLM infrastructure — strong direct fit for the FDE role with excellent architectural judgment and ideal seniority band.
+
+  Skipped from preview (22):
+    FACIAL_NO: 22 candidates
+
+  Running totals — Saved: 18 | Facial YES: 24
+  [adapt] Opus (paginate): continue — This string continues to produce saves at a healthy rate. Across 12 pages (200 candidates), we have 18 saves — a 9.0% save rate, which is strong for this brief. Page 12 alone yielded 3 saves (Tal Klap, Michael Seltenreich, Chelse Tsai-Simek), which is one of the best pages yet. The facial YES rate (24/200 = 12%) is also reasonable given the strict triage criteria. The dominant noise pattern is early-career candidates with <5 years experience, but the string's core vocabulary ('agentic workflow/system', 'tool calling', 'function calling', 'agent orchestration') is highly specific and continues to surface credible senior production builders. With 655 total results and only 200 evaluated, there's substantial runway remaining. The most recent page was particularly productive, so signal is clearly not exhausted.
+
+  --- Page 13 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Bhaskar Dutt — Senior Machine Learning Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Career trajectory shows classical ML engineering roles (Plaid for fintech ML, Helm.ai for autonomous driving perception, Primer.ai for NLP/intelligence analysis) without visible signals of production agentic/GenAI application delivery, enterprise customer-facing work, or solutions architecture — and with only ~4 years of experience, the profile is likely too junior for IC5-IC6 leveling.
+    [card 2/25] Deeptanshu . — Enterprise AI Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience — currently a master's student with only internship positions, well below the IC5-IC6 seniority bar.
+    [card 3/25] Thoshan Omprakash — AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate with a BS in 2025 and fewer than 5 years of experience, with no visible production GenAI delivery history.
+    [card 4/25] Geetha R. — GenAI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With roughly 4-5 years of experience (starting 2020) and no senior/staff-level IC progression or evidence of enterprise customer-facing delivery, this profile falls short of the IC5-IC6 seniority bar and shows no client-facing or architectural leadership signal.
+    [card 5/25] Manideep Pendyala — AI Solutions Engineering Intern
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience — currently an intern with only academic research positions, no production engineering history.
+    [early-exit] 5/5 facial_no (100%) — breaking page
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 13 | 655 results
+  ──────────────────────────────────────────────────
+
+  Skipped from preview (5):
+    FACIAL_NO: 5 candidates
+
+  Running totals — Saved: 18 | Facial YES: 24
+  [adapt] Opus (paginate): continue — The string continues to produce saves at a healthy rate. Across 13 pages (205 candidates), we have 18 saves for an 8.8% save rate, which is strong for this brief. Looking at the distribution: pages 11-12 were particularly productive with 5 saves (Vijay Reddy, Hossain Pazooki, Nicholas O'Brien, Tal Klap, Michael Seltenreich, Chelse Tsai-Simek). Page 13 had zero saves but was only a partial page with 5 candidates evaluated. The facial NO rate (~88%) is slightly above the expected 65-85% range, driven heavily by early-career candidates who don't meet the 5+ year bar — this is a characteristic of the pool rather than a string quality issue. The 24 Facial YES (11.7%) combined with the 18 saves shows good conversion from opens to saves. Signal has not dried up — saves appeared as recently as page 12 with 3 saves on that page alone. Worth continuing to extract remaining value from this 655-result pool.
+
+  --- Page 14 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Ansh Riyal — Machine Learning Engineer (Team Lead)
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (graduated undergrad 2022, MS 2024), and no visible evidence of production agentic/GenAI delivery at enterprise scale — the roles at small/unknown companies and a TA position do not meet the IC5-IC6 seniority bar.
+    [card 2/25] Pratham M. — Artificial Intelligence Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a master's degree completed in 2024 and career history starting in 2025, this candidate has fewer than 5 years of professional experience (early-career), and the "2X Hackathon Winner" emphasis combined with very brief tenures suggests prototype-level rather than production delivery experience.
+    [card 3/25] Tal Erez — Machine Learning Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a 2020 bachelor's and 2025 master's, the candidate has fewer than 5 years of professional experience, placing them in the early-career category below the IC5-IC6 seniority bar required for this role.
+    [card 4/25] Weicheng Zeng — Data Scientist
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (graduated undergrad 2023, master's 2025), with no visible production GenAI/agentic delivery or senior IC signals anywhere in the trajectory.
+    [card 5/25] Krishna K — Data Scientist
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of experience (graduated BTech 2022, Master's 2024), with only junior data scientist/analyst roles — well below IC5-IC6 seniority and no evidence of production enterprise GenAI delivery.
+    [early-exit] 5/5 facial_no (100%) — breaking page
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 14 | 655 results
+  ──────────────────────────────────────────────────
+
+  Skipped from preview (5):
+    FACIAL_NO: 5 candidates
+
+  Running totals — Saved: 18 | Facial YES: 24
+  [adapt] Opus (paginate): continue — This string continues to produce saves at a healthy rate. Across 14 pages (210 candidates), we have 18 saves — an 8.6% save rate, which is strong for this brief. Looking at recent pages: page 11 produced 3 saves (Vijay Reddy, Hossain Pazooki, Nicholas O'Brien), page 12 produced 3 saves (Tal Klap, Michael Seltenreich, Chelse Tsai-Simek). Pages 13-14 produced 0 saves across ~20 candidates, but this is only a brief dry spell after two very productive pages. The facial NO rate (~89%) is slightly above the expected 65-85% range, largely driven by the massive number of early-career/fresh-graduate candidates in this pool, but the save rate remains well above the 3% threshold. The quality of saves has been excellent — Staff/Sr. Staff engineers at Scale AI, LinkedIn, Anthropic, Goldman Sachs, BCG X, and strong startup CTOs. With 655 total results, we likely have several more pages of candidates to evaluate. Given the strong recent save production on pages 11-12, the brief 2-page dry spell is not yet cause for concern. Continue paginating.
+
+  --- Page 15 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Steven M. — Founding Team at Focal | Secure Advisor AI
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows a Product role at Uber (not engineering), a Founder in Residence at a VC, and a current founding team role with "GTM" in the headline, suggesting a product/business orientation rather than hands-on engineering authorship; no visible backend, ML, or software engineering IC positions anywhere in the career history.
+    [card 2/25] Anoop Pillai — Sr. Software Engineer - Lead
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows a senior software engineer with long tenures at Amazon and Xoriant but no visible AI, GenAI, LLM, agentic, or applied ML signal anywhere in the career history, and no client-facing delivery or solutions architecture pattern relevant to the role.
+    [card 3/25] Wayne Z. — Member of Technical Staff - Full Stack
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career engineer (graduated 2022, ~3 years experience) with full-stack roles at Salesforce and SAP but no visible AI, GenAI, LLM, or agentic delivery signals anywhere in the trajectory, falling below the 5-year experience bar and lacking any specific connection to required capability areas.
+    [card 4/25] Nagarjuna Muddana — Application Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The entire trajectory is Java full stack / application support / application development with no visible AI, GenAI, LLM, or agentic delivery signal anywhere, and the headline confirms a cloud migration and Java focus rather than applied AI engineering.
+    [card 5/25] Milind K. — Course Assistant
+    Facial judgment (Opus)...
+    [FACIAL_NO] Early-career profile with fewer than 5 years of engineering experience (BTech 2020, currently in a master's program), and the only AI-relevant role (AI Engineer at H&M for ~1 year) is too brief to indicate the senior IC-level production GenAI delivery required for this role.
+    [early-exit] 5/5 facial_no (100%) — breaking page
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 15 | 655 results
+  ──────────────────────────────────────────────────
+
+  Skipped from preview (5):
+    FACIAL_NO: 5 candidates
+
+  Running totals — Saved: 18 | Facial YES: 24
+  [adapt] Opus (paginate): continue — The string is still productive. Across 15 pages (215 candidates), we have 18 saves — an 8.4% save rate, which is well above the 3% threshold. Saves have been distributed throughout the pagination: pages 1-3 (6 saves), pages 6-8 (5 saves), pages 10-12 (6 saves), and page 12 alone produced 3 saves including high-quality profiles like Michael Seltenreich (Anthropic) and Chelse Tsai-Simek (Basis). The facial NO rate of 88.8% is slightly above the expected 65-85% range, driven heavily by early-career/insufficient-experience candidates, but saves continue to appear at a healthy clip. The last 3 pages (13-15) have been dry with 0 saves and 0 facial YES, which is a mild concern, but this could be a local cold streak. Given the strong overall save rate and the 655 result pool still having unexplored candidates, it's worth continuing for at least another page or two to see if signal returns before considering stopping or narrowing.
+
+  --- Page 16 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Kinsey Feng — Co-Founder & Full Stack Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] Fresh graduate (MS expected 2026, BS 2024) with fewer than 5 years of experience and no evidence of production GenAI delivery beyond a very early-stage startup.
+    [card 2/25] Arviell Simmons — Founder
+    Facial judgment (Opus)...
+    [FACIAL_NO] Only two visible positions — a recent solo founder of a small SMB-focused AI shop and an R&D specialist at a non-engineering organization — with no evidence of production enterprise-grade GenAI delivery, backend engineering depth, or the 5+ years of substantial engineering IC experience required for IC5-IC6 leveling.
+    [card 3/25] Devansh Agarwal — Technology and AI Strategy
+    Facial judgment (Opus)...
+    [FACIAL_NO] The entire career trajectory is consulting at PwC with titles centered on strategy, alliances, and transformation — matching the "AI strategy, transformation, or product leadership" non-fit pattern with no visible engineering IC or hands-on build signals anywhere.
+    [card 4/25] Mahak Agarwal — Senior Data Scientist (Specializing in AI)
+    Facial judgment (Opus)...
+    [FACIAL_NO] Career is entirely data scientist at IBM with ~3 years post-graduation experience (MS 2022), falling short of the 5+ year bar, and the headline's "LLM Safety & Agentic Robustness" suggests research focus rather than production agentic/GenAI application delivery; no evidence of enterprise customer-facing engineering or systems integration work.
+    [card 5/25] Evan Anderson — AI Developer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a 2022 master's graduation and career starting around 2024, this candidate has fewer than 5 years of experience, and the thin career history (Data Scientist at McKinsey/QuantumBlack, then AI Developer at Newell Brands) lacks evidence of production agentic/GenAI delivery at the IC5-IC6 level required.
+    [early-exit] 5/5 facial_no (100%) — breaking page
+
+  ──────────────────────────────────────────────────
+  PAGE REPORT: String #1 | Compound / Targets the HARD GATE capability — production agentic delive | Page 16 | 655 results
+  ──────────────────────────────────────────────────
+
+  Skipped from preview (5):
+    FACIAL_NO: 5 candidates
+
+  Running totals — Saved: 18 | Facial YES: 24
+  [adapt] Opus (paginate): stop — The string has been productive overall — 18 saves from 220 candidates (8.2% save rate) is strong for this brief. However, signal has clearly dried up in recent pages. The last save was on page 12 (Chelse Tsai-Simek), and pages 13-16 (approximately 55 candidates) have produced zero saves and zero Facial YES opens. The pattern across the last 4 pages is uniformly early-career/junior profiles and classical ML/data science trajectories with no production GenAI evidence. The 655-result pool has been well-mined through 16 pages (~220 candidates), and the remaining results are increasingly low-quality. Time to move to the next search string.
+  [adapt] Opus says STOP — signal exhausted.
+
+  Session: 1/29 strings | 220 evaluated | 24 facial YES | 18 saves | 0 refined
+
+────────────────────────────────────────────────────────────
+  String #2: Compound / Ultra-precision Type B string. These specific agentic framew
+  [Compound Batch 1 / Compound / Precision]
+────────────────────────────────────────────────────────────
+
+  [cadence] 26min of activity — pausing 176s to look human...
+  [cadence] Resuming.
+  Entering Boolean: ("LangGraph" OR "PydanticAI" OR "DSPy" OR "CrewAI" OR "AutoGen" OR "Semantic Ker...
+  Results: 1.4K+ (parsed: 1400)
+  [phase] PAGINATE — 1400 results, proceeding directly
+
+  --- Page 1 [PAGINATE] (refinement depth: 0) ---
+  Reviewing 25 card slots sequentially
+    [card 1/25] Brian Wan — Senior AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Senior AI Engineer at ASAPP (an enterprise conversational AI company) with a headline explicitly mentioning Generative AI, combined with a trajectory from ML Engineer at IBM → Senior SWE at DXC → Senior AI Engineer, suggests production GenAI delivery in an enterprise customer-facing context with strong backend engineering foundations.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (6 chunks) → Pattern: focused_reader
+    [profile] Expanded 1 collapsed section(s)
+    Profile text size: 7 KB
+    Final judgment (Opus)...
+    [SAVE] Strong direct fit — currently building production multi-agent workflows, RAG pipelines, and eval frameworks at ASAPP with 10 years of hands-on engineering depth; lacks explicit client-facing deployment experience but core technical bar is clearly met.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 4.4s, scrolled back 2 chunks
+    [card 2/25] Randy C. — Founding Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] With a 2023 bachelor's degree and career history starting in 2021, this candidate has fewer than 5 years of experience, placing them in the early-career fast exit category despite relevant-sounding titles.
+    [card 3/25] Eddie Costantini — Principal AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Headline explicitly states "building with Large Language Models (LLMs) and Agents" as a Principal AI Engineer, with a trajectory from Lead Data Scientist through Founding ML Engineer at a startup to current principal-level AI role — directly signals production agentic/GenAI delivery capability.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (12 chunks) → Pattern: focused_reader
+    [profile] Expanded 3 collapsed section(s)
+    Profile text size: 15 KB
+    Final judgment (Opus)...
+    [SAVE] Strong direct fit — Principal AI Engineer currently building production RAG pipelines, autonomous agents, evals, and hybrid retrieval with clear architectural ownership; 8-year hands-on trajectory with deep ML roots and ideal seniority band; may need to probe client-facing delivery experience in screen.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 3.9s, scrolled back 2 chunks
+    [card 4/25] Nilay Jhaveri — Lead Software Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] "Certified AI Engineer" headline combined with Lead Engineer at Bloomberg, plus founding/principal engineer roles at multiple startups (2022-2024) during the GenAI wave, suggests hands-on senior IC with plausible production GenAI delivery and architectural depth worth verifying.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (15 chunks) → Pattern: skipper
+    [profile] Expanded 2 collapsed section(s)
+    Profile text size: 13 KB
+    Final judgment (Opus)...
+    [REJECT] Seasoned Wall Street backend engineer with 25+ years of Java/distributed systems experience but no credible production GenAI, agentic, or ML delivery; single LLM bullet is a thin API wrapper POC — does not meet the technical bar for this role.
+    [profile-read] REJECT verdict → closing in 0.9s
+    [card 5/25] Anubhav Ghildiyal — Forward Deployed AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Current title is literally "Forward Deployed AI Engineer" at an AI data company (Nexla), with a trajectory showing AI Engineer and Senior Software Engineer roles, directly matching the production agentic/GenAI delivery capability area — though the career is relatively short (~6 years post-undergrad), the title and trajectory alignment warrant a full read.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (9 chunks) → Pattern: focused_reader
+    [profile] Expanded 1 collapsed section(s)
+    Profile text size: 7 KB
+    Final judgment (Opus)...
+    [SAVE] Early-career builder with real GenAI hands-on work (RAG, fine-tuning, multi-agent) and solid backend foundations, but production depth and seniority are thin for IC5-IC6; worth a screen to assess Nexla work and architectural maturity, but expect the candidate may be slightly under-leveled.
+    Saved to LinkedIn pipeline
+    [profile-read] SAVE verdict → lingering 8.0s, scrolled back 2 chunks
+    [card 6/25] Alexandros Karales — Lead AI & Data Analytics Instructor
+    Facial judgment (Opus)...
+    [FACIAL_NO] The trajectory shows an instructor/educator role, a director at a small AGI company with no clear production delivery evidence, and a long-running solo consultancy — no specific signal of production agentic/GenAI application delivery, enterprise systems integration, or hands-on IC engineering at the required level.
+    [card 7/25] Nico Young — Lead AI Engineer
+    Facial judgment (Opus)...
+    [FACIAL_NO] The career history shows only ~1.5 years of visible experience across three positions starting in 2024, indicating an early-career profile with fewer than 5 years of experience, falling below the seniority bar for an IC5-IC6 role despite relevant-sounding AI titles.
+    [card 8/25] Wassim LaCorchy — Principal Software Engineer - Applied AI
+    Facial judgment (Opus)...
+    [FACIAL_NO] The core of the career is Solutions Architect at AWS (2021–2025), which is a cloud-vendor pre-sales/solutioning role — a non-fit pattern — and the very brief Principal Software Engineer - Applied AI stint at Lennar (2025–2025) is too short to constitute meaningful production GenAI delivery evidence, while the Co-Founder role is unresolvable from the snippet.
+  [glance] proceed (0.60): 1/3 noise signals but LLM says proceed.
+    [card 9/25] Sruthi R. — Senior Software Engineer
+    [skip] Sruthi R. — already saved in LinkedIn pipeline
+    [card 10/25] Tyler Dodd — Senior Forward Deployed engineer
+    Facial judgment (Opus)...
+    [FACIAL_YES] Current title is literally "Senior Forward Deployed Engineer" — the exact role title — at Crowe (a consulting firm), suggesting hands-on customer-facing engineering delivery, and the progression from Microsoft Cloud consulting into an FDE role is a direct trajectory match worth a full profile review to assess GenAI depth and production build evidence.
+    Opening profile for full evaluation...
+    [profile-read] Long profile (7 chunks) → Pattern: skipper
+

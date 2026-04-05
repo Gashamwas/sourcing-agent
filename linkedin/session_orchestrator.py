@@ -95,6 +95,23 @@ def _resume_has_pending_work(output_dir: str | None) -> bool:
     return any(s.get("status") in {"queued", "in_progress"} for s in strings)
 
 
+def _parse_restart_strings_arg(raw: str | None) -> list[int]:
+    """Parse a comma-separated list of string ids from --restart-strings."""
+    if not raw:
+        return []
+
+    string_ids: list[int] = []
+    for chunk in raw.split(","):
+        part = chunk.strip()
+        if not part:
+            continue
+        try:
+            string_ids.append(int(part))
+        except ValueError as exc:
+            raise ValueError(f"Invalid string id '{part}' in --restart-strings") from exc
+    return string_ids
+
+
 # ──────────────────────────────────────────────────────────────────────
 # Sourcing session runner
 # ──────────────────────────────────────────────────────────────────────
@@ -109,6 +126,7 @@ async def _run_sourcing_session(
     decoy: DecoyAgent,
     session_duration: float,
     restart_string_id: int | None = None,
+    restart_string_ids: list[int] | None = None,
 ) -> dict:
     """Run one sourcing session with governor limits and decoy interleaving.
 
@@ -220,7 +238,11 @@ async def _run_sourcing_session(
         if search_config:
             await pipeline.run()
         else:
-            await pipeline.run_full(resume=resume, restart_string_id=restart_string_id)
+            await pipeline.run_full(
+                resume=resume,
+                restart_string_id=restart_string_id,
+                restart_string_ids=restart_string_ids,
+            )
         shutdown_reason = "pipeline_complete"
 
     except SessionExpired:
@@ -271,6 +293,7 @@ async def run_day_cycle(
     single_session: bool = False,
     resume: bool = False,
     restart_string_id: int | None = None,
+    restart_string_ids: list[int] | None = None,
 ):
     """Run a full day cycle: sourcing sessions interleaved with dormant periods."""
 
@@ -353,6 +376,7 @@ async def run_day_cycle(
                 decoy=decoy,
                 session_duration=session_duration,
                 restart_string_id=restart_string_id,
+                restart_string_ids=restart_string_ids,
             )
         except (KeyboardInterrupt, Exception) as e:
             result = {"shutdown_reason": f"interrupted: {type(e).__name__}", "stats": {}}
@@ -374,6 +398,7 @@ async def run_day_cycle(
         # After first session, subsequent sessions should resume (without restart)
         resume = True
         restart_string_id = None
+        restart_string_ids = None
 
         if single_session or stop_event.is_set():
             break
@@ -455,6 +480,11 @@ def main():
     parser.add_argument("--resume", action="store_true", help="Resume from existing progress")
     parser.add_argument("--restart-string", type=int, default=None, help="Reset a specific string to page 1 (use with --resume)")
     parser.add_argument(
+        "--restart-strings",
+        default=None,
+        help="Reset multiple strings to page 1 before resuming, e.g. 4,11,12,16,27",
+    )
+    parser.add_argument(
         "--input-mode",
         choices=["concurrent", "away"],
         default="concurrent",
@@ -480,8 +510,16 @@ def main():
         print(f"Error: Brief file not found: {args.brief}")
         sys.exit(1)
 
-    # --restart-string implies --resume
-    if args.restart_string is not None and not args.resume:
+    try:
+        restart_string_ids = _parse_restart_strings_arg(args.restart_strings)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    if args.restart_string is not None:
+        restart_string_ids.append(args.restart_string)
+
+    # Any restart request implies --resume
+    if (args.restart_string is not None or restart_string_ids) and not args.resume:
         args.resume = True
 
     asyncio.run(run_day_cycle(
@@ -492,6 +530,7 @@ def main():
         single_session=args.single_session,
         resume=args.resume,
         restart_string_id=args.restart_string,
+        restart_string_ids=restart_string_ids,
     ))
 
 

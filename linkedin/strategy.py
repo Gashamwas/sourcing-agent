@@ -11,10 +11,306 @@ Two main functions:
 
 from __future__ import annotations
 import json
+import re
 import sys
 from shared.schemas import KitString, ExecutionPlan, BlockReport, AdaptationResponse, SearchString
 from shared.llm_clients import opus_llm
 from shared.brief_loader import Brief
+
+
+_CANONICAL_FRAMEWORK_PATTERNS = (
+    "langgraph",
+    "pydanticai",
+    "dspy",
+    "crewai",
+    "autogen",
+    "semantic kernel",
+    "model context protocol",
+    "mcp",
+    "browser-use",
+    "browser use",
+    "playwright",
+    "litellm",
+    "langsmith",
+    "ragas",
+    "deepeval",
+)
+
+_CANONICAL_COMPANY_PATTERNS = (
+    "palantir",
+    "scale ai",
+    "snorkel",
+    "anthropic",
+    "openai",
+    "cohere",
+    "cognition",
+    "cursor",
+    "anduril",
+    "dataiku",
+    "datarobot",
+    "c3 ai",
+    "c3.ai",
+)
+
+_CANONICAL_TITLE_PATTERNS = (
+    "forward deployed",
+    "forward-deployed",
+    "customer engineer",
+    "customer engineering",
+    "solutions engineer",
+    "solutions engineering",
+    "implementation engineer",
+    "implementation engineering",
+    "delivery engineer",
+    "delivery engineering",
+    "field engineer",
+    "field engineering",
+)
+
+_CANONICAL_BROAD_PATTERNS = (
+    "agentic workflow",
+    "agentic workflows",
+    "agentic system",
+    "agentic systems",
+    "agent orchestration",
+    "tool calling",
+    "function calling",
+)
+
+_EDGE_CASE_PATTERNS = (
+    "copilot",
+    "co-pilot",
+    "internal copilot",
+    "knowledge management",
+    "knowledge assistant",
+    "intelligent search",
+    "semantic search",
+    "document processing",
+    "document understanding",
+    "document intelligence",
+    "contract analysis",
+    "compliance workflow",
+    "support automation",
+    "developer productivity",
+    "internal tools",
+    "technical discovery",
+    "solution design",
+    "solutions delivery",
+    "requirements gathering",
+    "trusted advisor",
+    "technical consulting",
+    "reference architecture",
+    "reference implementation",
+    "deployment toolkit",
+    "accelerator",
+    "reusable module",
+    "reusable modules",
+    "delivery playbook",
+    "workflow engine",
+    "human in the loop",
+    "human-in-the-loop",
+    "semantic cache",
+    "evaluation harness",
+    "eval harness",
+    "observability",
+    "tracing",
+    "prompt logging",
+    "latency optimization",
+    "cost optimization",
+    "agent routing",
+    "event-driven",
+    "event driven",
+    "temporal",
+    "fastapi",
+)
+
+_EDGE_CASE_COMPANY_PATTERNS = (
+    "deloitte",
+    "accenture",
+    "bcg",
+    "bcg x",
+    "mckinsey",
+    "quantumblack",
+    "slalom",
+    "thoughtworks",
+    "epam",
+    "globant",
+    "ci&t",
+    "harvey",
+    "casetext",
+    "ironclad",
+    "robin ai",
+    "evenup",
+    "notion",
+    "glean",
+    "moveworks",
+    "writer",
+    "hebbia",
+    "vellum",
+)
+
+_MAX_PROMOTED_EDGE_CASE_GAPS = 3
+
+
+def _brief_targets_edge_case_opening(brief: Brief) -> bool:
+    """Whether the brief explicitly calls for a tapped-market edge-case opening."""
+    haystack = " ".join(
+        [brief.role_description, brief.intake_notes, *(brief.instructions or [])]
+    ).lower()
+    triggers = (
+        "tapped",
+        "exhausted",
+        "heavily worked",
+        "already been worked",
+        "obvious pool",
+        "edge-case",
+        "edge case",
+        "nooks and crannies",
+    )
+    return any(trigger in haystack for trigger in triggers)
+
+
+def _opening_priority(boolean: str, rationale: str = "") -> tuple[int, int]:
+    """Classify how suitable a string is for an edge-case opening sequence.
+
+    Returns (bucket, score):
+      bucket 0 = edge-case / adjacent opening string
+      bucket 1 = neutral / mixed
+      bucket 2 = canonical cleanup string
+    """
+    text = f"{boolean} {rationale}".lower()
+
+    framework_hits = sum(1 for pattern in _CANONICAL_FRAMEWORK_PATTERNS if pattern in text)
+    company_hits = sum(1 for pattern in _CANONICAL_COMPANY_PATTERNS if pattern in text)
+    title_hits = sum(1 for pattern in _CANONICAL_TITLE_PATTERNS if pattern in text)
+    broad_hits = sum(1 for pattern in _CANONICAL_BROAD_PATTERNS if pattern in text)
+    edge_hits = sum(1 for pattern in _EDGE_CASE_PATTERNS if pattern in text)
+    edge_hits += sum(1 for pattern in _EDGE_CASE_COMPANY_PATTERNS if pattern in text)
+
+    has_exact_fde = bool(
+        re.search(r"\bforward deployed\b|\bforward-deployed\b|\bfde\b|\bfdse\b", text)
+    )
+    framework_first = framework_hits >= 2 and edge_hits == 0
+    company_first = company_hits >= 2 and edge_hits == 0
+    title_first = (title_hits >= 1 or has_exact_fde) and edge_hits == 0
+    broad_core = broad_hits >= 2 and edge_hits == 0
+
+    canonical = has_exact_fde or framework_first or company_first or title_first or broad_core
+    edge_case = edge_hits >= 2 or (edge_hits >= 1 and not canonical)
+
+    if edge_case and not canonical:
+        bucket = 0
+    elif canonical and edge_hits <= 1:
+        bucket = 2
+    else:
+        bucket = 1
+
+    score = (
+        edge_hits * 5
+        - framework_hits * 4
+        - company_hits * 3
+        - title_hits * 3
+        - broad_hits * 2
+        - (4 if has_exact_fde else 0)
+    )
+    return bucket, score
+
+
+def _sort_strings_for_edge_case_opening(strings: list[dict]) -> list[dict]:
+    annotated: list[tuple[tuple[int, int, int], dict]] = []
+    for idx, item in enumerate(strings):
+        bucket, score = _opening_priority(
+            item.get("boolean", ""),
+            item.get("rationale", "") or item.get("gap", ""),
+        )
+        annotated.append(((bucket, -score, idx), item))
+    annotated.sort(key=lambda pair: pair[0])
+    return [item for _, item in annotated]
+
+
+def _augment_novelty_metrics(plan: ExecutionPlan) -> None:
+    success_metric = (
+        "At least 50% of saves from the first 2 blocks come from adjacent or edge-case "
+        "pools rather than exact-title FDE, framework-first, or canonical frontier-company strings"
+    )
+    pivot_trigger = (
+        "Early saves cluster in exact-title FDE, framework-first, or canonical frontier-company "
+        "pools without surfacing adjacent populations"
+    )
+    sequencing_trigger = (
+        "The opening block relies mainly on broad 'agentic + production' or direct framework-name "
+        "strings instead of edge-case transfer populations"
+    )
+
+    if success_metric not in plan.architecture_success_criteria:
+        plan.architecture_success_criteria.append(success_metric)
+    if pivot_trigger not in plan.architecture_pivot_triggers:
+        plan.architecture_pivot_triggers.append(pivot_trigger)
+    if sequencing_trigger not in plan.architecture_pivot_triggers:
+        plan.architecture_pivot_triggers.append(sequencing_trigger)
+
+
+def _rebalance_execution_plan_for_edge_case_opening(plan: ExecutionPlan) -> str:
+    """Promote edge-case coverage gaps and demote canonical opening strings."""
+    promoted_gaps: list[dict] = []
+    remaining_gaps: list[dict] = []
+
+    for gap in plan.coverage_gaps:
+        boolean = gap.get("suggested_boolean")
+        if not boolean:
+            remaining_gaps.append(gap)
+            continue
+
+        bucket, score = _opening_priority(boolean, f"{gap.get('gap', '')} {gap.get('rationale', '')}")
+        if bucket != 2 and score >= 20 and len(promoted_gaps) < _MAX_PROMOTED_EDGE_CASE_GAPS:
+            promoted_gaps.append(
+                {
+                    "boolean": boolean,
+                    "rationale": f"Promoted coverage gap — {gap.get('gap', gap.get('rationale', 'edge-case population'))}",
+                    "vocabulary_sources": "coverage_gap",
+                }
+            )
+        else:
+            remaining_gaps.append(gap)
+
+    combined = promoted_gaps + list(plan.generated_strings)
+    plan.generated_strings = _sort_strings_for_edge_case_opening(combined)
+    plan.coverage_gaps = remaining_gaps
+    _augment_novelty_metrics(plan)
+
+    canonical_early = sum(
+        1
+        for item in plan.generated_strings[:8]
+        if _opening_priority(item.get("boolean", ""), item.get("rationale", ""))[0] == 2
+    )
+    return (
+        f"promoted {len(promoted_gaps)} edge-case coverage gaps; "
+        f"reordered opening to reduce canonical cleanup strings "
+        f"(canonical in first 8: {canonical_early})"
+    )
+
+
+def _rebalance_adaptation_for_edge_case_opening(
+    adaptation: AdaptationResponse,
+    remaining_strings: list[SearchString],
+) -> AdaptationResponse:
+    adaptation.new_strings = _sort_strings_for_edge_case_opening(adaptation.new_strings)
+
+    remaining_by_id = {ss.id: ss for ss in remaining_strings}
+    for reorder in adaptation.reorder:
+        if reorder.get("move_to") != "next":
+            continue
+        ss = remaining_by_id.get(reorder.get("string_id"))
+        if not ss:
+            continue
+        bucket, _score = _opening_priority(ss.boolean, ss.name)
+        if bucket == 2:
+            reorder["move_to"] = "last"
+            reason = reorder.get("reason", "").strip()
+            suffix = "Demoted because this is a canonical cleanup string in a tapped market."
+            reorder["reason"] = f"{reason} {suffix}".strip()
+
+    return adaptation
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +342,9 @@ def form_strategy(
     try:
         result = opus_llm(system, user_prompt, expect_json=True, max_tokens=16384)
         plan = ExecutionPlan.from_dict(result)
+        if _brief_targets_edge_case_opening(brief):
+            summary = _rebalance_execution_plan_for_edge_case_opening(plan)
+            print(f"  Edge-case rebalance: {summary}")
         plan.original_architecture = plan.architecture  # Set once, never updated on pivot
         if plan.architecture:
             print(f"  Architecture: {plan.architecture} — {plan.architecture_rationale[:120]}")
@@ -166,6 +465,28 @@ Place strings anchored primarily to RL/RLHF/post-training vocabulary in the SECO
 - RL practitioners also appear in non-RL strings (someone building RL environments shows up on "simulation" or "agent" strings too — and that incidental RL signal is often stronger than the boilerplate RLHF keyword match)
 - By the time RL strings execute, the adaptation loop will have learned from earlier strings' signal/noise patterns, producing more strategic RL searches than the obvious keyword combinations
 This is NOT deprioritization — all RL strings still execute. It is sequencing for maximum marginal yield.
+
+### Tapped-Market / Edge-Case Opening (MANDATORY when the brief says the obvious pool is exhausted)
+
+If the brief's instructions or intake notes say the market is tapped, exhausted, or already heavily worked, then your OPENING SEQUENCE must prioritize non-obvious adjacent populations rather than the canonical role vocabulary.
+
+Use this mental loop:
+1. First ask: what would a generally solid technical sourcer search if they were doing a competent but standard pass for this role?
+2. Then ask: which same-caliber candidates would that standard pass systematically miss because they use different titles, different product language, or sit in adjacent org structures?
+3. Generate your opening strings primarily for THOSE missed populations.
+
+For the FIRST 8 strings:
+- At least 5 must target edge-case or transfer populations
+- Prefer intersections like backend/platform + copilots, internal AI platforms, delivery accelerators, reference architectures, observability/tracing/evals, product/problem-language AI builders, consultancy ICs with build evidence, or vertical SaaS builders
+- Do NOT front-load exact-title strings, company-first canonical employer strings, or framework-first strings where a fashionable tool/library name is the main qualifier
+- Do NOT front-load broad core strings like ("LLM" OR "GenAI" OR "agentic") AND ("production" OR "deployed") unless they are crossed with a non-obvious adjacent population qualifier
+
+The canonical pool still matters, but it belongs in later cleanup passes once the edge-case populations have been tested.
+
+NOVELTY ACCOUNTING (MANDATORY for tapped markets):
+- In a tapped market, productivity alone is not enough. Saves from exact-title FDEs, direct frontier-company pools, and framework-first strings are useful confirmation but LOW-NOVELTY signal.
+- Do NOT interpret a high save rate from those canonical pools as proof the opening sequence is correct.
+- When you set architecture success criteria and pivot triggers, include at least one metric about novelty or pool mix, not just save rate and result count.
 
 ### Architecture-Specific Modifiers
 
@@ -478,6 +799,19 @@ When generating new strings, combine terms from the kit vocabulary with domain q
 
 Include BOTH broad recall strings AND narrow precision "sniper" strings that use specific tool/framework/benchmark names from the kit vocabulary — terms only real practitioners would have on their profiles.
 
+If the brief says the obvious pool is tapped, prefer generating new strings that expand productive edge-case populations before emitting direct framework-name cleanup strings or exact-title cleanup strings.
+
+When adapting, continue using the same loop: identify what a standard sourcer would search next, then push one layer outward toward adjacent but same-caliber populations that the standard next step would still miss.
+
+In tapped markets, evaluate BLOCK QUALITY on two axes:
+1. productivity: saves, facial pass rate, result quality
+2. novelty: whether the saves came from adjacent populations versus exact-title FDEs, framework-first strings, or canonical frontier-company pools
+
+If a string is productive but mostly confirms the obvious pool, treat it as cleanup signal, not as the template for what should come next. In that case:
+- prefer reordering similar queued strings later
+- prefer generating adjacent expansions instead of "more of the same"
+- recommend a pivot if the opening sequence is succeeding only in low-novelty pools
+
 ## LinkedIn Boolean Rules (MANDATORY)
 - LinkedIn does NOT stem: "model" ≠ "models" — include all morphological variants
 - LinkedIn IS substring-embedded: "reward model" matches "reward model development" — never add superstrings
@@ -516,5 +850,7 @@ Return valid JSON only."""
     user_prompt += "\nSuggest adaptations."
 
     result = opus_llm(system, user_prompt, expect_json=True)
-
-    return AdaptationResponse.from_dict(result)
+    adaptation = AdaptationResponse.from_dict(result)
+    if _brief_targets_edge_case_opening(brief):
+        adaptation = _rebalance_adaptation_for_edge_case_opening(adaptation, remaining_strings)
+    return adaptation

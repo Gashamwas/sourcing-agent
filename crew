@@ -13,17 +13,39 @@ RECRUITING_TOOLS="$(cd "$REPO_ROOT/.." && pwd)"
 # ── helpers ──────────────────────────────────────────────────────────
 
 _claude() {
-  claude --bare -p "$1" \
-    --allowedTools "Read,Glob,Grep,Bash(wc *),Bash(cat *),Bash(head *),Bash(tail *),Bash(python3 *),Bash(jq *),Bash(git diff *),Bash(git log *),Bash(git status *)" \
-    -C "${2:-$REPO_ROOT}" \
-    "${@:3}"
+  (cd "${2:-$REPO_ROOT}" && claude -p "$1" \
+    --allowedTools "Read,Glob,Grep,Bash(wc:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(python3:*),Bash(jq:*),Bash(git diff:*),Bash(git log:*),Bash(git status:*)" \
+    "${@:3}")
 }
 
 _claude_write() {
-  claude --bare -p "$1" \
-    --allowedTools "Read,Glob,Grep,Write,Edit,Bash(wc *),Bash(cat *),Bash(head *),Bash(tail *),Bash(python3 *),Bash(jq *),Bash(git diff *),Bash(git log *),Bash(git status *),Bash(git commit *),Bash(git add *)" \
-    -C "${2:-$REPO_ROOT}" \
-    "${@:3}"
+  (cd "${2:-$REPO_ROOT}" && claude -p "$1" \
+    --allowedTools "Read,Glob,Grep,Write,Edit,Bash(wc:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(python3:*),Bash(jq:*),Bash(git diff:*),Bash(git log:*),Bash(git status:*),Bash(git commit:*),Bash(git add:*)" \
+    "${@:3}")
+}
+
+# ── 0. projects: list linkedin project IDs and role names ────────────
+
+_list_projects() {
+  printf "  %-12s  %-40s  %s\n" "PROJECT ID" "ROLE" "CANDIDATES"
+  printf "  %-12s  %-40s  %s\n" "──────────" "────" "──────────"
+  for f in "$REPO_ROOT"/config/brief-*.json; do
+    [[ -f "$f" ]] || continue
+    python3 -c "
+import json, os
+d = json.load(open('$f'))
+pid = d.get('linkedin_project_id','')
+if not pid: exit()
+name = d.get('linkedin_project','') or d.get('role_title','')
+hist = '$REPO_ROOT/output/candidate_history-' + pid + '.jsonl'
+count = sum(1 for _ in open(hist)) if os.path.exists(hist) else 0
+print(f'  {pid:<12}  {name:<40}  {count}')
+" 2>/dev/null
+  done | sort -u
+}
+
+cmd_projects() {
+  _list_projects
 }
 
 # ── 1. brief: generate a v2 brief from a JD ─────────────────────────
@@ -68,9 +90,7 @@ cmd_intel() {
   if [[ -z "$project_id" ]]; then
     echo "Usage: crew intel <linkedin_project_id>"
     echo ""
-    echo "Available projects (from candidate_history files):"
-    ls "$REPO_ROOT/output"/candidate_history-*.jsonl 2>/dev/null | \
-      sed 's/.*candidate_history-//; s/\.jsonl//'
+    _list_projects
     exit 1
   fi
 
@@ -106,9 +126,7 @@ cmd_diagnose() {
   if [[ -z "$project_id" ]]; then
     echo "Usage: crew diagnose <linkedin_project_id> [linkedin|github]"
     echo ""
-    echo "Available projects (from candidate_history files):"
-    ls "$REPO_ROOT/output"/candidate_history-*.jsonl 2>/dev/null | \
-      sed 's/.*candidate_history-//; s/\.jsonl//'
+    _list_projects
     exit 1
   fi
 
@@ -257,6 +275,7 @@ cmd_uncommitted() {
 # ── dispatch ─────────────────────────────────────────────────────────
 
 case "${1:-help}" in
+  projects)    shift; cmd_projects "$@" ;;
   brief)       shift; cmd_brief "$@" ;;
   intel)       shift; cmd_intel "$@" ;;
   diagnose)    shift; cmd_diagnose "$@" ;;
@@ -267,6 +286,10 @@ case "${1:-help}" in
 crew — headless Claude Code utilities for the sourcing agent
 
 Commands:
+  projects
+      List LinkedIn project IDs, role names, and candidate counts.
+      Example: crew projects
+
   brief <jd-path> [role-slug] [version]
       Generate a v2 sourcing brief from a job description.
       Example: crew brief config/jd-sre-lead.txt sre-lead v1

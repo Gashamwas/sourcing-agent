@@ -70,6 +70,37 @@ def _normalize_title_family(title: str) -> str:
     return t
 
 
+_PARENS_SUFFIX = _re.compile(r"\s*\([^)]*\)")
+_NON_ALNUM = _re.compile(r"[^a-z0-9]+")
+_BROWSER_DISCONNECT_PATTERNS = (
+    "target crashed",
+    "target closed",
+    "connection closed",
+    "session closed",
+    "broken pipe",
+    "browser has been closed",
+    "page closed",
+    "context closed",
+    "page.createisolatedworld",
+    "page.addscripttoevaluateonnewdocument",
+    "cannot get world",
+)
+
+
+def _normalize_candidate_name_key(name: str) -> str:
+    """Collapse minor punctuation/parenthetical variants when matching saved profiles."""
+    t = _PARENS_SUFFIX.sub("", (name or "").lower())
+    t = t.replace(".", " ")
+    t = _NON_ALNUM.sub(" ", t)
+    return " ".join(t.split())
+
+
+def _is_browser_disconnect_error(error: BaseException | str) -> bool:
+    """Detect browser/CDP failures that should trigger reconnect logic."""
+    text = str(error).lower()
+    return any(pattern in text for pattern in _BROWSER_DISCONNECT_PATTERNS)
+
+
 class Pipeline:
     """Orchestrates the multi-model sourcing pipeline."""
 
@@ -359,7 +390,12 @@ class Pipeline:
         print(f"  Results written to: {rejudge_path}")
         print(f"{'=' * 60}")
 
-    async def run_full(self, resume: bool = False, restart_string_id: int | None = None) -> None:
+    async def run_full(
+        self,
+        resume: bool = False,
+        restart_string_id: int | None = None,
+        restart_string_ids: list[int] | None = None,
+    ) -> None:
         """Autonomous search evolution: extract kit → strategy → execute → adapt."""
         from shared.kit_extractor import extract_kit_strings
         from linkedin.strategy import form_strategy, adapt_after_block
@@ -417,9 +453,14 @@ class Pipeline:
                 # Preserve persisted queue order. Adaptive strings may be inserted
                 # "next in queue", which is not always the same as numeric ID order.
 
-                # If restarting a specific string, reset it and clean up its output
-                if restart_string_id is not None:
-                    self._restart_string(progress, restart_string_id)
+                restart_ids: list[int] = []
+                if restart_string_ids:
+                    restart_ids.extend(restart_string_ids)
+                elif restart_string_id is not None:
+                    restart_ids.append(restart_string_id)
+
+                if restart_ids:
+                    self._restart_strings(progress, restart_ids)
 
                 # Rebuild dedup set from cross-session history only
                 self._seen_urls = set()
@@ -565,8 +606,7 @@ class Pipeline:
                     )
                     raise
                 except Exception as e:
-                    err_msg = str(e).lower()
-                    if "target crashed" in err_msg or "connection closed" in err_msg or "broken pipe" in err_msg:
+                    if _is_browser_disconnect_error(e):
                         print(f"\n  [!] Browser crashed during string #{search_string.id}. Attempting reconnect...")
                         self._checkpoint_progress(
                             progress,
@@ -925,12 +965,28 @@ class Pipeline:
         card_index: int,
     ) -> CandidateSnippet | None:
         """Focus one result card, pause briefly, and extract its snippet."""
-        await self.browser.focus_card_for_review(card_index)
-        await asyncio.sleep(
-            human_delay_correlated(random.uniform(0.7, 1.8), channel="card_glance")
-        )
+        try:
+            await self.browser.focus_card_for_review(card_index)
+            await asyncio.sleep(
+                human_delay_correlated(random.uniform(0.7, 1.8), channel="card_glance")
+            )
+            snapshot = await self.browser.get_card_snapshot(card_index)
+        except Exception as e:
+            print(f"    [warn] Card {card_index + 1} could not be extracted: {e}")
+            log_event(
+                self.log_path,
+                "card_extract_error",
+                string_id=search_string.id,
+                page=page_num,
+                card_index=card_index + 1,
+                error=str(e),
+            )
+            try:
+                await self.browser.go_back_to_results()
+            except Exception:
+                pass
+            return None
 
-        snapshot = await self.browser.get_card_snapshot(card_index)
         innertext = (snapshot.get("innertext") or "").strip()
         if not innertext:
             print(f"    [warn] Card {card_index + 1} rendered without readable text")
@@ -978,6 +1034,13 @@ class Pipeline:
         progress: Progress | None = None,
     ) -> GlanceResult | None:
         """Review the current results page top-to-bottom, card by card."""
+        # V2 briefs: use batch facial triage (one LLM call for all candidates on page)
+        if self.brief_obj and self.brief_obj.has_v2_schema:
+            return await self._review_page_batch(
+                search_string, page_num, result_count, page_report,
+                all_candidates, string_stats, progress,
+            )
+
         slot_count = await self.browser.get_card_slot_count()
         if slot_count == 0:
             # Fallback if the list has not hydrated yet.
@@ -1141,6 +1204,328 @@ class Pipeline:
             if progress and hasattr(self, "_session_expired") and self._session_expired.is_set():
                 progress.save(str(self.progress_path))
                 raise SessionExpired("session_duration_cap")
+
+            if progress and hasattr(self, "_pause_requested") and self._pause_requested.is_set():
+                self._pause_requested.clear()
+                progress.save(str(self.progress_path))
+                try:
+                    await asyncio.wait_for(self._resume_event.wait(), timeout=300)
+                except asyncio.TimeoutError:
+                    print("  [!] Resume timeout (5 min) — continuing without decoy burst.")
+                    self._resume_event.set()
+
+        return glance_result
+
+    async def _review_page_batch(
+        self,
+        search_string: SearchString,
+        page_num: int,
+        result_count: int,
+        page_report: "_PageReport",
+        all_candidates: list[dict],
+        string_stats: dict,
+        progress: Progress | None = None,
+    ) -> GlanceResult | None:
+        """Batch-mode page review for V2 briefs.
+
+        Three phases:
+          1. Extract all card snippets (browser interaction, no LLM calls)
+          2. Batch facial triage (one LLM call for all eligible snippets)
+          3. Full evaluation for FACIAL_YES candidates (sequential profile opens)
+        """
+        from shared.judger import facial_judge_batch, is_failure_decision
+
+        slot_count = await self.browser.get_card_slot_count()
+        if slot_count == 0:
+            fallback_count = await self.browser.scroll_to_load_all_results()
+            slot_count = fallback_count or await self.browser.get_card_count()
+
+        print(f"  Reviewing {slot_count} card slots (batch mode)", flush=True)
+        if slot_count == 0:
+            return None
+
+        # ── Phase 1: Extract all card snippets ──────────────────────────
+        glance_result = None
+        preview_snippets: list[CandidateSnippet] = []
+        eligible_snippets: list[CandidateSnippet] = []
+
+        for card_index in range(slot_count):
+            snippet = await self._extract_card_snippet(search_string, page_num, card_index)
+            if not snippet:
+                continue
+
+            preview_snippets.append(snippet)
+            print(
+                f"    [card {card_index + 1}/{slot_count}] {snippet.name} — "
+                f"{snippet.current_title or snippet.headline or 'preview only'}"
+            )
+
+            # Dedup check
+            url = snippet.profile_url
+            if url and (url in self._seen_urls or url in self._in_flight_urls):
+                if url in self._seen_urls:
+                    prior = self._prior_outcomes.get(url, "")
+                    if prior in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"):
+                        print(f"    [dup] {snippet.name} — saved in prior session")
+                    elif prior == "REJECT":
+                        print(f"    [dup] {snippet.name} — rejected in prior session")
+                    elif prior in ("FACIAL_NO", "FACIAL_SKIP"):
+                        print(f"    [dup] {snippet.name} — {prior} in prior session")
+                    elif prior == "FACIAL_YES":
+                        print(f"    [re-eval] {snippet.name} — facial YES in prior session, completing evaluation")
+                        self._seen_urls.discard(url)
+                    else:
+                        print(f"    [dup] {snippet.name} — already processed")
+                if url in self._seen_urls or url in self._in_flight_urls:
+                    page_report.add_skip_preview(snippet.name, "duplicate")
+                    string_stats["duplicates"] += 1
+                    await self._preview_skip_pause("duplicate")
+                    continue
+
+            if snippet.already_saved:
+                print(f"    [skip] {snippet.name} — already saved in LinkedIn pipeline")
+                page_report.add_skip_preview(snippet.name, "already_saved")
+                string_stats.setdefault("already_saved_skips", 0)
+                string_stats["already_saved_skips"] += 1
+                await self._preview_skip_pause("already_saved")
+                continue
+
+            # Employer blacklist check (no LLM call)
+            blacklisted = False
+            if self.brief_obj.employer_blacklist and snippet.current_company:
+                company_lower = snippet.current_company.lower()
+                for blocked in self.brief_obj.employer_blacklist:
+                    if blocked.lower() in company_lower:
+                        print(f"    [BLACKLIST] {snippet.name} — '{snippet.current_company}' matches '{blocked}'")
+                        self.stats.setdefault("blacklist_skips", 0)
+                        self.stats["blacklist_skips"] += 1
+                        if page_report:
+                            page_report.add_skip_preview(snippet.name, f"BLACKLIST: {blocked}")
+                        bl_decision = OpusDecision(
+                            stage="facial", decision="FACIAL_NO", path="employer_blacklist",
+                            confidence=1.0, rationale=f"Employer blacklist: {blocked}",
+                            candidate_name=snippet.name, profile_url=snippet.profile_url,
+                        )
+                        append_jsonl(self.facial_path, bl_decision.to_dict())
+                        append_jsonl(self.history_path, {
+                            "profile_url": snippet.profile_url,
+                            "candidate_name": snippet.name,
+                            "outcome": "FACIAL_NO",
+                            "confidence": 1.0,
+                            "source_string_id": snippet.source_string_id,
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                        })
+                        self._prior_outcomes[snippet.profile_url] = "FACIAL_NO"
+                        self._mark_terminal(snippet.profile_url)
+                        all_candidates.append({
+                            "name": snippet.name, "title": snippet.current_title,
+                            "company": snippet.current_company, "headline": snippet.headline,
+                            "outcome": "facial_no", "rationale": bl_decision.rationale,
+                            "page": page_num,
+                        })
+                        string_stats["facial_no"] += 1
+                        blacklisted = True
+                        break
+            if blacklisted:
+                continue
+
+            # Eligible for batch facial
+            if snippet.profile_url:
+                self._in_flight_urls.add(snippet.profile_url)
+            append_jsonl(self.snippets_path, snippet.to_dict())
+            self.stats["snippets_extracted"] += 1
+            string_stats["candidates"] += 1
+            eligible_snippets.append(snippet)
+
+            # Glance assessment
+            if glance_result is None and len(preview_snippets) >= config.GLANCE_MIN_SNIPPETS:
+                glance_result = self._glance_assess(preview_snippets)
+                log_event(
+                    self.log_path, "glance_assess", string_id=search_string.id,
+                    page=page_num, action=glance_result.action,
+                    confidence=glance_result.confidence, signals=glance_result.signals,
+                )
+                print(
+                    f"  [glance] {glance_result.action} ({glance_result.confidence:.2f}): "
+                    f"{glance_result.summary}"
+                )
+                if glance_result.action == "reformulate":
+                    print("    [glance] Batch extraction found strong reformulation signal — stopping extraction")
+                    break
+
+            if progress and hasattr(self, "_session_expired") and self._session_expired.is_set():
+                progress.save(str(self.progress_path))
+                raise SessionExpired("session_duration_cap")
+
+        if not eligible_snippets:
+            return glance_result
+
+        # ── Phase 2: Batch facial triage ────────────────────────────────
+        print(f"  Batch facial triage: {len(eligible_snippets)} candidates in one call", flush=True)
+
+        decisions = facial_judge_batch(
+            eligible_snippets, self.brief_obj, prompt_prefix=self._tightening_prefix,
+        )
+
+        facial_yes_snippets: list[CandidateSnippet] = []
+        page_evaluated = 0
+        page_facial_no = 0
+
+        for snippet, facial in zip(eligible_snippets, decisions):
+            append_jsonl(self.facial_path, facial.to_dict())
+
+            # Handle parse/judgment failures
+            if is_failure_decision(facial.decision):
+                print(f"    [PARSE_FAILURE] {snippet.name}: {facial.rationale}")
+                self.stats.setdefault("parse_failures", 0)
+                self.stats["parse_failures"] += 1
+                if self._bias_monitor:
+                    self._bias_monitor.record_decision(DecisionRecord(
+                        candidate_id=f"{snippet.source_string_id}_p{snippet.page}_r{snippet.result_rank}",
+                        string_id=str(snippet.source_string_id),
+                        stage="facial", decision=facial.decision,
+                        confidence=facial.confidence, capability_area=None,
+                    ))
+                self._in_flight_urls.discard(snippet.profile_url)
+                all_candidates.append({
+                    "name": snippet.name, "title": snippet.current_title,
+                    "company": snippet.current_company, "headline": snippet.headline,
+                    "outcome": "error", "rationale": facial.rationale, "page": page_num,
+                })
+                continue
+
+            # Terminal facial decision — write to history
+            append_jsonl(self.history_path, {
+                "profile_url": snippet.profile_url,
+                "candidate_name": snippet.name,
+                "outcome": facial.decision,
+                "confidence": facial.confidence,
+                "source_string_id": snippet.source_string_id,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+            self._prior_outcomes[snippet.profile_url] = facial.decision
+            self._mark_terminal(snippet.profile_url)
+
+            # Bias monitoring
+            if self._bias_monitor:
+                self._bias_monitor.record_decision(DecisionRecord(
+                    candidate_id=f"{snippet.source_string_id}_p{snippet.page}_r{snippet.result_rank}",
+                    string_id=str(snippet.source_string_id),
+                    stage="facial", decision=facial.decision,
+                    confidence=facial.confidence, capability_area=None,
+                ))
+
+            if facial.decision in ("FACIAL_NO", "FACIAL_SKIP"):
+                tag = "FACIAL_NO" if facial.decision == "FACIAL_NO" else "FACIAL_SKIP"
+                print(f"    [{tag}] {snippet.name}: {facial.rationale}")
+                if facial.decision == "FACIAL_NO":
+                    self.stats["facial_no"] += 1
+                    page_facial_no += 1
+                else:
+                    self.stats.setdefault("facial_skip", 0)
+                    self.stats["facial_skip"] += 1
+                if page_report:
+                    page_report.add_skip_preview(snippet.name, f"{tag}: {facial.rationale}")
+                all_candidates.append({
+                    "name": snippet.name, "title": snippet.current_title,
+                    "company": snippet.current_company, "headline": snippet.headline,
+                    "outcome": "facial_no" if facial.decision == "FACIAL_NO" else "facial_skip",
+                    "rationale": facial.rationale, "page": page_num,
+                })
+                page_evaluated += 1
+            else:
+                # FACIAL_YES
+                print(f"    [FACIAL_YES] {snippet.name}: {facial.rationale}")
+                self.stats["facial_yes"] += 1
+                facial_yes_snippets.append(snippet)
+                all_candidates.append({
+                    "name": snippet.name, "title": snippet.current_title,
+                    "company": snippet.current_company, "headline": snippet.headline,
+                    "outcome": "facial_yes", "rationale": facial.rationale, "page": page_num,
+                })
+                page_evaluated += 1
+
+        # Tightening check (applies to NEXT page — batch processes current page at once)
+        if not self._triage_tightened and self._bias_monitor:
+            tightening = self._bias_monitor.get_tightening_status(str(snippet.source_string_id))
+            if tightening:
+                self._triage_tightened = True
+                self._tightening_prefix = (
+                    f"⚠ TRIAGE TIGHTENING ACTIVE: The facial YES rate on this search string is running "
+                    f"{tightening['actual_rate']:.0%}, which is {tightening['multiplier']:.1f}x above the expected "
+                    f"maximum of {tightening['expected_high']:.0%}. Apply stricter filtering: require TWO strong "
+                    f"positive signals for FACIAL_YES instead of one.\n\n"
+                )
+                print(f"    [bias] Tightening facial criteria for next page "
+                      f"(YES rate: {tightening['actual_rate']:.0%}, expected max: {tightening['expected_high']:.0%})")
+
+        # Early exit check (after all batch results are known)
+        if page_evaluated >= config.EARLY_EXIT_MIN_CANDIDATES:
+            page_no_rate = page_facial_no / page_evaluated
+            if page_no_rate >= self._get_early_exit_rate():
+                print(
+                    f"    [early-exit] {page_facial_no}/{page_evaluated} "
+                    f"facial_no ({page_no_rate:.0%}) — skipping full evals"
+                )
+                log_event(
+                    self.log_path, "early_exit", string_id=search_string.id,
+                    page=page_num, evaluated=page_evaluated,
+                    facial_no=page_facial_no, rate=round(page_no_rate, 2),
+                )
+                facial_yes_snippets.clear()
+
+        self._checkpoint_progress(progress, search_string=search_string, page_num=page_num)
+
+        # ── Phase 3: Full evaluation for FACIAL_YES candidates ──────────
+        consecutive_api_errors = 0
+
+        for snippet in facial_yes_snippets:
+            if progress and hasattr(self, "_session_expired") and self._session_expired.is_set():
+                progress.save(str(self.progress_path))
+                raise SessionExpired("session_duration_cap")
+
+            if consecutive_api_errors >= 5:
+                print(f"    [CIRCUIT BREAKER] {consecutive_api_errors} consecutive API failures — pausing 60s")
+                log_event(self.log_path, "circuit_breaker", consecutive_errors=consecutive_api_errors)
+                await asyncio.sleep(60)
+                consecutive_api_errors = 0
+
+            decision = await self._full_evaluate(snippet, page_report)
+
+            if decision and hasattr(decision, "rationale") and "[API error" in (decision.rationale or ""):
+                consecutive_api_errors += 1
+            else:
+                consecutive_api_errors = 0
+
+            if decision and getattr(decision, "_panel_stuck", False):
+                print(f"    [ERROR] Panel stuck after {snippet.name} — skipping remaining full evals")
+                log_event(self.log_path, "panel_stuck", name=snippet.name, page=page_num)
+                break
+
+            # Update the candidate entry in all_candidates with full eval outcome
+            if decision:
+                if decision.decision in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"):
+                    outcome = "save"
+                    string_stats["saves"] += 1
+                    string_stats["facial_yes"] += 1
+                    search_string.saves.append(snippet.name)
+                elif decision.decision == "REJECT":
+                    outcome = "reject"
+                    string_stats["rejects"] += 1
+                    string_stats["facial_yes"] += 1
+                elif decision.stage == "full" and is_failure_decision(decision.decision):
+                    outcome = "error"
+                else:
+                    outcome = "facial_yes"
+                    string_stats["facial_yes"] += 1
+
+                for c in all_candidates:
+                    if c["name"] == snippet.name and c["page"] == page_num and c["outcome"] == "facial_yes":
+                        c["outcome"] = outcome
+                        c["rationale"] = decision.rationale
+                        break
+
+            self._checkpoint_progress(progress, search_string=search_string, page_num=page_num)
 
             if progress and hasattr(self, "_pause_requested") and self._pause_requested.is_set():
                 self._pause_requested.clear()
@@ -1511,7 +1896,7 @@ Medium noise tolerance. Facial NO rates between {expected_no_low:.0%} and {expec
             "narrow:<boolean>" — push narrower Boolean onto refinement stack
             "broaden"   — pop last refinement (revert to previous Boolean)
         """
-        from shared.llm_clients import opus_llm
+        from shared.llm_clients import opus_llm_cached
 
         # Build compact candidate summary
         candidate_lines = []
@@ -1646,7 +2031,7 @@ This is strong evidence the current Boolean is hitting the wrong population.
 What next?"""
 
         try:
-            result = opus_llm(system, user_prompt, expect_json=True)
+            result = opus_llm_cached(system, user_prompt, expect_json=True)
             action = result.get("action", "continue")
             rationale = result.get("rationale", "")
             print(f"  [adapt] Opus ({search_string.phase}): {action} — {rationale}")
@@ -1691,7 +2076,7 @@ What next?"""
         Returns:
             "narrow:<boolean>" if Opus provides a narrowed Boolean, None if it can't.
         """
-        from shared.llm_clients import opus_llm
+        from shared.llm_clients import opus_llm_cached
 
         candidate_lines = []
         for c in all_candidates:
@@ -1739,7 +2124,7 @@ Return JSON:
 Provide a narrowed Boolean."""
 
         try:
-            result = opus_llm(system, user_prompt, expect_json=True)
+            result = opus_llm_cached(system, user_prompt, expect_json=True)
             new_boolean = result.get("refined_boolean", "")
             rationale = result.get("rationale", "")
             if new_boolean:
@@ -1874,6 +2259,13 @@ Provide a narrowed Boolean."""
         print(f"    [FACIAL_YES] {facial.rationale}")
         self.stats["facial_yes"] += 1
 
+        return await self._full_evaluate(snippet, page_report)
+
+    async def _full_evaluate(
+        self, snippet: CandidateSnippet, page_report: "_PageReport | None" = None,
+    ) -> Optional[OpusDecision]:
+        """Open profile, extract, and run full evaluation. Called after facial triage passes."""
+
         # --- Full profile extraction (cheap model) ---
         # Emergency recovery check before browser interaction
         await self._ensure_browser_healthy()
@@ -1896,6 +2288,8 @@ Provide a narrowed Boolean."""
                 except GovernorLimitReached:
                     raise
                 except Exception as url_err:
+                    if _is_browser_disconnect_error(url_err):
+                        raise
                     print(f"    [warn] URL-based open failed ({url_err}), falling back to name match...")
             if not opened:
                 await self.browser.open_profile(snippet.name)
@@ -1910,13 +2304,21 @@ Provide a narrowed Boolean."""
         except GovernorLimitReached:
             raise
         except Exception as e:
+            if _is_browser_disconnect_error(e):
+                print(f"    [ERROR] Browser session dropped during profile extraction: {e}")
+                log_event(self.log_path, "profile_browser_disconnect", name=snippet.name, error=str(e))
+                raise
             print(f"    [ERROR] Profile extraction failed: {e}")
             log_event(self.log_path, "profile_error", name=snippet.name, error=str(e))
             try:
                 await self.browser.go_back_to_results()
             except Exception:
                 pass
-            return facial
+            return OpusDecision(
+                stage="facial", decision="FACIAL_YES", path="none", confidence=1.0,
+                rationale=f"[PROFILE_EXTRACTION_FAILED: {e}]",
+                candidate_name=snippet.name, profile_url=snippet.profile_url,
+            )
 
         # --- Final judgment (Opus) ---
         print(f"    Final judgment (Opus)...")
@@ -2047,6 +2449,10 @@ Provide a narrowed Boolean."""
             await self.browser.go_back_to_results()
             await asyncio.sleep(human_delay_correlated(0.8, channel="panel_close"))
         except Exception as e:
+            if _is_browser_disconnect_error(e):
+                print(f"    [ERROR] Browser session dropped while closing profile: {e}")
+                log_event(self.log_path, "panel_close_browser_disconnect", name=snippet.name, error=str(e))
+                raise
             print(f"    [ERROR] go_back_to_results failed: {e} — panel may still be open")
             log_event(self.log_path, "go_back_error", name=snippet.name, error=str(e))
             # Tag the result so the page loop knows state is corrupted
@@ -2144,6 +2550,47 @@ Provide a narrowed Boolean."""
 
         return "\n".join(lines)
 
+    def _load_profile_index_for_adaptation(self) -> dict[str, dict]:
+        """Index saved profile summaries by normalized candidate name."""
+        if not self.profiles_path.exists():
+            return {}
+
+        index: dict[str, dict] = {}
+        for entry in read_jsonl(self.profiles_path):
+            key = _normalize_candidate_name_key(entry.get("name", ""))
+            if key and key not in index:
+                index[key] = entry
+        return index
+
+    def _saved_profile_snapshots(
+        self,
+        saved_names: list[str],
+        profile_index: dict[str, dict],
+    ) -> list[dict]:
+        """Small LinkedIn-facing snapshots so adaptation can judge novelty, not just counts."""
+        snapshots: list[dict] = []
+        seen: set[str] = set()
+
+        for name in saved_names:
+            key = _normalize_candidate_name_key(name)
+            if not key or key in seen:
+                continue
+            entry = profile_index.get(key)
+            if not entry:
+                continue
+            seen.add(key)
+            current = (entry.get("experiences") or [{}])[0] or {}
+            snapshots.append(
+                {
+                    "name": entry.get("name", name),
+                    "title": current.get("title", ""),
+                    "company": current.get("company", ""),
+                    "headline": entry.get("headline", ""),
+                }
+            )
+
+        return snapshots
+
     # ------------------------------------------------------------------
     # Full run: block-level adaptation
     # ------------------------------------------------------------------
@@ -2159,6 +2606,8 @@ Provide a narrowed Boolean."""
         print(f"\n{'═' * 60}")
         print(f"  Adaptation checkpoint (after {len(block_strings)} strings)")
         print(f"{'═' * 60}")
+
+        profile_index = self._load_profile_index_for_adaptation()
 
         # Build block report
         strings_with_saves = [s for s in block_strings if s.saves]
@@ -2188,6 +2637,7 @@ Provide a narrowed Boolean."""
                     "pages_reviewed": s.pages_reviewed,
                     "saves": len(s.saves),
                     "save_names": s.saves[:5],
+                    "saved_profiles": self._saved_profile_snapshots(s.saves[:5], profile_index),
                     "facial_yes": s.facial_yes_count,
                     "facial_no": s.facial_no_count,
                     "notes": s.notes,
@@ -2501,6 +2951,19 @@ Provide a narrowed Boolean."""
         # 6. Save updated progress
         progress.save(str(self.progress_path))
         print(f"  String #{string_id} reset to page 1. Ready for re-evaluation.")
+
+    def _restart_strings(self, progress: Progress, string_ids: list[int]) -> None:
+        """Reset multiple strings while preserving the requested order."""
+        seen_ids: set[int] = set()
+        ordered_ids: list[int] = []
+        for string_id in string_ids:
+            if string_id in seen_ids:
+                continue
+            seen_ids.add(string_id)
+            ordered_ids.append(string_id)
+
+        for string_id in ordered_ids:
+            self._restart_string(progress, string_id)
 
     @staticmethod
     def _rewrite_jsonl(path, records: list[dict]) -> None:

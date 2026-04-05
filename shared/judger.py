@@ -13,7 +13,7 @@ import json
 import logging
 import re
 from shared.schemas import CandidateSnippet, CandidateProfileSummary, OpusDecision
-from shared.llm_clients import opus_llm
+from shared.llm_clients import opus_llm, opus_llm_cached, facial_llm
 from shared.brief_loader import Brief
 
 logger = logging.getLogger(__name__)
@@ -46,8 +46,12 @@ def extract_priority_rank(path: str) -> int:
     return int(m.group(1)) if m else 0
 from linkedin.judgment_templates import (
     assemble_facial_prompt,
+    assemble_facial_system,
     assemble_full_evaluation_prompt,
+    assemble_full_evaluation_system,
+    assemble_facial_batch_system,
     parse_facial_response,
+    parse_facial_batch_response,
     parse_full_evaluation_response,
 )
 
@@ -354,14 +358,15 @@ def facial_judge(snippet: CandidateSnippet, brief: Brief | None = None, prompt_p
     if not b:
         raise RuntimeError("Judger not initialized. Call init_judger(brief) or pass brief.")
 
-    # --- V2 path: structural templates ---
+    # --- V2 path: structural templates with prompt caching ---
     if b.has_v2_schema:
+        system = assemble_facial_system(b._new_brief)
         snippet_text = _snippet_to_text(snippet)
-        prompt = assemble_facial_prompt(b._new_brief, snippet_text)
+        user_msg = snippet_text
         if prompt_prefix:
-            prompt = prompt_prefix + prompt
+            user_msg = prompt_prefix + user_msg
         try:
-            raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
+            raw = facial_llm(system, user_msg, expect_json=False)
         except Exception as e:
             logger.warning("V2 facial judge exception: %s", e)
             return OpusDecision(
@@ -400,7 +405,7 @@ Education: {snippet.education_snippet}{career_section}
 Decide: FACIAL_YES or FACIAL_NO."""
 
     try:
-        result = opus_llm(system, user_prompt, expect_json=True)
+        result = opus_llm_cached(system, user_prompt, expect_json=True)
     except Exception as e:
         logger.warning("old-brief facial judge exception: %s", e)
         return OpusDecision(
@@ -437,12 +442,12 @@ def full_judge(summary: CandidateProfileSummary, brief: Brief | None = None) -> 
     if not b:
         raise RuntimeError("Judger not initialized. Call init_judger(brief) or pass brief.")
 
-    # --- V2 path: structural templates ---
+    # --- V2 path: structural templates with prompt caching ---
     if b.has_v2_schema:
+        system = assemble_full_evaluation_system(b._new_brief)
         profile_text = _profile_to_text(summary)
-        prompt = assemble_full_evaluation_prompt(b._new_brief, profile_text)
         try:
-            raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
+            raw = opus_llm_cached(system, profile_text, expect_json=False)
         except Exception as e:
             logger.warning("V2 full judge exception: %s", e)
             return OpusDecision(
@@ -501,7 +506,7 @@ Skills: {skills_text}
 Decide: SAVE or REJECT."""
 
     try:
-        result = opus_llm(system, user_prompt, expect_json=True)
+        result = opus_llm_cached(system, user_prompt, expect_json=True)
     except Exception as e:
         logger.warning("old-brief full judge exception: %s", e)
         return OpusDecision(
@@ -540,10 +545,9 @@ def github_facial_judge(portfolio_text: str, brief: Brief | None = None) -> Opus
     receives the structured portfolio text (toolchain, repos, contributions).
     """
     from github.judgment_templates import (
-        assemble_github_facial_prompt,
+        assemble_github_facial_system,
         parse_facial_response,
     )
-    from shared.brief_schema import Brief as NewBrief
 
     b = brief or _brief
     if not b:
@@ -552,9 +556,9 @@ def github_facial_judge(portfolio_text: str, brief: Brief | None = None) -> Opus
     if not b.has_v2_schema:
         raise RuntimeError("GitHub judges require a V2 brief with capability_areas.")
 
-    prompt = assemble_github_facial_prompt(b._new_brief, portfolio_text)
+    system = assemble_github_facial_system(b._new_brief)
     try:
-        raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
+        raw = facial_llm(system, portfolio_text, expect_json=False)
     except Exception as e:
         logger.warning("GitHub facial judge exception: %s", e)
         return OpusDecision(
@@ -582,10 +586,9 @@ def github_full_judge(evidence_text: str, brief: Brief | None = None) -> OpusDec
     receives the complete evidence text (toolchain, repos, READMEs, papers, etc.).
     """
     from github.judgment_templates import (
-        assemble_github_full_evaluation_prompt,
+        assemble_github_full_evaluation_system,
         parse_full_evaluation_response,
     )
-    from shared.brief_schema import Brief as NewBrief
 
     b = brief or _brief
     if not b:
@@ -594,9 +597,9 @@ def github_full_judge(evidence_text: str, brief: Brief | None = None) -> OpusDec
     if not b.has_v2_schema:
         raise RuntimeError("GitHub judges require a V2 brief with capability_areas.")
 
-    prompt = assemble_github_full_evaluation_prompt(b._new_brief, evidence_text)
+    system = assemble_github_full_evaluation_system(b._new_brief)
     try:
-        raw = opus_llm("Follow the evaluation procedure exactly.", prompt, expect_json=False)
+        raw = opus_llm_cached(system, evidence_text, expect_json=False)
     except Exception as e:
         logger.warning("GitHub full judge exception: %s", e)
         return OpusDecision(
@@ -625,3 +628,152 @@ def github_full_judge(evidence_text: str, brief: Brief | None = None) -> OpusDec
         candidate_name="",  # Caller sets this
         profile_url="",     # Caller sets this
     )
+
+
+# ---------------------------------------------------------------------------
+# Batch facial triage (Phase 2)
+# ---------------------------------------------------------------------------
+
+def facial_judge_batch(
+    snippets: list[CandidateSnippet],
+    brief: Brief | None = None,
+    prompt_prefix: str = "",
+) -> list[OpusDecision]:
+    """Batch facial triage — one LLM call for all snippets on a page.
+
+    V2 briefs only. Falls back to sequential for old briefs or on batch failure.
+    """
+    b = brief or _brief
+    if not b:
+        raise RuntimeError("Judger not initialized. Call init_judger(brief) or pass brief.")
+
+    if not b.has_v2_schema:
+        return [facial_judge(s, b, prompt_prefix=prompt_prefix) for s in snippets]
+
+    if not snippets:
+        return []
+
+    # Build batch user message
+    snippet_texts = [_snippet_to_text(s) for s in snippets]
+    numbered = "\n\n".join(f"[{i+1}] {text}" for i, text in enumerate(snippet_texts))
+    user_msg = numbered
+    if prompt_prefix:
+        user_msg = prompt_prefix + user_msg
+
+    system = assemble_facial_batch_system(b._new_brief)
+
+    try:
+        raw = facial_llm(system, user_msg, expect_json=False, max_tokens=4096)
+    except Exception as e:
+        logger.warning("Batch facial judge failed, falling back to sequential: %s", e)
+        return [facial_judge(s, b, prompt_prefix=prompt_prefix) for s in snippets]
+
+    results = parse_facial_batch_response(raw, len(snippets))
+
+    decisions: list[OpusDecision | None] = []
+    failed_indexes: list[int] = []
+    for idx, (snippet, result) in enumerate(zip(snippets, results)):
+        if is_failure_decision(result.decision):
+            failed_indexes.append(idx)
+            decisions.append(None)
+            continue
+
+        decisions.append(OpusDecision(
+            stage="facial",
+            decision=result.decision,
+            path="none",
+            confidence=1.0,
+            rationale=result.reason,
+            candidate_name=snippet.name,
+            profile_url=snippet.profile_url,
+        ))
+
+    if failed_indexes:
+        logger.warning(
+            "Batch facial judge had %s parse failure(s); retrying sequentially for those entries",
+            len(failed_indexes),
+        )
+        for idx in failed_indexes:
+            decisions[idx] = facial_judge(snippets[idx], b, prompt_prefix=prompt_prefix)
+
+    return [decision for decision in decisions if decision is not None]
+
+
+def github_facial_judge_batch(
+    portfolio_texts: list[tuple[str, str, str]],
+    brief: Brief | None = None,
+) -> list[OpusDecision]:
+    """Batch GitHub facial triage — one LLM call for multiple candidates.
+
+    Args:
+        portfolio_texts: list of (username, profile_url, portfolio_text) tuples
+        brief: optional Brief override
+
+    V2 briefs only. Falls back to sequential on batch failure.
+    """
+    from github.judgment_templates import (
+        assemble_github_facial_batch_system,
+    )
+
+    b = brief or _brief
+    if not b:
+        raise RuntimeError("Judger not initialized.")
+
+    if not b.has_v2_schema:
+        raise RuntimeError("GitHub batch facial requires a V2 brief.")
+
+    if not portfolio_texts:
+        return []
+
+    system = assemble_github_facial_batch_system(b._new_brief)
+
+    # Build batch user message (reuse LinkedIn batch format: [N] content)
+    numbered = "\n\n".join(
+        f"[{i+1}] {text}" for i, (_, _, text) in enumerate(portfolio_texts)
+    )
+
+    try:
+        raw = facial_llm(system, numbered, expect_json=False, max_tokens=4096)
+    except Exception as e:
+        logger.warning("GitHub batch facial failed, falling back to sequential: %s", e)
+        decisions = []
+        for candidate_name, profile_url, text in portfolio_texts:
+            decision = github_facial_judge(text, b)
+            decision.candidate_name = candidate_name
+            decision.profile_url = profile_url
+            decisions.append(decision)
+        return decisions
+
+    results = parse_facial_batch_response(raw, len(portfolio_texts))
+
+    decisions: list[OpusDecision | None] = []
+    failed_indexes: list[int] = []
+    for idx, ((candidate_name, profile_url, _), result) in enumerate(zip(portfolio_texts, results)):
+        if is_failure_decision(result.decision):
+            failed_indexes.append(idx)
+            decisions.append(None)
+            continue
+
+        decisions.append(OpusDecision(
+            stage="facial",
+            decision=result.decision,
+            path="none",
+            confidence=1.0,
+            rationale=result.reason,
+            candidate_name=candidate_name,
+            profile_url=profile_url,
+        ))
+
+    if failed_indexes:
+        logger.warning(
+            "GitHub batch facial had %s parse failure(s); retrying sequentially for those entries",
+            len(failed_indexes),
+        )
+        for idx in failed_indexes:
+            candidate_name, profile_url, text = portfolio_texts[idx]
+            decision = github_facial_judge(text, b)
+            decision.candidate_name = candidate_name
+            decision.profile_url = profile_url
+            decisions[idx] = decision
+
+    return [decision for decision in decisions if decision is not None]

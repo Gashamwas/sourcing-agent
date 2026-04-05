@@ -17,7 +17,7 @@ from typing import Optional
 
 from github.schemas import GitHubSearchQuery, GitHubBatchReport
 from github.query_validator import validate_batch
-from shared.llm_clients import opus_llm
+from shared.llm_clients import opus_llm_cached
 from shared.brief_loader import Brief
 import github.config as gc
 
@@ -40,7 +40,7 @@ def form_github_strategy(
     user_prompt = _build_strategy_user(brief, prior_run_data)
 
     try:
-        result = opus_llm(system, user_prompt, expect_json=True, max_tokens=16384)
+        result = opus_llm_cached(system, user_prompt, expect_json=True, max_tokens=16384)
     except Exception as e:
         return _default_queries(brief, include_default_repos, include_default_orgs), f"Fallback: {e}"
 
@@ -184,6 +184,25 @@ Available filters:
 
 Generate 5-10 topic search queries targeting repos in capability area domains.
 
+### Tapped-Market / Edge-Case Opening
+
+If the brief says the obvious pool is tapped, exhausted, or already heavily worked, then your opening GitHub queries should prioritize non-obvious adjacent builders rather than the canonical framework crowd.
+
+Use this mental loop:
+1. First ask what a strong but standard technical sourcer would search on GitHub for this role.
+2. Then ask which same-caliber builders that standard pass would miss because their repos emphasize product/problem language, delivery tooling, internal platforms, or adjacent systems work instead of canonical framework names.
+3. Generate your opening queries primarily for those missed populations.
+
+For the initial query slate:
+- Prefer profiles and repos that signal delivery accelerators, reference architectures, eval harnesses, tracing/observability, internal tools, product/problem-language AI systems, or consultancy/vertical-SaaS builders
+- Do NOT over-concentrate the opening set on exact canonical framework imports or frontier-brand clusters alone
+- Treat direct framework-name and obvious frontier-repo mining as cleanup/completion passes, not the only opening move
+
+NOVELTY ACCOUNTING:
+- In a tapped market, direct framework-import hits and frontier-brand repo hits are useful confirmation but low-novelty signal.
+- Do not treat a strong yield from those obvious pools as proof the opening query mix is correct.
+- Aim for the opening slate to surface adjacent but same-caliber builders whose repos emphasize delivery tooling, product/problem language, internal platforms, or reusable implementation patterns.
+
 ### Channel 4: Stargazer Mining
 For discriminating repos — niche ML training/eval repos where STARRING itself is a signal.
 Not for popular general repos (too noisy). Target repos like OpenRLHF/OpenRLHF,
@@ -266,6 +285,13 @@ def _build_strategy_user(
 
     if brief.search_priorities:
         prompt += f"## Search Priorities\n{', '.join(brief.search_priorities)}\n\n"
+
+    if brief.additional_search_terms:
+        prompt += (
+            "## Additional Search Terms\n"
+            "These terms should be used for search query generation but are NOT evaluation criteria:\n"
+            f"{', '.join(brief.additional_search_terms)}\n\n"
+        )
 
     if brief.instructions:
         prompt += "## Sourcing Instructions\n" + "\n".join(f"- {i}" for i in brief.instructions) + "\n\n"
@@ -458,6 +484,8 @@ Focus on:
 - Languages and repos common in saved candidates → mine those repos, search those language+topic combos
 - Queries that hit the 1,000 result cap → suggest narrower segmentations
 - Zero-save queries → avoid similar patterns
+- If the brief says the obvious pool is tapped, prefer extending productive edge-case populations before adding more canonical framework-name or frontier-brand cleanup queries
+- Keep asking which same-caliber builders a standard technical sourcer would still miss, and bias new queries toward those adjacent populations first
 {exhaustion_section}
 
 Return JSON:
@@ -491,7 +519,7 @@ Return valid JSON only."""
 Suggest adaptations."""
 
     try:
-        result = opus_llm(system, user_prompt, expect_json=True)
+        result = opus_llm_cached(system, user_prompt, expect_json=True)
     except Exception as e:
         return [], f"Adaptation failed: {e}", []
 
