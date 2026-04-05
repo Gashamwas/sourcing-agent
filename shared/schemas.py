@@ -296,10 +296,16 @@ class SearchString:
     # Facial triage stats (persisted for block-level aggregate computation)
     facial_yes_count: int = 0
     facial_no_count: int = 0
+    candidates_count: int = 0
+    duplicates_count: int = 0
     # Two-phase adaptation fields
     phase: str = "scout"  # "scout" | "paginate"
     original_boolean: str = ""  # The original Boolean before any refinements
     refinement_stack: list[str] = field(default_factory=list)  # Stack of applied Booleans (push=narrow, pop=broaden)
+    # Strategy metadata for cross-run memory and novelty accounting
+    family_key: str = ""
+    novelty_bucket: str = ""
+    domain_lane: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
