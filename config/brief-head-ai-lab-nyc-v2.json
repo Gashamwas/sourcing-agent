@@ -1,0 +1,456 @@
+{
+  "role_title": "Head of Applied AI Lab",
+  "role_level": "L8-L9",
+  "role_summary": "Mini-CTO of Turing's enterprise applied AI practice focused on BFSI. This leader runs the technical side of an applied AI consulting and delivery operation serving Fortune 500 financial institutions and institutional-finance clients. The role is not research, not AI transformation strategy, and not product management over builders. The hard bar is a senior executive-builder who can personally whiteboard and pressure-test system architecture, direct technical delivery, and operate credibly in BFSI workflows and constraints.",
+  "geography": "New York City Metropolitan Area",
+  "linkedin_project": "Head of Applied AI Lab",
+  "linkedin_project_id": "1957683706",
+
+  "instructions": [
+    "This market has already been worked repeatedly. The FIRST 8 strings must be majority edge-case transfer populations rather than the canonical big-bank, exact-title, framework-first, or broad GenAI + BFSI pools.",
+    "Before generating strings, first model what a competent sourcer would search in a standard pass for this role. Then move one layer outward: which same-caliber candidates are hidden behind different BFSI subdomain language, workflow language, vendor language, or adjacent titles? Target those nooks and crannies first.",
+    "Judge the opening sequence by novelty as well as productivity. In the first 2 blocks, at least half of the saves should ideally come from adjacent or edge-case pools rather than exact-title Applied AI Lab candidates, framework-first strings, large-bank company-first strings, or generic GenAI + BFSI strings.",
+    "BFSI is the hard-primary domain, but do NOT express that primarily with generic terms like banking, financial services, or BFSI in the opening sequence. Use subdomain and workflow language first: capital markets, post-trade, collateral, treasury, market structure, surveillance, AML, KYC, sanctions, model governance, underwriting, claims, policy ops, asset management, wealth, research workflow, portfolio operations, market-data, custody, regtech, and vendor workflow contexts.",
+    "The first 8 strings must NOT be anchored primarily on bare LLM, GenAI, RAG, generic BFSI words, or large-bank employer lists. Those can appear only as secondary qualifiers inside a sharper operational or problem-language string.",
+    "Generate morphology-aware domain variants for every chosen anchor: singular/plural, hyphen/spaced variants, acronym plus expansion, and common practitioner shorthand. Missing lexical variants means missing candidates.",
+    "Search both product-language and systems-language populations. Strong candidates may describe their work as research copilot, analyst assistant, trade surveillance workflow, investment memo automation, client reporting, onboarding automation, model risk review, treasury assistant, claims intake, underwriting workbench, document intelligence, compliance workflow, or regulatory response rather than generic GenAI language.",
+    "Use adjacent titles aggressively when AND-gated with build evidence: principal architect, principal engineer, head of AI engineering, technology fellow, engineering director, delivery engineering lead, consulting engineer, implementation engineering leader, distinguished engineer, startup CTO, and technical lead at BFSI vendors or consulting firms. Do not treat title variation as a disqualifier if the builder evidence is strong.",
+    "The evaluation bar does NOT move just because the market is tapped. Edge-case means hidden same-caliber builders, not looser screening. Keep the hard gates: NYC, 15+ years, BFSI domain depth, post-2022 applied GenAI build evidence, and large-org-too-senior exclusions.",
+    "Use the current search kit only as background vocabulary. If it keeps pulling the same canonical pools, demote those families and keep the opening focused on non-obvious BFSI-adjacent populations."
+  ],
+
+  "search_priorities": [
+    "Capital markets and post-trade builders who shifted into production GenAI delivery: collateral workflow, treasury workflow, market structure tooling, trade surveillance, research workflow, and institutional-finance copilots",
+    "Risk, compliance, AML, KYC, sanctions, model governance, and regulatory-response builders who personally built AI systems rather than only owning policy or transformation",
+    "Asset management, wealth, portfolio-operations, client-reporting, and research-copilot builders with hands-on GenAI architecture depth",
+    "Insurance, actuarial, underwriting, claims, policy-review, and policy-operations builders who shipped applied AI systems under regulated enterprise constraints",
+    "Fintech, regtech, custody, market-data, post-trade, and workflow vendors selling into BFSI enterprises where senior leaders still personally built the system",
+    "Consulting-engineering and technical-fellow populations serving major banks, insurers, asset managers, or institutional-finance clients where the profile clearly shows build-and-deploy ownership",
+    "Small fintech or institutional-finance startup CTOs and founding technical leaders who remain hands-on and built agentic or copilot-style systems for real financial workflows",
+    "Canonical big-bank, frontier-company, and exact-title Applied AI Lab populations only after edge-case BFSI workflow and vendor populations have been tested"
+  ],
+
+  "additional_search_terms": [
+    "analyst assistant",
+    "analyst assistants",
+    "investment memo automation",
+    "investment memo assistant",
+    "research copilot",
+    "research copilots",
+    "research workflow",
+    "trade surveillance workflow",
+    "market surveillance workflow",
+    "post-trade workflow",
+    "post trade workflow",
+    "collateral workflow",
+    "collateral management",
+    "treasury assistant",
+    "treasury workflow",
+    "client reporting",
+    "portfolio operations",
+    "portfolio workflow",
+    "onboarding automation",
+    "onboarding assistant",
+    "regulatory response",
+    "regulatory workflow",
+    "model risk review",
+    "model governance workflow",
+    "compliance workflow",
+    "aml investigation",
+    "kyc review",
+    "sanctions screening",
+    "claims intake",
+    "claims workflow",
+    "underwriting workbench",
+    "underwriting assistant",
+    "policy review",
+    "policy workflow",
+    "document intelligence",
+    "document understanding",
+    "market data workflow",
+    "custody workflow",
+    "exception management",
+    "institutional workflow"
+  ],
+
+  "intake_notes": "This is a return to the older Head of Applied AI Lab framing, not the newer multi-vertical FDE framing. BFSI is the hard-primary vertical. The market has been worked heavily, and the obvious pool now recycles the same company-first and generic GenAI strings. For strategy, treat the canonical pool as already mined. Open with BFSI subdomain and workflow language, adjacent titles, consulting-engineering populations, BFSI vendors, and hidden transfer populations before any big-bank lists or generic LLM/BFSI Boolean. Reuse the current search kit only as background vocabulary; do not let it dictate the opening sequence if it keeps reproducing canonical pools.",
+
+  "capability_areas": [
+    {
+      "name": "1. Production Applied GenAI Delivery (HARD GATE)",
+      "description": "Has personally architected and shipped applied GenAI systems in production enterprise environments. The signal is not AI strategy, not supervising a team that built, and not adopting vendor copilots. The person must still show direct technical authorship of real systems: RAG, agentic workflows, evaluation frameworks, orchestration, deployment hardening, or model behavior improvement in live enterprise contexts.",
+      "builder_signals": [
+        "Personally architected and implemented production LLM or agentic systems with concrete delivery outcomes",
+        "Built or directly owned RAG pipelines, retrieval systems, agent orchestration, evaluation harnesses, or model behavior improvement loops",
+        "Uses precise builder language: I built, I architected, I implemented, I deployed, I productionized",
+        "Can describe architecture tradeoffs across latency, reliability, governance, observability, or rollout",
+        "Post-2022 work with LLM deployment, RAG design, agentic architectures, evaluation frameworks, fine-tuning, or model selection and benchmarking"
+      ],
+      "user_signals": [
+        "AI transformation or AI strategy leadership without implementation evidence",
+        "Led the team that built it but no personal engineering authorship is visible",
+        "Adopted GitHub Copilot, Devin, or vendor AI tooling rather than building custom systems",
+        "Prompt experimentation, demos, or thin wrappers around hosted APIs with no production architecture ownership"
+      ],
+      "key_terms": [
+        "agentic workflow",
+        "tool calling",
+        "function calling",
+        "orchestration",
+        "RAG",
+        "evaluation framework",
+        "eval harness",
+        "guardrails",
+        "semantic search",
+        "retrieval pipeline",
+        "MCP",
+        "Temporal"
+      ]
+    },
+    {
+      "name": "2. BFSI Domain Fluency (HARD GATE)",
+      "description": "Has built AI systems in BFSI contexts or for BFSI clients where the work had to fit financial workflows, regulatory constraints, operational controls, and domain-specific data problems. The best signal is not just a bank logo. It is hands-on AI work attached to real BFSI subdomains such as capital markets, post-trade, treasury, surveillance, AML/KYC, model governance, underwriting, claims, asset management, client reporting, research workflows, custody, market-data, or regtech products.",
+      "builder_signals": [
+        "Built AI systems in capital markets, post-trade, collateral, treasury, market-data, or institutional-finance workflows",
+        "Built AI for risk, compliance, AML, KYC, sanctions, surveillance, model governance, or regulatory response",
+        "Built AI in insurance, actuarial, underwriting, claims, policy ops, or other financial-risk workflows",
+        "Built AI in asset management, wealth, research workflow, portfolio operations, or client reporting",
+        "Worked at a fintech, regtech, market-data, custody, or workflow vendor serving financial institutions and personally built the AI system"
+      ],
+      "user_signals": [
+        "Worked at a bank, insurer, or asset manager in a non-technical role",
+        "Owned financial product strategy, transformation, or analytics without building the AI system",
+        "General enterprise AI work with no visible BFSI employer, project, or workflow signal anywhere in the profile"
+      ],
+      "key_terms": [
+        "capital markets",
+        "post-trade",
+        "collateral",
+        "treasury",
+        "trade surveillance",
+        "AML",
+        "KYC",
+        "sanctions",
+        "model governance",
+        "model risk",
+        "underwriting",
+        "claims",
+        "asset management",
+        "wealth management",
+        "client reporting",
+        "research workflow",
+        "portfolio operations",
+        "market data",
+        "custody",
+        "regtech"
+      ]
+    },
+    {
+      "name": "3. Executive Builder Leadership & Technical Delivery Infrastructure",
+      "description": "Acts like a mini-CTO: senior enough to lead the technical side of an applied AI lab, but still close enough to the systems to make architecture decisions personally. The strongest candidates have built repeatable delivery tooling, reference architectures, evaluation standards, or technical playbooks across multiple enterprise AI deployments and can credibly brief technical and executive stakeholders.",
+      "builder_signals": [
+        "Built reusable delivery accelerators, reference architectures, deployment toolkits, or evaluation standards used across multiple engagements",
+        "Built or scaled an applied AI engineering function while remaining technically credible and architecture-deep",
+        "Created repeatable delivery patterns, technical standards, or internal platforms that made future AI deployments faster or safer",
+        "Can scope ambiguous enterprise requirements and convert them into technical plans and implemented systems",
+        "Shows seniority at the director, senior director, head of, principal architect, principal engineer, or context-appropriate VP level without drifting into large-org pure management"
+      ],
+      "user_signals": [
+        "Practice leadership, staffing, or selling without technical authorship of the delivery system",
+        "Executive leadership at a massive org where the candidate is clearly too far from the code",
+        "One-off solution delivery with no evidence of reusable technical infrastructure or architectural ownership"
+      ],
+      "key_terms": [
+        "reference architecture",
+        "delivery playbook",
+        "accelerator",
+        "technical standards",
+        "evaluation harness",
+        "architecture review",
+        "technical discovery",
+        "solution design",
+        "deployment toolkit",
+        "reusable module"
+      ]
+    }
+  ],
+
+  "post_save_modifiers": [
+    {
+      "name": "Client-Facing Gravitas",
+      "trigger": "Candidate already qualifies as SAVE, SIGNAL_SAVE, TRANSFERABLE_SAVE, or INFERENTIAL_SAVE based on the core capability areas",
+      "if_present": "Boost confidence by 0.05-0.10. Note that the candidate appears able to brief CIO-level stakeholders, run technical discovery, or lead client-facing delivery conversations while staying technically credible.",
+      "if_absent": "No adjustment. Lack of explicit client-facing evidence is not a rejection reason if the senior builder bar is already met.",
+      "signals": [
+        "Led technical discovery, architecture workshops, or solution design with enterprise clients or senior stakeholders",
+        "Acts as trusted technical advisor paired with clear hands-on build evidence",
+        "Presentation, consulting, or enterprise-delivery language paired with direct system-building evidence"
+      ]
+    },
+    {
+      "name": "Institutional Finance Credibility",
+      "trigger": "Candidate already qualifies as SAVE, SIGNAL_SAVE, TRANSFERABLE_SAVE, or INFERENTIAL_SAVE based on the core capability areas",
+      "if_present": "Boost confidence by 0.03-0.08. Note that elite institutional-finance trajectory or BFSI-vendor credibility increases confidence in domain fit and executive screen-worthiness.",
+      "if_absent": "No adjustment. Do not reject solely for lacking marquee logos if the BFSI workflow evidence is real.",
+      "signals": [
+        "Strong institutional-finance employer trajectory with real builder evidence",
+        "Deep fixed-income, capital-markets, risk, insurance, or asset-management workflow credibility",
+        "Public technical artifacts or repeated BFSI-domain architecture work that signal unusually strong domain taste"
+      ]
+    }
+  ],
+
+  "depth_distinction": {
+    "builder_definition": "A builder for this role personally drives the technical design and implementation of applied AI systems in enterprise BFSI settings. They do not just bless the architecture, sponsor the program, or lead the team from a distance. They can still reason from first principles about the system: workflow, retrieval, orchestration, data integration, evaluation, governance, deployment, and delivery tradeoffs. The whiteboard test is: could this person credibly walk a CIO and a team of engineers through the system they would build for a hard BFSI workflow and explain why?",
+    "user_definition": "A user or adjacent profile talks about AI, adopts AI, sells AI, scopes AI, or manages builders without personally building the production system. This includes AI strategy leaders, product heads, cloud-vendor pre-sales, transformation executives, vendor-tool rollout owners, and large-org practice leaders whose recent work is mostly organizational rather than technical.",
+    "edge_case_guidance": "CONSULTING / DELIVERY TITLES: Do not reject titles like Technology Fellow, Solutions Architect, Consulting Engineer, Delivery Lead, or Senior Manager on title alone. These can hide real builder-leaders if the bullets show personal engineering authorship of BFSI AI systems. STARTUP CTOS: At scrappy startups under roughly 150 employees, CTOs and co-founders can fit if they are still hands-on and the work is clearly institutional-finance or BFSI-adjacent. BIG-ORG LEADERS: At large financial institutions, SVP, EVP, MD, CDAO, CIO, or large-practice Partner titles are usually too senior unless the context is unusually small and still IC-like. PRINCIPAL ARCHITECTS / ENGINEERING DIRECTORS: These are strong fits when paired with direct build evidence in BFSI workflows, even if the profile does not use generic GenAI language heavily."
+  },
+
+  "inferential_save_rules": {
+    "description": "This search is intentionally edge-case-friendly because the obvious pool has been exhausted. When a sparse profile still carries a strong prior of being the right senior BFSI builder, prefer INFERENTIAL_SAVE over silent rejection so the recruiter can review it.",
+    "conditions": [
+      "Principal architect, engineering director, or technology fellow with explicit BFSI workflow language plus post-2022 GenAI or applied AI builder terms, even if bullets are sparse",
+      "Hands-on CTO or co-founder at a small fintech, regtech, market-data, custody, or institutional-workflow startup serving financial institutions",
+      "Senior engineering leader at a consulting or BFSI-vendor context whose headline clearly combines build evidence with capital markets, risk, insurance, or asset-management delivery",
+      "Strong institutional-finance trajectory with recent applied AI or GenAI builder language and 15+ years, even if the LinkedIn summary is thin",
+      "Profile shows uncommon BFSI problem-language such as trade surveillance, client reporting, collateral workflow, model risk review, underwriting workbench, or research copilot paired with architecture or deployment language"
+    ],
+    "save_tag": "INFERENTIAL_SAVE",
+    "confidence_range": [0.35, 0.5],
+    "note": "The recruiter would rather review a small set of strong edge-case maybes than miss the right senior BFSI builder because the profile used non-standard titles or workflow language."
+  },
+
+  "non_fit_patterns": [
+    {
+      "label": "Cloud-vendor pre-sales or customer-solutions leadership",
+      "description": "Customer-facing solutions or architecture roles at AWS, Azure, GCP, or similar vendors where the work is demos, solutioning, and technical sales support around platform capabilities rather than personal authorship of enterprise AI systems.",
+      "why_not": "Client-facing gravitas is relevant, but the role requires a senior builder who personally ships the system. Demoing and advising on platform capabilities is not the same as engineering a production BFSI AI deployment.",
+      "examples": [
+        "Head of Customer Solutions",
+        "Senior Leader Solutions Architecture",
+        "Principal Solutions Architect"
+      ]
+    },
+    {
+      "label": "AI strategy, transformation, or product leadership",
+      "description": "Profiles centered on AI transformation, roadmaps, product management, or executive AI strategy rather than hands-on engineering authorship.",
+      "why_not": "The role needs someone who can personally pressure-test and direct the technical system. Strategy or product leadership without builder evidence is insufficient.",
+      "examples": [
+        "Head of AI Products",
+        "AI Transformation Executive",
+        "SVP Product Manager of ML"
+      ]
+    },
+    {
+      "label": "Vendor-tool adoption mistaken for AI building",
+      "description": "AI experience is limited to rolling out vendor copilots, enterprise chat tools, or off-the-shelf AI enablement programs rather than building custom systems.",
+      "why_not": "Adopting GitHub Copilot, Devin, or packaged AI tools is not the same as designing and shipping production applied AI systems.",
+      "examples": [
+        "Implemented GitHub Copilot across engineering",
+        "Led AI enablement using vendor tools",
+        "Rolled out enterprise chat assistants"
+      ]
+    },
+    {
+      "label": "Pure analytics or classical ML in finance",
+      "description": "Strong quantitative or ML profiles in fraud, scoring, forecasting, recommendations, or analytics without evidence of post-2022 applied GenAI delivery.",
+      "why_not": "The domain is relevant, but the daily work is wrong. This role requires current applied GenAI builder depth, not just classical finance ML.",
+      "examples": [
+        "Fraud data scientist",
+        "Credit risk modeling lead",
+        "Quantitative analytics director"
+      ]
+    },
+    {
+      "label": "Customer-facing delivery without engineering authorship",
+      "description": "Implementation, customer success, or technical account roles that live close to clients but focus on onboarding, coordination, adoption, or delivery management rather than writing and owning the system.",
+      "why_not": "The role still needs a builder, not only a delivery coordinator or enterprise liaison.",
+      "examples": [
+        "Implementation consultant",
+        "Technical account manager",
+        "Customer success engineer"
+      ]
+    },
+    {
+      "label": "Too-senior large-org AI or data leadership",
+      "description": "SVP, EVP, MD, CDAO, CIO, CTO of a very large engineering org, or Partner running a large AI practice where the recent work is organizational leadership rather than technical authorship.",
+      "why_not": "Scope and compensation are usually wrong, and the profile is too far from hands-on system building for this role's bar.",
+      "examples": [
+        "EVP & CDAIO",
+        "Managing Director, AI",
+        "Partner, AI Transformation",
+        "CTO of a 400-person engineering org"
+      ]
+    }
+  ],
+
+  "non_fit_override_rule": "Non-fit patterns describe default expectations for noisy populations, not absolute bans. Specific evidence that the candidate personally built and shipped production GenAI systems with BFSI workflow depth overrides the non-fit pattern. This is especially important for consulting, architecture, delivery, and adjacent executive-builder titles, which can hide real fits as easily as they can hide noise.",
+
+  "employer_signal_rules": [
+    {
+      "tier": "bfsi_institution_builder",
+      "employer_patterns": [
+        "Goldman Sachs",
+        "JPMorgan",
+        "Morgan Stanley",
+        "Bank of America",
+        "Citi",
+        "BlackRock",
+        "Apollo",
+        "Tradeweb",
+        "Bloomberg",
+        "Vanguard",
+        "TIAA",
+        "Prudential"
+      ],
+      "evidence_required": "BFSI institution alone is not enough. Save only when the profile clearly shows builder evidence in GenAI or applied AI systems and credible ownership of a domain workflow. VP is context-dependent. SVP, MD, EVP, CDAO, CIO, or very large-org CTO is usually too senior.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "bfsi_vendor_or_regtech_builder",
+      "employer_patterns": [],
+      "evidence_required": "Fintech, regtech, custody, post-trade, market-data, or workflow vendors serving financial institutions. The company name is helpful, but the decisive signal is that the candidate personally built the AI system for institutional-finance workflows.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "consulting_engineering_bfsi",
+      "employer_patterns": [
+        "Deloitte",
+        "Accenture",
+        "McKinsey",
+        "BCG",
+        "BCG X",
+        "EY",
+        "PwC",
+        "KPMG",
+        "Thoughtworks",
+        "Slalom",
+        "EPAM",
+        "Globant",
+        "CI&T"
+      ],
+      "evidence_required": "Only save when the profile clearly shows build-and-deploy work for BFSI clients. Advisory, staffing, transformation, product, and partner-level roles are common false positives. Technology fellow, principal architect, engineering director, and consulting-engineering profiles can be excellent fits when the builder evidence is real.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "small_fintech_or_institutional_startup_builder",
+      "employer_patterns": [],
+      "evidence_required": "Small startups under roughly 150 employees building institutional-finance, treasury, capital-markets, regtech, insurance, or wealth workflows. CTOs and co-founders can fit if they remain hands-on and the work clearly maps to the role's domain and builder bar.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "neutral",
+      "employer_patterns": [],
+      "evidence_required": "Apply the same technical and domain standard as any other candidate. Lesser-known employers can absolutely be strong fits if the actual BFSI workflow and applied AI work is right.",
+      "save_on_employer_alone": false
+    }
+  ],
+
+  "minimum_years_experience": 15,
+  "minimum_bar_description": "Fifteen or more years is a hard floor because the role must hit the ground running as the technical leader of an applied AI lab serving senior enterprise stakeholders. The meaningful bar is not raw tenure alone. The candidate must show direct builder depth in applied GenAI, real BFSI domain work, and enough seniority to hold the room with a CIO while still being technically credible. Current NYC metro location is non-negotiable. Post-2022 GenAI work is required. Large-org executive titles above the intended scope are usually disqualifying unless the context is clearly smaller and still hands-on.",
+
+  "facial_calibration": {
+    "expected_yes_rate_low": 0.05,
+    "expected_yes_rate_high": 0.18,
+    "fast_exit_patterns": [
+      "ENTIRE career is customer success, pre-sales, account management, or business development",
+      "ENTIRE career is product management, transformation, or strategy with no engineering-builder roles",
+      "ENTIRE career is classical analytics, BI, audit, or reporting with no software or AI engineering leadership",
+      "ENTIRE career is QA, testing, or non-ML IT roles with no engineering progression",
+      "Fresh or clearly under-leveled profile with fewer than 15 years visible experience",
+      "Current location clearly outside NYC metro",
+      "Most recent trajectory is large-org SVP, EVP, MD, CDAO, CIO, Partner, or massive-org CTO and the rest of the trajectory points the same way"
+    ],
+    "trajectory_yes_patterns": [
+      "Engineering director, head of AI engineering, principal architect, or principal engineer with clear BFSI and GenAI language",
+      "Technology fellow, distinguished engineer, or senior consulting-engineering leader with direct build-and-deploy language in BFSI contexts",
+      "Startup CTO or co-founder at a small fintech, regtech, market-data, or institutional-workflow company with obvious hands-on language",
+      "Career progression from capital-markets or risk systems into applied AI or GenAI delivery roles",
+      "Profiles using BFSI workflow language like trade surveillance, collateral, treasury, underwriting, claims, client reporting, or research workflow alongside AI or architecture signals"
+    ],
+    "trajectory_ambiguous_patterns": [
+      "Solutions Architect or customer-engineering titles at consulting firms or enterprise AI vendors because these can hide real builder-leaders",
+      "VP or Head-level titles at smaller firms where the scope may still be hands-on",
+      "Principal architect or engineering director with sparse bullets but strong BFSI employer trajectory",
+      "Applied scientist or ML engineering leader in finance where the snippet does not reveal whether the work is classical ML or production GenAI"
+    ],
+    "trajectory_no_patterns": [
+      "Title contains product, transformation, customer success, account, or strategy language and the rest of the trajectory points the same way",
+      "No visible BFSI employer, BFSI workflow language, or financial-domain signal anywhere in the trajectory",
+      "Most recent role is large-org executive leadership and the visible trajectory suggests the candidate is materially above scope"
+    ]
+  },
+
+  "market_density": "sparse",
+  "employer_blacklist": [
+    "Turing"
+  ],
+  "kit_url": "https://search-kit-library.vercel.app/kit/10c0183e-f28b-49a0-b10f-680c73ab6fba",
+
+  "bias_controls": {
+    "max_consecutive_saves": 5,
+    "max_consecutive_rejects": 18,
+    "parse_failure_alarm_rate": 0.03
+  },
+
+  "calibration_examples": {
+    "strong_saves": [
+      {
+        "name": "Jon Dorando",
+        "why": "Co-Founder & CTO of Boosted.ai at scrappy scale, deep institutional-finance context, personally built the system, and senior enough to operate like a mini-CTO without drifting into giant-org executive scope."
+      },
+      {
+        "name": "Bojan Ciric",
+        "why": "Technology Fellow at Deloitte with hands-on LangGraph/CrewAI/AWS Bedrock delivery for Tier-1 banks. Consulting title, but the actual work is senior builder-leadership in BFSI."
+      },
+      {
+        "name": "Indu Kuppusamy",
+        "why": "VP at Goldman with explicit agentic AI, MCP server, semantic search, and marketplace build evidence. Strong example of context-appropriate VP plus hands-on builder depth."
+      },
+      {
+        "name": "Alexander Zakharov",
+        "why": "Principal architect with deep fixed-income and credit-trading background plus recent agentic workflow and orchestration work. Excellent hidden-builder archetype."
+      }
+    ],
+    "incorrect_saves": [
+      {
+        "name": "Robert Babinski",
+        "why": "Large-org CTO at Freddie Mac with 400-person org and budget scope far above the role. Wrong level, wrong cost, too far from the code."
+      },
+      {
+        "name": "Swatee Singh",
+        "why": "EVP/CDAIO and MD trajectory at major institutions. Way above intended scope despite strong finance relevance."
+      },
+      {
+        "name": "Richa Kaul",
+        "why": "Customer-solutions / pre-sales architecture at AWS. Strong client-facing polish, wrong kind of technical work."
+      },
+      {
+        "name": "Amir Elkabir",
+        "why": "Head of AI Products profile. Product strategy and transformation rather than builder depth."
+      },
+      {
+        "name": "Gerard Pento",
+        "why": "Citi executive whose AI work centers on vendor-tool adoption like GitHub Copilot and Devin. Too senior and wrong depth."
+      }
+    ],
+    "borderline_verify": [
+      {
+        "name": "Susan Malkin",
+        "why": "Context-dependent seniority and mixed startup plus large-bank signal. Worth opening, but verify whether she remains a builder."
+      },
+      {
+        "name": "David Goldberg",
+        "why": "SVP title at a smaller firm plus direct RAG build signal. Could be within range if the firm context is genuinely small and hands-on."
+      },
+      {
+        "name": "Pratik Shah",
+        "why": "Engineering Director & Head of GenAI at Morgan Stanley with relevant tooling. Keep if the build evidence outweighs any tool-adoption-only language."
+      }
+    ]
+  },
+
+  "version": "2.0",
+  "author": "Codex",
+  "notes": "V2 brief for Head of Applied AI Lab. Keeps the old AI Lab evaluation bar but ports in the tapped-market and novelty-accounting controls from the edge-case FDE brief. Search strategy is intentionally biased toward non-obvious BFSI subdomain language, workflow language, vendor contexts, and adjacent executive-builder titles before canonical big-bank or generic GenAI pools."
+}

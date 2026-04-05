@@ -108,7 +108,21 @@ class BlockReport:
             lines.append("- Per-string breakdown:")
             for sd in self.string_details:
                 status = f"{sd['saves']} saves" if sd['saves'] else "zero saves"
-                lines.append(f"  #{sd['string_id']} [{status}, {sd['pages_reviewed']}p, {sd['result_count']} results]: {sd['boolean'][:150]}")
+                metadata = (
+                    f"family={sd.get('family_key', 'unknown')} "
+                    f"novelty={sd.get('novelty_bucket', 'unknown')} "
+                    f"lane={sd.get('domain_lane', 'general')}"
+                )
+                lines.append(
+                    f"  #{sd['string_id']} [{status}, {sd['pages_reviewed']}p, {sd['result_count']} results, {metadata}]: "
+                    f"{sd['boolean'][:150]}"
+                )
+                if "duplicates" in sd or "candidates" in sd:
+                    lines.append(
+                        f"    Seen: candidates={sd.get('candidates', 0)}, "
+                        f"duplicates={sd.get('duplicates', 0)}, "
+                        f"facial_yes={sd.get('facial_yes', 0)}, facial_no={sd.get('facial_no', 0)}"
+                    )
                 if sd.get('notes'):
                     lines.append(f"    Notes: {sd['notes']}")
                 if sd.get('save_names'):

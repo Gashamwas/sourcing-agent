@@ -20,9 +20,11 @@ from shared.brief_loader import load_brief, Brief
 
 BRAZIL_BRIEF_PATH = str(Path(__file__).parent.parent / "config" / "brief-brazil-real.json")
 HEAD_AI_BRIEF_PATH = str(Path(__file__).parent.parent / "config" / "brief-head-ai-lab-real.json")
+HEAD_AI_V2_BRIEF_PATH = str(Path(__file__).parent.parent / "config" / "brief-head-ai-lab-nyc-v2.json")
 
 BRAZIL_BRIEF = load_brief(BRAZIL_BRIEF_PATH)
 HEAD_AI_BRIEF = load_brief(HEAD_AI_BRIEF_PATH)
+HEAD_AI_V2_BRIEF = load_brief(HEAD_AI_V2_BRIEF_PATH)
 
 
 def _make_snippet(**kwargs) -> CandidateSnippet:
@@ -126,6 +128,22 @@ def test_head_ai_brief_loads():
     assert brief.kit_url.startswith("https://search-kit-library.vercel.app/kit/")
     assert brief.linkedin_project == "Head of Applied AI Lab"
     assert brief.linkedin_project_id == "1957683706"
+
+
+def test_head_ai_v2_brief_loads():
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    assert isinstance(brief, Brief)
+    assert brief.has_v2_schema is True
+    assert brief.role_title == "Head of Applied AI Lab"
+    assert brief.linkedin_project == "Head of Applied AI Lab"
+    assert brief.linkedin_project_id == "1957683706"
+    assert brief.additional_search_terms
+    assert "analyst assistant" in brief.additional_search_terms
+    assert "trade surveillance workflow" in brief.additional_search_terms
+    assert "first 8 strings" in brief.intake_notes.lower() or any(
+        "first 8 strings" in instruction.lower() for instruction in brief.instructions
+    )
+    assert brief.market_density == "sparse"
 
 
 def test_both_briefs_have_kit_url():

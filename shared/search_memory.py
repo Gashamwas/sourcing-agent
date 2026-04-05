@@ -331,7 +331,9 @@ def build_search_memory_summary(memory: dict | None, limit: int = 8) -> dict:
 
 def format_search_memory_summary(memory: dict | None, limit: int = 8) -> str:
     """Human-readable summary for prompt injection."""
-    summary = build_search_memory_summary(memory, limit=limit)
+    summary = memory or {}
+    if not summary or not isinstance(summary.get("families"), list):
+        summary = build_search_memory_summary(memory, limit=limit)
     overall = summary["overall"]
     lines = [
         "Prior search-family memory:",

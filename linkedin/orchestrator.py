@@ -34,6 +34,14 @@ from shared.judger import facial_judge, full_judge, init_judger, is_failure_deci
 from shared.storage import append_jsonl, read_jsonl, read_jsonl_set, log_event, write_json, read_json
 from shared.brief_loader import load_brief, Brief
 from shared.bias_controls import BiasMonitor, DecisionRecord
+from shared.search_memory import (
+    build_search_memory_summary,
+    extract_dominant_anchors,
+    infer_domain_lane,
+    normalize_family_key,
+    normalize_novelty_bucket,
+    update_search_memory,
+)
 from shared import config
 from shared.governor import GovernorLimitReached, SessionExpired
 
@@ -146,6 +154,8 @@ class Pipeline:
 
         # Cross-session noise discoveries (brief-scoped, never archived)
         self.noise_path = self.output_dir / f"noise_discoveries-{self._brief_id}.jsonl"
+        self.search_memory_path = self.output_dir / f"search_memory-{self._brief_id}.json"
+        self._search_memory: dict = {}
 
         # Dedup cache (loaded once, updated in memory — avoids O(n^2) file reads)
         self._seen_urls: set[str] = set()       # terminal outcomes only
@@ -221,6 +231,49 @@ class Pipeline:
         if url:
             self._seen_urls.add(url)
 
+    def _load_search_memory(self) -> None:
+        """Load brief-scoped search family memory if present."""
+        if not self.search_memory_path.exists():
+            self._search_memory = {}
+            return
+        self._search_memory = read_json(self.search_memory_path)
+        families = len(self._search_memory.get("families", {}))
+        print(f"  [memory] Loaded search family memory ({families} families)")
+
+    def _save_search_memory(self) -> None:
+        """Persist brief-scoped search family memory."""
+        write_json(self.search_memory_path, self._search_memory)
+
+    def _update_search_memory_from_block(self, block_strings: list[SearchString]) -> None:
+        """Update family memory with the completed block's observed performance."""
+        self._search_memory = update_search_memory(
+            self._search_memory,
+            self._brief_id,
+            block_strings,
+        )
+        self._save_search_memory()
+
+    def _hydrate_search_string_metadata(self, search_string: SearchString) -> None:
+        """Backfill family metadata for older progress files or unlabeled strings."""
+        if not search_string.family_key:
+            search_string.family_key = normalize_family_key(
+                None,
+                search_string.boolean,
+                search_string.name,
+            )
+        if not search_string.novelty_bucket:
+            search_string.novelty_bucket = normalize_novelty_bucket(
+                None,
+                search_string.boolean,
+                search_string.name,
+            )
+        if not search_string.domain_lane:
+            search_string.domain_lane = infer_domain_lane(
+                None,
+                search_string.boolean,
+                search_string.name,
+            )
+
     def _checkpoint_progress(
         self,
         progress: Progress | None,
@@ -260,6 +313,7 @@ class Pipeline:
         self._in_flight_urls = set()
         self._prior_outcomes = {}
         self._load_candidate_history()
+        self._load_search_memory()
 
         progress = self._load_or_create_progress()
         self._progress = progress
@@ -433,6 +487,7 @@ class Pipeline:
         self._in_flight_urls = set()
         self._prior_outcomes = {}
         self._load_candidate_history()
+        self._load_search_memory()
 
         # Ctrl+C handler — only install if not running under session_orchestrator
         def _sigint_handler(sig, frame):
@@ -468,6 +523,7 @@ class Pipeline:
                 self._in_flight_urls = set()
                 self._prior_outcomes = {}
                 self._load_candidate_history()
+                self._load_search_memory()
 
                 # Load kit strings for adaptation vocabulary
                 kit_path = self.output_dir / "kit_strings.json"
@@ -485,6 +541,9 @@ class Pipeline:
                 if self._bias_monitor and self.bias_checkpoint_path.exists():
                     self._bias_monitor.load_checkpoint(str(self.bias_checkpoint_path))
                     print(f"  Resumed bias monitor from checkpoint")
+
+                for search_string in progress.strings:
+                    self._hydrate_search_string_metadata(search_string)
 
                 done_count = sum(1 for s in progress.strings if s.status == "done")
                 total_count = len(progress.strings)
@@ -528,6 +587,11 @@ class Pipeline:
                             prior_data = {}
                         prior_data["noise_discoveries"] = noise_entries
 
+                if self._search_memory:
+                    if prior_data is None:
+                        prior_data = {}
+                    prior_data["search_memory_summary"] = self._search_memory
+
                 self._execution_plan = form_strategy(self.brief_obj, self._kit_strings, prior_data)
                 write_json(self.output_dir / "execution_plan.json", self._execution_plan.to_dict())
                 print(f"  Strategy: {self._execution_plan.strategy_rationale[:120]}...")
@@ -542,6 +606,8 @@ class Pipeline:
 
                 # --- Phase 3: Build execution order from plan ---
                 search_strings = self._build_ordered_search_strings()
+                for search_string in search_strings:
+                    self._hydrate_search_string_metadata(search_string)
 
                 progress = Progress(
                     brief_name=self.brief_obj.id,
@@ -958,6 +1024,9 @@ class Pipeline:
         # Persist transient facial stats onto SearchString for block-level aggregation
         search_string.facial_yes_count = string_stats["facial_yes"]
         search_string.facial_no_count = string_stats["facial_no"]
+        search_string.candidates_count = string_stats["candidates"]
+        search_string.duplicates_count = string_stats["duplicates"]
+        self._hydrate_search_string_metadata(search_string)
 
     async def _extract_card_snippet(
         self,
@@ -2499,6 +2568,9 @@ Provide a narrowed Boolean."""
                 block=f"Compound Batch {batch_num}",
                 subblock="Compound",
                 string_type="Precision",
+                family_key=gs.get("family_key", ""),
+                novelty_bucket=gs.get("novelty_bucket", ""),
+                domain_lane=gs.get("domain_lane", ""),
             )
             ordered.append(ss)
             next_id += 1
@@ -2518,6 +2590,9 @@ Provide a narrowed Boolean."""
                 block="Coverage Gaps",
                 subblock="Coverage Gap",
                 string_type="Recall",
+                family_key=gap.get("family_key", ""),
+                novelty_bucket=gap.get("novelty_bucket", ""),
+                domain_lane=gap.get("domain_lane", ""),
             )
             ordered.append(ss)
             next_id += 1
@@ -2537,6 +2612,13 @@ Provide a narrowed Boolean."""
         total_facial_yes = sum(s.facial_yes_count for s in block_strings)
         total_seen = total_facial_no + total_facial_yes
         total_saves = sum(len(s.saves) for s in block_strings)
+        total_duplicates = sum(s.duplicates_count for s in block_strings)
+        edge_case_saves = sum(
+            len(s.saves) for s in block_strings if s.novelty_bucket == "edge_case"
+        )
+        canonical_saves = sum(
+            len(s.saves) for s in block_strings if s.novelty_bucket == "canonical"
+        )
 
         facial_no_rate = total_facial_no / total_seen if total_seen else 0
         save_rate = total_saves / total_facial_yes if total_facial_yes else 0
@@ -2550,6 +2632,8 @@ Provide a narrowed Boolean."""
             f"- Facial NO rate: {facial_no_rate:.1%}",
             f"- Saves: {total_saves}",
             f"- Save rate (per evaluated): {save_rate:.1%}",
+            f"- Duplicates skipped: {total_duplicates}",
+            f"- Novelty mix: edge_case={edge_case_saves}, canonical={canonical_saves}",
             f"- Strings with <20 results: {strings_below_20}/{len(block_strings)}",
         ]
 
@@ -2613,6 +2697,8 @@ Provide a narrowed Boolean."""
         print(f"{'═' * 60}")
 
         profile_index = self._load_profile_index_for_adaptation()
+        for search_string in block_strings:
+            self._hydrate_search_string_metadata(search_string)
 
         # Build block report
         strings_with_saves = [s for s in block_strings if s.saves]
@@ -2628,6 +2714,9 @@ Provide a narrowed Boolean."""
                     "name": s.name,
                     "saves": len(s.saves),
                     "results": s.result_count,
+                    "family_key": s.family_key,
+                    "novelty_bucket": s.novelty_bucket,
+                    "domain_lane": s.domain_lane,
                 }
                 for s in sorted(strings_with_saves, key=lambda x: len(x.saves), reverse=True)[:3]
             ],
@@ -2640,11 +2729,16 @@ Provide a narrowed Boolean."""
                     "original_boolean": s.original_boolean or s.boolean,
                     "result_count": s.result_count,
                     "pages_reviewed": s.pages_reviewed,
+                    "candidates": s.candidates_count,
+                    "duplicates": s.duplicates_count,
                     "saves": len(s.saves),
                     "save_names": s.saves[:5],
                     "saved_profiles": self._saved_profile_snapshots(s.saves[:5], profile_index),
                     "facial_yes": s.facial_yes_count,
                     "facial_no": s.facial_no_count,
+                    "family_key": s.family_key,
+                    "novelty_bucket": s.novelty_bucket,
+                    "domain_lane": s.domain_lane,
                     "notes": s.notes,
                 }
                 for s in block_strings
@@ -2652,9 +2746,12 @@ Provide a narrowed Boolean."""
         )
 
         print(f"  {report.to_summary_text()}")
+        self._update_search_memory_from_block(block_strings)
 
         # Get remaining unexecuted search strings
         remaining = [s for s in progress.strings if s.status == "queued"]
+        for search_string in remaining:
+            self._hydrate_search_string_metadata(search_string)
 
         if not remaining:
             print("  No remaining strings — skipping adaptation.")
@@ -2669,6 +2766,7 @@ Provide a narrowed Boolean."""
                 execution_plan=self._execution_plan,
                 pivot_count=progress.pivot_count,
                 block_aggregate=block_aggregate,
+                search_memory_summary=self._search_memory,
             )
 
             # Apply adaptations
@@ -2697,7 +2795,11 @@ Provide a narrowed Boolean."""
                         boolean=ns["boolean"],
                         block=block_name,
                         string_type="Adaptive",
+                        family_key=ns.get("family_key", ""),
+                        novelty_bucket=ns.get("novelty_bucket", ""),
+                        domain_lane=ns.get("domain_lane", ""),
                     )
+                    self._hydrate_search_string_metadata(new_ss)
                     progress.strings.insert(insert_idx, new_ss)
                     inserted_ids.add(max_id)
                     insert_idx += 1

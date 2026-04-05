@@ -16,6 +16,12 @@ import sys
 from shared.schemas import KitString, ExecutionPlan, BlockReport, AdaptationResponse, SearchString
 from shared.llm_clients import opus_llm
 from shared.brief_loader import Brief
+from shared.search_memory import (
+    format_search_memory_summary,
+    infer_domain_lane,
+    normalize_family_key,
+    normalize_novelty_bucket,
+)
 
 
 _CANONICAL_FRAMEWORK_PATTERNS = (
@@ -81,6 +87,30 @@ _EDGE_CASE_PATTERNS = (
     "copilot",
     "co-pilot",
     "internal copilot",
+    "analyst assistant",
+    "treasury assistant",
+    "research workflow",
+    "research copilot",
+    "investment memo",
+    "client reporting",
+    "trade surveillance",
+    "market surveillance",
+    "collateral workflow",
+    "collateral management",
+    "post trade",
+    "post-trade",
+    "onboarding automation",
+    "claims intake",
+    "claims workflow",
+    "underwriting workbench",
+    "underwriting assistant",
+    "policy review",
+    "model risk",
+    "model governance",
+    "regulatory response",
+    "market data workflow",
+    "custody workflow",
+    "portfolio operations",
     "knowledge management",
     "knowledge assistant",
     "intelligent search",
@@ -228,6 +258,119 @@ def _sort_strings_for_edge_case_opening(strings: list[dict]) -> list[dict]:
     return [item for _, item in annotated]
 
 
+def _annotate_string_metadata(item: dict, *, boolean_key: str = "boolean") -> dict:
+    """Ensure generated strings carry stable family/novelty/domain labels."""
+    boolean = item.get(boolean_key, "") or ""
+    rationale = item.get("rationale", "") or item.get("gap", "") or ""
+    bucket, _score = _opening_priority(boolean, rationale)
+
+    item["family_key"] = normalize_family_key(item.get("family_key"), boolean, rationale)
+    item["novelty_bucket"] = normalize_novelty_bucket(
+        item.get("novelty_bucket")
+        or ("edge_case" if bucket == 0 else "canonical"),
+        boolean,
+        rationale,
+    )
+    item["domain_lane"] = infer_domain_lane(item.get("domain_lane"), boolean, rationale)
+    return item
+
+
+def _annotate_plan_metadata(plan: ExecutionPlan) -> None:
+    plan.generated_strings = [
+        _annotate_string_metadata(dict(item))
+        for item in plan.generated_strings
+    ]
+
+    annotated_gaps = []
+    for gap in plan.coverage_gaps:
+        gap_item = dict(gap)
+        if gap_item.get("suggested_boolean"):
+            gap_item = _annotate_string_metadata(gap_item, boolean_key="suggested_boolean")
+        annotated_gaps.append(gap_item)
+    plan.coverage_gaps = annotated_gaps
+
+
+def _annotate_adaptation_metadata(adaptation: AdaptationResponse) -> None:
+    adaptation.new_strings = [
+        _annotate_string_metadata(dict(item))
+        for item in adaptation.new_strings
+    ]
+
+
+def _apply_search_memory_to_plan(
+    plan: ExecutionPlan,
+    search_memory: dict | None,
+) -> str:
+    """Demote exhausted search families so prior overlap does not lead the run again."""
+    if not search_memory or not search_memory.get("families"):
+        return ""
+
+    family_status = {
+        family.get("family_key", ""): family
+        for family in search_memory.get("families", [])
+    }
+    annotated: list[tuple[tuple[int, int], dict]] = []
+    demoted = 0
+
+    for idx, item in enumerate(plan.generated_strings):
+        family = family_status.get(item.get("family_key", ""), {})
+        exhausted = family.get("status") == "exhausted"
+        if exhausted:
+            demoted += 1
+        annotated.append(
+            (
+                (
+                    1 if exhausted else 0,
+                    idx,
+                ),
+                item,
+            )
+        )
+
+    annotated.sort(key=lambda pair: pair[0])
+    plan.generated_strings = [item for _, item in annotated]
+    if demoted == 0:
+        return ""
+    return f"demoted {demoted} strings from exhausted families"
+
+
+def _apply_search_memory_to_adaptation(
+    adaptation: AdaptationResponse,
+    remaining_strings: list[SearchString],
+    search_memory: dict | None,
+) -> None:
+    if not search_memory or not search_memory.get("families"):
+        return
+
+    family_status = {
+        family.get("family_key", ""): family
+        for family in search_memory.get("families", [])
+    }
+
+    adaptation.new_strings.sort(
+        key=lambda item: (
+            1
+            if family_status.get(item.get("family_key", ""), {}).get("status") == "exhausted"
+            else 0,
+            0 if item.get("novelty_bucket") == "edge_case" else 1,
+        )
+    )
+
+    remaining_by_id = {ss.id: ss for ss in remaining_strings}
+    for reorder in adaptation.reorder:
+        if reorder.get("move_to") != "next":
+            continue
+        ss = remaining_by_id.get(reorder.get("string_id"))
+        if not ss:
+            continue
+        family = family_status.get(ss.family_key or "", {})
+        if family.get("status") == "exhausted":
+            reorder["move_to"] = "last"
+            reason = reorder.get("reason", "").strip()
+            suffix = "Demoted because this family is exhausted from prior runs."
+            reorder["reason"] = f"{reason} {suffix}".strip()
+
+
 def _augment_novelty_metrics(plan: ExecutionPlan) -> None:
     success_metric = (
         "At least 50% of saves from the first 2 blocks come from adjacent or edge-case "
@@ -342,9 +485,17 @@ def form_strategy(
     try:
         result = opus_llm(system, user_prompt, expect_json=True, max_tokens=16384)
         plan = ExecutionPlan.from_dict(result)
+        _annotate_plan_metadata(plan)
         if _brief_targets_edge_case_opening(brief):
             summary = _rebalance_execution_plan_for_edge_case_opening(plan)
+            _annotate_plan_metadata(plan)
             print(f"  Edge-case rebalance: {summary}")
+        memory_summary = _apply_search_memory_to_plan(
+            plan,
+            (prior_run_data or {}).get("search_memory_summary"),
+        )
+        if memory_summary:
+            print(f"  Search-memory rebalance: {memory_summary}")
         plan.original_architecture = plan.architecture  # Set once, never updated on pivot
         if plan.architecture:
             print(f"  Architecture: {plan.architecture} — {plan.architecture_rationale[:120]}")
@@ -354,6 +505,7 @@ def form_strategy(
         # Try to salvage a partial JSON response
         plan = _try_salvage_strategy(e)
         if plan:
+            _annotate_plan_metadata(plan)
             print(f"  [warn] Strategy JSON was truncated — salvaged partial plan", file=sys.stderr)
             return plan
 
@@ -610,10 +762,16 @@ Return JSON with this structure:
   - "boolean": The full Boolean string (string)
   - "rationale": Why this compound is likely to surface strong candidates for the role (string)
   - "vocabulary_sources": {"Which kit blocks/clusters the terms come from" if has_kit else "Which JD sections or capability areas the terms derive from"} (string) — this is for traceability only, NOT for scoping evaluation
+  - "family_key": Short stable label for this search family (string) — use the same label for close variants of the same idea
+  - "novelty_bucket": "edge_case" or "canonical" (string)
+  - "domain_lane": Primary lane this string targets (string, e.g. capital_markets, risk_compliance, asset_management, insurance, bfsi_vendors, general)
 - "coverage_gaps": Array of gaps identified. Each object:
   - "gap": Description of the missing coverage (string)
   - "suggested_boolean": Optional Boolean string to fill the gap, or null (string|null)
   - "rationale": Why this population matters for this role (string)
+  - "family_key": Optional stable label for the gap string family (string)
+  - "novelty_bucket": Optional "edge_case" or "canonical" (string)
+  - "domain_lane": Optional primary lane label (string)
 - "noise_predictions": Array of objects with "term" (string), "expected_collision" (string), "mitigation" (string)
 
 Return valid JSON only."""
@@ -654,7 +812,9 @@ the role description, archetypes, and JD context below. Apply all LinkedIn Boole
         prompt += f"\n## Intake Notes\n{brief.intake_notes}\n"
 
     if prior_run_data:
-        prompt += f"\n## Prior Run Data\n{json.dumps(prior_run_data, indent=2)}\n"
+        raw_prior = dict(prior_run_data)
+        raw_prior.pop("search_memory_summary", None)
+        prompt += f"\n## Prior Run Data\n{json.dumps(raw_prior, indent=2)}\n"
 
         if prior_run_data.get("noise_discoveries"):
             noise_text = "\n## Noise Patterns Discovered in Prior Sessions\n"
@@ -662,6 +822,14 @@ the role description, archetypes, and JD context below. Apply all LinkedIn Boole
                 noise_text += f"- {nd['term']}: [{nd['status']}] {nd.get('note', '')}\n"
             noise_text += "\nAvoid generating strings that primarily target confirmed_noise patterns.\n"
             prompt += noise_text
+
+        if prior_run_data.get("search_memory_summary"):
+            prompt += (
+                "\n## Search Family Memory\n"
+                f"{format_search_memory_summary(prior_run_data['search_memory_summary'])}\n"
+                "\nAvoid reopening exhausted families early in the run. If you reuse them at all, "
+                "treat them as later cleanup passes rather than opening bets.\n"
+            )
 
     if brief.search_priorities:
         prompt += f"\n## User Hints\nSearch priorities: {', '.join(brief.search_priorities)}\n"
@@ -723,6 +891,7 @@ def adapt_after_block(
     execution_plan: ExecutionPlan | None = None,
     pivot_count: int = 0,
     block_aggregate: str = "",
+    search_memory_summary: dict | None = None,
 ) -> AdaptationResponse:
     """Ask Opus to adapt after a block completes — generate new strings from vocabulary.
 
@@ -823,7 +992,7 @@ If a string is productive but mostly confirms the obvious pool, treat it as clea
 {arch_review}
 
 Return JSON with this structure:
-- "new_strings": Array of objects with "boolean" (string), "rationale" (string)
+- "new_strings": Array of objects with "boolean" (string), "rationale" (string), "family_key" (string), "novelty_bucket" ("edge_case"|"canonical"), "domain_lane" (string)
 - "skip_remaining": Array of objects with "string_id" (int), "reason" (string)
 - "reorder": Array of objects with "string_id" (int), "move_to" ("next" | "last"), "reason" (string)
 - "noise_updates": Array of objects with "term" (string), "status" ("confirmed_signal" | "confirmed_noise" | "mixed"), "note" (string)
@@ -834,13 +1003,23 @@ Return valid JSON only."""
 
     remaining_text = ""
     for ss in remaining_strings:
-        remaining_text += f"  #{ss.id}: {ss.boolean[:200]}\n"
+        metadata = (
+            f"family={ss.family_key or 'unknown'} "
+            f"novelty={ss.novelty_bucket or 'unknown'} "
+            f"lane={ss.domain_lane or 'general'}"
+        )
+        remaining_text += f"  #{ss.id} [{metadata}]: {ss.boolean[:200]}\n"
 
     user_prompt = f"""{block_report.to_summary_text()}
 
 ## Remaining Queued Strings ({len(remaining_strings)})
 {remaining_text}
 """
+    if search_memory_summary:
+        user_prompt += (
+            "\n## Search Family Memory\n"
+            f"{format_search_memory_summary(search_memory_summary)}\n"
+        )
     if vocab_section:
         user_prompt += f"""
 ## Kit Vocabulary (building blocks for new strings)
@@ -851,6 +1030,8 @@ Return valid JSON only."""
 
     result = opus_llm(system, user_prompt, expect_json=True)
     adaptation = AdaptationResponse.from_dict(result)
+    _annotate_adaptation_metadata(adaptation)
     if _brief_targets_edge_case_opening(brief):
         adaptation = _rebalance_adaptation_for_edge_case_opening(adaptation, remaining_strings)
+    _apply_search_memory_to_adaptation(adaptation, remaining_strings, search_memory_summary)
     return adaptation
