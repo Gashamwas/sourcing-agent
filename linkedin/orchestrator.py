@@ -29,6 +29,7 @@ from shared.extractors import (
     extract_snippet_from_card_innertext,
     extract_profile_from_dom,
 )
+from shared.failures import judgment_failure_decision
 from shared.judger import facial_judge, full_judge, init_judger, is_failure_decision
 from shared.storage import append_jsonl, read_jsonl, read_jsonl_set, log_event, write_json, read_json
 from shared.brief_loader import load_brief, Brief
@@ -2179,10 +2180,12 @@ Provide a narrowed Boolean."""
         except Exception as e:
             print(f"    [ERROR] Facial judgment failed: {e}")
             log_event(self.log_path, "facial_error", name=snippet.name, error=str(e))
-            facial = OpusDecision(
-                stage="facial", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-                rationale=f"[JUDGMENT_FAILURE: {str(e)[:100]}]",
-                candidate_name=snippet.name, profile_url=snippet.profile_url,
+            facial = judgment_failure_decision(
+                stage="facial",
+                candidate_name=snippet.name,
+                profile_url=snippet.profile_url,
+                error=e,
+                source="judgment",
             )
 
         append_jsonl(self.facial_path, facial.to_dict())
@@ -2327,10 +2330,12 @@ Provide a narrowed Boolean."""
         except Exception as e:
             print(f"    [ERROR] Final judgment failed: {e}")
             log_event(self.log_path, "final_error", name=snippet.name, error=str(e))
-            final = OpusDecision(
-                stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-                rationale=f"[JUDGMENT_FAILURE: {e}]",
-                candidate_name=snippet.name, profile_url=snippet.profile_url,
+            final = judgment_failure_decision(
+                stage="full",
+                candidate_name=snippet.name,
+                profile_url=snippet.profile_url,
+                error=e,
+                source="judgment",
             )
 
         append_jsonl(self.final_path, final.to_dict())

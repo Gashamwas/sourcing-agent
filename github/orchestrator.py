@@ -36,6 +36,7 @@ from github.query_validator import ExhaustionState
 from github.observability import SessionObserver
 from shared.contact_discovery import merge_profile_contact
 
+from shared.failures import judgment_failure_decision
 from shared.schemas import CandidateSnippet, CandidateProfileSummary, OpusDecision
 from shared.judger import facial_judge, full_judge, init_judger, github_facial_judge, github_facial_judge_batch, github_full_judge, extract_priority_rank, is_failure_decision
 from github.outreach import generate_outreach
@@ -679,11 +680,12 @@ class GitHubPipeline:
                 try:
                     full_decision = github_full_judge(evidence_text)
                 except Exception as e:
-                    full_decision = OpusDecision(
-                        stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-                        rationale=f"[JUDGMENT_FAILURE: {e}]",
+                    full_decision = judgment_failure_decision(
+                        stage="full",
                         candidate_name=candidate.user.name or username,
                         profile_url=candidate.user.profile_url,
+                        error=e,
+                        source="judgment",
                     )
                 full_decision.candidate_name = candidate.user.name or username
                 full_decision.profile_url = candidate.user.profile_url
@@ -804,11 +806,12 @@ class GitHubPipeline:
             try:
                 facial_decision = github_facial_judge(portfolio_text)
             except Exception as e:
-                facial_decision = OpusDecision(
-                    stage="facial", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-                    rationale=f"[JUDGMENT_FAILURE: {e}]",
+                facial_decision = judgment_failure_decision(
+                    stage="facial",
                     candidate_name=candidate.user.name or username,
                     profile_url=candidate.user.profile_url,
+                    error=e,
+                    source="judgment",
                 )
             facial_decision.candidate_name = candidate.user.name or username
             facial_decision.profile_url = candidate.user.profile_url
@@ -823,10 +826,12 @@ class GitHubPipeline:
             try:
                 facial_decision = facial_judge(snippet)
             except Exception as e:
-                facial_decision = OpusDecision(
-                    stage="facial", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-                    rationale=f"[JUDGMENT_FAILURE: {e}]",
-                    candidate_name=snippet.name, profile_url=snippet.profile_url,
+                facial_decision = judgment_failure_decision(
+                    stage="facial",
+                    candidate_name=snippet.name,
+                    profile_url=snippet.profile_url,
+                    error=e,
+                    source="judgment",
                 )
 
         append_jsonl(self.facial_path, facial_decision.to_dict())
@@ -862,11 +867,12 @@ class GitHubPipeline:
             try:
                 full_decision = github_full_judge(evidence_text)
             except Exception as e:
-                full_decision = OpusDecision(
-                    stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-                    rationale=f"[JUDGMENT_FAILURE: {e}]",
+                full_decision = judgment_failure_decision(
+                    stage="full",
                     candidate_name=candidate.user.name or username,
                     profile_url=candidate.user.profile_url,
+                    error=e,
+                    source="judgment",
                 )
             full_decision.candidate_name = candidate.user.name or username
             full_decision.profile_url = candidate.user.profile_url
@@ -876,10 +882,12 @@ class GitHubPipeline:
             try:
                 full_decision = full_judge(profile_summary)
             except Exception as e:
-                full_decision = OpusDecision(
-                    stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-                    rationale=f"[JUDGMENT_FAILURE: {e}]",
-                    candidate_name=profile_summary.name, profile_url=profile_summary.profile_url,
+                full_decision = judgment_failure_decision(
+                    stage="full",
+                    candidate_name=profile_summary.name,
+                    profile_url=profile_summary.profile_url,
+                    error=e,
+                    source="judgment",
                 )
 
         append_jsonl(self.final_path, full_decision.to_dict())

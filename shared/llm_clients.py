@@ -6,29 +6,19 @@ import random
 import time
 import shared.config as config
 
+from shared.failures import classify_runtime_failure
+
 
 # ---------------------------------------------------------------------------
 # Retry helper
 # ---------------------------------------------------------------------------
 
-_RETRYABLE_STATUS_CODES = {429, 502, 503, 529}
 _MAX_RETRIES = 5
 
 
 def _is_retryable(exc: Exception) -> bool:
     """Check if an exception is a transient API error worth retrying."""
-    err_str = str(exc)
-    # Anthropic SDK raises APIStatusError with status_code attribute
-    if hasattr(exc, 'status_code') and exc.status_code in _RETRYABLE_STATUS_CODES:
-        return True
-    # OpenAI SDK raises similar structured errors
-    if hasattr(exc, 'status_code') and exc.status_code in _RETRYABLE_STATUS_CODES:
-        return True
-    # Fallback: check error message for known transient patterns
-    for pattern in ['overloaded', '529', '503', '502', 'rate_limit', '429', 'capacity']:
-        if pattern in err_str.lower():
-            return True
-    return False
+    return classify_runtime_failure(exc, source="llm").retryable
 
 
 def _retry_with_backoff(fn, label: str = "LLM"):
@@ -37,9 +27,14 @@ def _retry_with_backoff(fn, label: str = "LLM"):
         try:
             return fn()
         except Exception as e:
-            if attempt < _MAX_RETRIES - 1 and _is_retryable(e):
+            classification = classify_runtime_failure(e, source="llm")
+            if attempt < _MAX_RETRIES - 1 and classification.retryable:
                 wait = (2 ** attempt) + random.uniform(0, 1)
-                print(f"    [RETRY] {label} error ({e}), attempt {attempt + 1}/{_MAX_RETRIES}, waiting {wait:.1f}s")
+                print(
+                    f"    [RETRY] {label} {classification.kind.lower()}/"
+                    f"{classification.domain}/{classification.reason} "
+                    f"({e}), attempt {attempt + 1}/{_MAX_RETRIES}, waiting {wait:.1f}s"
+                )
                 time.sleep(wait)
             else:
                 raise

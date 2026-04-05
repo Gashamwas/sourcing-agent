@@ -12,6 +12,11 @@ from __future__ import annotations
 import json
 import logging
 import re
+from shared.failures import (
+    is_failure_decision as _is_failure_decision,
+    judgment_failure_decision,
+    parse_failure_decision,
+)
 from shared.schemas import CandidateSnippet, CandidateProfileSummary, OpusDecision
 from shared.llm_clients import opus_llm, opus_llm_cached, facial_llm
 from shared.brief_loader import Brief
@@ -33,7 +38,7 @@ def _safe_confidence(val, default: float = 0.5) -> float:
 
 def is_failure_decision(decision: str) -> bool:
     """True if decision represents a non-terminal parse/judgment failure."""
-    return decision in ("PARSE_FAILURE", "JUDGMENT_FAILURE")
+    return _is_failure_decision(decision)
 
 
 def extract_priority_rank(path: str) -> int:
@@ -369,10 +374,12 @@ def facial_judge(snippet: CandidateSnippet, brief: Brief | None = None, prompt_p
             raw = facial_llm(system, user_msg, expect_json=False)
         except Exception as e:
             logger.warning("V2 facial judge exception: %s", e)
-            return OpusDecision(
-                stage="facial", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-                rationale=f"[JUDGMENT_FAILURE: {e}]",
-                candidate_name=snippet.name, profile_url=snippet.profile_url,
+            return judgment_failure_decision(
+                stage="facial",
+                candidate_name=snippet.name,
+                profile_url=snippet.profile_url,
+                error=e,
+                source="judgment",
             )
         result = parse_facial_response(raw)
         confidence = 0.0 if is_failure_decision(result.decision) else 1.0
@@ -408,19 +415,23 @@ Decide: FACIAL_YES or FACIAL_NO."""
         result = opus_llm_cached(system, user_prompt, expect_json=True)
     except Exception as e:
         logger.warning("old-brief facial judge exception: %s", e)
-        return OpusDecision(
-            stage="facial", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-            rationale=f"[JUDGMENT_FAILURE: {e}]",
-            candidate_name=snippet.name, profile_url=snippet.profile_url,
+        return judgment_failure_decision(
+            stage="facial",
+            candidate_name=snippet.name,
+            profile_url=snippet.profile_url,
+            error=e,
+            source="judgment",
         )
 
     raw_decision = result.get("decision") if isinstance(result, dict) else None
     if raw_decision not in _VALID_FACIAL:
         logger.warning("facial parse-failure: decision=%r (old-brief path)", raw_decision)
-        return OpusDecision(
-            stage="facial", decision="PARSE_FAILURE", path="none", confidence=0.0,
-            rationale=f"[PARSE_FAILURE: decision={raw_decision!r}]",
-            candidate_name=snippet.name, profile_url=snippet.profile_url,
+        return parse_failure_decision(
+            stage="facial",
+            candidate_name=snippet.name,
+            profile_url=snippet.profile_url,
+            reason="invalid_decision",
+            detail=f"decision={raw_decision!r}",
         )
     return OpusDecision(
         stage="facial",
@@ -450,10 +461,12 @@ def full_judge(summary: CandidateProfileSummary, brief: Brief | None = None) -> 
             raw = opus_llm_cached(system, profile_text, expect_json=False)
         except Exception as e:
             logger.warning("V2 full judge exception: %s", e)
-            return OpusDecision(
-                stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-                rationale=f"[JUDGMENT_FAILURE: {e}]",
-                candidate_name=summary.name, profile_url=summary.profile_url,
+            return judgment_failure_decision(
+                stage="full",
+                candidate_name=summary.name,
+                profile_url=summary.profile_url,
+                error=e,
+                source="judgment",
             )
         result = parse_full_evaluation_response(raw)
         # Build path from match_type + capability_area for downstream logging
@@ -509,19 +522,23 @@ Decide: SAVE or REJECT."""
         result = opus_llm_cached(system, user_prompt, expect_json=True)
     except Exception as e:
         logger.warning("old-brief full judge exception: %s", e)
-        return OpusDecision(
-            stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-            rationale=f"[JUDGMENT_FAILURE: {e}]",
-            candidate_name=summary.name, profile_url=summary.profile_url,
+        return judgment_failure_decision(
+            stage="full",
+            candidate_name=summary.name,
+            profile_url=summary.profile_url,
+            error=e,
+            source="judgment",
         )
 
     raw_decision = result.get("decision") if isinstance(result, dict) else None
     if raw_decision not in _VALID_FULL:
         logger.warning("full parse-failure: decision=%r (old-brief path)", raw_decision)
-        return OpusDecision(
-            stage="full", decision="PARSE_FAILURE", path="none", confidence=0.0,
-            rationale=f"[PARSE_FAILURE: decision={raw_decision!r}]",
-            candidate_name=summary.name, profile_url=summary.profile_url,
+        return parse_failure_decision(
+            stage="full",
+            candidate_name=summary.name,
+            profile_url=summary.profile_url,
+            reason="invalid_decision",
+            detail=f"decision={raw_decision!r}",
         )
     return OpusDecision(
         stage="full",
@@ -561,10 +578,12 @@ def github_facial_judge(portfolio_text: str, brief: Brief | None = None) -> Opus
         raw = facial_llm(system, portfolio_text, expect_json=False)
     except Exception as e:
         logger.warning("GitHub facial judge exception: %s", e)
-        return OpusDecision(
-            stage="facial", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-            rationale=f"[JUDGMENT_FAILURE: {e}]",
-            candidate_name="", profile_url="",
+        return judgment_failure_decision(
+            stage="facial",
+            candidate_name="",
+            profile_url="",
+            error=e,
+            source="judgment",
         )
     result = parse_facial_response(raw)
 
@@ -602,10 +621,12 @@ def github_full_judge(evidence_text: str, brief: Brief | None = None) -> OpusDec
         raw = opus_llm_cached(system, evidence_text, expect_json=False)
     except Exception as e:
         logger.warning("GitHub full judge exception: %s", e)
-        return OpusDecision(
-            stage="full", decision="JUDGMENT_FAILURE", path="none", confidence=0.0,
-            rationale=f"[JUDGMENT_FAILURE: {e}]",
-            candidate_name="", profile_url="",
+        return judgment_failure_decision(
+            stage="full",
+            candidate_name="",
+            profile_url="",
+            error=e,
+            source="judgment",
         )
     result = parse_full_evaluation_response(raw)
 
