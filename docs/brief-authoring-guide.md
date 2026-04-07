@@ -1,161 +1,170 @@
-# Brief Authoring Guide
+# Drafting The Agent Brief
 
-This guide walks you through writing a brief for the autonomous sourcing agent. The brief carries ALL role-specific evaluation criteria — the pipeline's templates, adaptation logic, and bias controls read from it. A well-written brief is the single highest-leverage input to the system.
+Internal only: use this to turn intake responses into a brief.
 
-If you're trying to socialize brief-writing with recruiters and recruiting managers, or you need to translate unfamiliar roles into agent-ready criteria, start with `docs/team-brief-translation-playbook.md` and fill `docs/agent-brief-intake-template.md` before drafting the JSON.
+If you are answering the intake, use `docs/agent-brief-intake-template.md` instead.
 
-The questions below map directly to fields in the brief schema. Answer each one. If you're using preflight (Opus generates a draft from the JD), use this guide to review what it produces — preflight fills gaps with generic criteria, and generic criteria compound into either false positives or false negatives over hundreds of evaluations.
+This guide is for the person drafting the brief. Its job is to help you turn plain-English intake responses into a first-pass brief without overfitting, guessing, or importing too much system language into the drafting process.
 
----
+## 1. What You Need Before You Start
 
-## 1. Role Identity
+For a strong first pass, you usually need:
 
-**What is the exact title, level, and 2-3 sentence summary of what this person does day-to-day?**
+- a job description
+- any existing intake notes
+- a few examples, if available
+- a clear picture of what good looks like
+- a clear picture of the common lookalikes that are usually wrong
+- enough context to understand where the search stands
 
-Not a rephrased JD. A synthesized description of the work. The summary should answer: "If I watched this person work for a week, what would I see them building?"
+You do not need a perfect packet. Do not block on completeness if the core judgment is clear.
 
-*FDL example: "Translates research goals into concrete data specifications, RL environment designs, and evaluation frameworks that improve frontier model training. Owns the technical bridge between what researchers need and what the data/environment infrastructure produces."*
+## 2. Start With The Role In Plain English
 
-Bad example: "A technical leader who works on AI/ML projects and collaborates with cross-functional teams." This describes every ML role. The evaluation template injects this summary into every prompt — if it's generic, the evaluator has nothing to anchor against.
+Before you touch the brief structure, write down a 2-3 sentence summary of the role in normal language.
 
----
+That summary should answer:
 
-## 2. Capability Areas (3-7)
+> If I watched this person work for a week, what would I actually see them doing?
 
-**What are the distinct domains that define this role's scope?**
+If you cannot answer that clearly, the rest of the brief will be weak.
 
-Each capability area should be a type of work the role does — not a skill, not a keyword, not a team name. Think: "What are the 3-7 things this person might spend a quarter building?"
+Good summary:
 
-For each area:
+> Hands-on engineer who designs and ships production AI workflows for enterprise customers, owns the surrounding architecture, and can turn vague business problems into working systems.
 
-- **Name**: Short, specific. "Post-Training Data & RLHF Pipelines" not "AI/ML."
-- **Description**: What work in this area looks like at this level.
-- **Builder signals**: Specific evidence that someone BUILDS in this area. Project types, methodologies, outputs. What would you see on a profile?
-- **User signals**: Specific evidence that someone USES outputs from this area. This is the false positive boundary — profiles that list similar keywords but do different work.
-- **Key terms** (optional): Terms that discriminate builders from users. Terms only builders would use.
+Weak summary:
 
-The capability areas are the anchors for Step 1 of every evaluation. If you get these wrong, the evaluator either maps everything (too broad) or nothing (too narrow).
+> Strategic cross-functional AI leader with strong communication skills.
 
-**How to test**: Take 5 candidates you've already evaluated correctly (3 saves, 2 rejects). Can you map each save to a specific capability area with evidence? Does each reject fail to map? If a reject maps to a capability area, the area is defined too broadly.
+The summary should describe the work, not the aspiration.
 
----
+## 3. Turn "What Good Looks Like" Into Capability Areas
 
-## 3. Depth Distinction
+Capability areas are the 3-7 kinds of work the role actually does.
 
-**What does "building" mean for this specific role? What does "using" mean?**
+They should be:
 
-This is the single most important calibration point. The depth distinction is the boundary between "relevant to the role" and "works in the same general space."
+- work domains, not keywords
+- specific enough to exclude obvious lookalikes
+- broad enough to cover more than one resume bullet
 
-- **Builder definition**: What specific artifacts, systems, or outputs does the role create? The answer should describe what the person's work FEEDS INTO. For FDL: "the output feeds into model training, not into a business application."
-- **User definition**: What does the application-layer version of this work look like? The answer should describe what someone who USES the builder's outputs does. For FDL: "Fine-tunes or deploys pre-trained models for business use cases."
-- **Edge case guidance**: How to handle borderline profiles. What tips the balance?
+For each area, draft:
 
-**How to test**: Take the candidate who was your hardest correct reject — someone who looked relevant but wasn't. Does the depth distinction explain why? If not, refine it.
+- a short name
+- what that work looks like in practice
+- signs that someone has actually done it
+- signs that someone has only been adjacent to it
 
----
+Pressure-test each one:
 
-## 4. Non-Fit Patterns (3-8)
+- Can I map strong examples to this area with real evidence?
+- Would this area wrongly include the common lookalikes?
+- If this area matched everyone, would it still mean anything?
 
-**What are the most common profiles that will appear in search results, look adjacent, and aren't a fit?**
+If the answer to the last question is yes, it is too broad.
 
-Each non-fit pattern describes WORK, not titles or keywords. The format:
-- **Label**: Short identifier.
-- **Description**: What this person actually builds every day.
-- **Why not**: Why their work doesn't connect to the role despite surface similarity.
-- **Examples**: Concrete examples — "fraud detection at Nubank" not "data science."
+## 4. Draw The Real Yes / No Boundary
 
-Non-fit patterns are checked AFTER capability mapping in the evaluation template. They're not "hard skips" (which triggers avoidance) — they're evidence that the candidate's actual work doesn't connect to the role.
+The depth boundary is the most important part of the brief.
 
-**How to test**: Run your most common search strings mentally. What are the top 3 profile types that will flood results and waste evaluation tokens? Those are your non-fit patterns.
+Your job is to define:
 
-**The critical pitfall**: Don't make non-fit patterns too broad. "Data science" is not a non-fit pattern — it describes half the candidates. "Applied ML for business metrics (fraud, recommendations, ad targeting)" is a non-fit pattern — it describes specific work that isn't the role.
+- what counts as real hands-on depth for this role
+- what adjacent-but-insufficient work looks like
+- what makes a borderline case tip toward yes or no
 
----
+Use the intake's examples and common lookalikes heavily here.
 
-## 5. Employer Signal Rules
+If your depth boundary cannot explain the hardest correct reject, it is not ready.
 
-**How much does company name matter for this search?**
+## 5. Turn Lookalikes Into Non-Fit Patterns
 
-Define 3-4 tiers and for each one, specify what additional evidence is required beyond the employer name:
+The intake should give you the common backgrounds that look close but are usually wrong.
 
-- **Frontier lab** (OpenAI, Anthropic, DeepMind, etc.): What's the minimum evidence needed beyond the employer name?
-- **Strong AI company**: What specific evidence distinguishes a relevant role from an application-layer role at this company?
-- **General tech** (strong companies with mostly-applied ML): This is typically the highest false-positive tier. What evidence separates the 2% doing relevant work from the 98% doing applied ML?
-- **Neutral**: Same standard as any candidate — employer carries no weight.
+Turn those into non-fit patterns that describe the actual work, not just the title.
 
-**The key question for each tier**: Can you save on employer + relevant title alone, or do you always need project/publication/team evidence?
+Good non-fit pattern:
 
-For almost every search, the answer is: employer alone is never sufficient. The one exception might be a search where the employer IS the domain — e.g., if you're sourcing for a BFSI AI role, someone leading AI at a major bank has domain relevance built in.
+> Applied ML for fraud and risk scoring. Looks adjacent because of strong ML titles and employers, but the work is focused on business metrics rather than the role's target systems.
 
----
+Weak non-fit pattern:
 
-## 6. Minimum Bar
+> Data scientist
 
-**What do the minimum years of experience actually mean in practice?**
+Titles, employers, and keywords can support the pattern, but they should not be the pattern.
 
-Not just a number — a description of what those years should contain. "4-5+ years hands-on building deep learning systems where data quality or model behavior was the primary output" is meaningful. "3+ years of experience" is not — it passes everyone with a 3-year-old LinkedIn account.
+## 6. Translate Search-Stage Context Into Opening Guidance
 
----
+Search-stage context should shape how the agent opens the search, not whether the role is understandable.
 
-## 7. Facial Triage Calibration
+Use that context to decide whether the brief needs:
 
-**What are the obvious non-fits that can be detected from a snippet?**
+- instructions
+- search priorities
+- additional search terms
 
-Remember what the facial stage actually sees: name, headline, current title/company, location, education line, and a **career history** (title + company + dates for every visible position). It does NOT see job description bullets, project details, or skills. You cannot tell from this data what someone actually built at a given company.
+Examples:
 
-### Fast Exit Patterns
+- If the team has been in market for months, add guidance not to open with the obvious pool.
+- If the role shifted after the JD was posted, add guidance to evaluate against the updated scope.
+- If a specific adjacent population matters, add the relevant search terms without turning them into evaluation criteria.
 
-These should be things where the ENTIRE career trajectory is clearly outside scope. Not "current title is X" — every position points away. Examples: entire career is IT support, entire career is sales/BD, entire career is analytics/BI with no ML engineering positions.
+Keep these as operator-owned translations, not stakeholder homework.
 
-If you're unsure whether something is a fast exit, it isn't. The facial stage should be permissive.
+## 7. Write LinkedIn Snippet Rules Conservatively
 
-### Trajectory Patterns (the most important facial calibration)
+The brief field for LinkedIn snippet triage is `facial_calibration`.
 
-The career history is the highest-signal field at the facial stage. Three categories:
+In plain English, this means the quick yes / no / ambiguous rules based only on what is visible from a LinkedIn snippet.
 
-**YES patterns** — career trajectories that favor passing to full evaluation:
-- What employer/title combinations strongly suggest relevance? (e.g., "any position at a frontier AI lab in a technical role")
-- What career progressions suggest depth? (e.g., "research → industry ML transitions")
-- What specific keywords in titles are near-certain signals? (e.g., "RL" or "post-training" anywhere in any title)
+That surface usually includes:
 
-**AMBIGUOUS patterns** — trajectories that default to YES because you can't resolve them from a snippet:
-- This is the critical category. "ML Engineer at Nubank" is ambiguous — could be fraud detection (reject) or training infra (save). The facial stage CANNOT make this call. These MUST default to YES.
-- Any role where the title is generic enough to span multiple domains (ML Engineer, Data Scientist, Applied Scientist) at a company with both relevant and irrelevant ML work.
+- title
+- company
+- headline
+- location
+- education line
+- visible career history
 
-**NO patterns** — trajectories that favor rejection, but ONLY if the entire history matches:
-- What careers, when viewed across all positions, have zero plausible connection? (e.g., "entire career is data analytics/BI with no ML engineering positions at any point")
-- These should be strong enough that seeing even ONE exception in the trajectory would flip to ambiguous.
+It does not include project detail, skills depth, or bullet-level evidence.
 
-**How to test**: Take 5 candidates who were facial YES but ultimately rejected at full evaluation. Were they ambiguous (correct facial YES, full eval resolved correctly) or fast exits (should have been caught at facial)? If they were legitimately ambiguous, the facial stage is working. If they were obvious non-fits detectable from trajectory alone, add the pattern.
+That means:
 
-### Expected YES Rate
+- only use whole-career signals for obvious fast rejects
+- keep generic titles broad and ambiguous
+- do not pretend a snippet tells you more than it does
 
-What percentage of search results do you expect to survive facial triage?
-- Dense market, broad strings: 40-60%
-- Moderate targeting: 25-45%
-- Narrow/senior search: 15-30%
+When in doubt, stay permissive and let full evaluation do the harder work.
 
----
+## 8. What To Leave Out Of A First Pass
 
-## 8. Market Density
+Do not force these unless the intake or prior search context truly supports them:
 
-**Is this a dense, moderate, or sparse talent market?**
+- detailed employer tiering
+- geography-specific traps
+- search-term collision logic
+- inferential-save logic
+- post-save modifiers
+- highly tuned edge-case rules
 
-This controls pagination depth in the adaptation layer.
-- **Dense**: Many plausible candidates per string. Brazil ML engineers, Bay Area SWEs.
-- **Moderate**: Normal distribution. Default.
-- **Sparse**: Few plausible candidates per string. Embodied AI in Latin America, niche research domains.
+These are often better added after a pilot than guessed upfront.
 
----
+## 9. First-Pass Brief Checklist
 
-## Final Checklist
+Before you call the first draft ready, confirm:
 
-Before running the pipeline:
+- I can explain the role in plain English without quoting the JD.
+- I know what a strong fit looks like.
+- I know what the common lookalikes are.
+- I can explain why those lookalikes are usually wrong.
+- I have enough signal to write capability areas that mean something.
+- I have enough signal to write a real yes / no boundary.
+- I have translated search-stage context into opening guidance where needed.
+- I have not filled gaps with guesses just to make the brief look complete.
 
-- [ ] Can you map 3 known-good candidates to specific capability areas with evidence from the brief?
-- [ ] Does the depth distinction correctly reject your hardest correct-reject candidate?
-- [ ] Are non-fit patterns specific enough that they describe work, not job titles?
-- [ ] Does the employer signal rule for the highest-risk tier (usually general_tech) require specific evidence?
-- [ ] Is the minimum bar description meaningful, not just a year count?
-- [ ] Have you reviewed preflight's confidence notes (if using preflight)?
-- [ ] Is the employer blacklist set (you probably don't want to source people from your own company)?
+Before you run a pilot, confirm:
+
+- the draft explains both strong fits and hard rejects
+- the LinkedIn snippet rules are conservative
+- unresolved questions are called out explicitly instead of buried
