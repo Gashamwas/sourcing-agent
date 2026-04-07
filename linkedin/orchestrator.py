@@ -1479,7 +1479,6 @@ class Pipeline:
 
             if snippet.profile_url:
                 self._in_flight_urls.add(snippet.profile_url)
-            append_jsonl(self.snippets_path, snippet.to_dict())
             self._record_runtime_snippet(search_string, snippet)
             self.stats["snippets_extracted"] += 1
             string_stats["candidates"] += 1
@@ -1693,15 +1692,6 @@ class Pipeline:
                             confidence=1.0, rationale=f"Employer blacklist: {blocked}",
                             candidate_name=snippet.name, profile_url=snippet.profile_url,
                         )
-                        append_jsonl(self.facial_path, bl_decision.to_dict())
-                        append_jsonl(self.history_path, {
-                            "profile_url": snippet.profile_url,
-                            "candidate_name": snippet.name,
-                            "outcome": "FACIAL_NO",
-                            "confidence": 1.0,
-                            "source_string_id": snippet.source_string_id,
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
-                        })
                         facial_attempt_id = self._start_runtime_stage_attempt(
                             search_string=search_string,
                             snippet=snippet,
@@ -1730,7 +1720,6 @@ class Pipeline:
             # Eligible for batch facial
             if snippet.profile_url:
                 self._in_flight_urls.add(snippet.profile_url)
-            append_jsonl(self.snippets_path, snippet.to_dict())
             self._record_runtime_snippet(search_string, snippet)
             self.stats["snippets_extracted"] += 1
             string_stats["candidates"] += 1
@@ -1776,7 +1765,6 @@ class Pipeline:
                 snippet=snippet,
                 stage="facial",
             )
-            append_jsonl(self.facial_path, facial.to_dict())
 
             # Handle parse/judgment failures
             if is_failure_decision(facial.decision):
@@ -1803,15 +1791,6 @@ class Pipeline:
                 })
                 continue
 
-            # Terminal facial decision — write to history
-            append_jsonl(self.history_path, {
-                "profile_url": snippet.profile_url,
-                "candidate_name": snippet.name,
-                "outcome": facial.decision,
-                "confidence": facial.confidence,
-                "source_string_id": snippet.source_string_id,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
             self._prior_outcomes[snippet.profile_url] = facial.decision
             self._mark_terminal(snippet.profile_url)
             self._finish_runtime_stage_success(
@@ -2604,15 +2583,6 @@ Provide a narrowed Boolean."""
                         confidence=1.0, rationale=f"Employer blacklist: {blocked}",
                         candidate_name=snippet.name, profile_url=snippet.profile_url,
                     )
-                    append_jsonl(self.facial_path, blacklist_decision.to_dict())
-                    append_jsonl(self.history_path, {
-                        "profile_url": snippet.profile_url,
-                        "candidate_name": snippet.name,
-                        "outcome": "FACIAL_NO",
-                        "confidence": 1.0,
-                        "source_string_id": snippet.source_string_id,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    })
                     facial_attempt_id = self._start_runtime_stage_attempt(
                         search_string=runtime_search_string,
                         snippet=snippet,
@@ -2648,8 +2618,6 @@ Provide a narrowed Boolean."""
                 source="judgment",
             )
 
-        append_jsonl(self.facial_path, facial.to_dict())
-
         # Intercept parse/judgment failures — log but do NOT persist to cross-session history
         if is_failure_decision(facial.decision):
             print(f"    [PARSE_FAILURE] {facial.rationale}")
@@ -2673,15 +2641,6 @@ Provide a narrowed Boolean."""
             self._in_flight_urls.discard(snippet.profile_url)
             return facial
 
-        # Append to cross-session history (only for terminal decisions)
-        append_jsonl(self.history_path, {
-            "profile_url": snippet.profile_url,
-            "candidate_name": snippet.name,
-            "outcome": facial.decision,
-            "confidence": facial.confidence,
-            "source_string_id": snippet.source_string_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
         self._prior_outcomes[snippet.profile_url] = facial.decision
         self._mark_terminal(snippet.profile_url)
         self._finish_runtime_stage_success(
@@ -2786,7 +2745,6 @@ Provide a narrowed Boolean."""
             print(f"    Profile text size: {len(profile_text) / 1024:.0f} KB")
 
             summary = extract_profile_from_dom(profile_text, snippet.profile_url)
-            append_jsonl(self.profiles_path, summary.to_dict())
 
         except GovernorLimitReached:
             raise
@@ -2830,8 +2788,6 @@ Provide a narrowed Boolean."""
                 source="judgment",
             )
 
-        append_jsonl(self.final_path, final.to_dict())
-
         # Intercept parse/judgment failures — do NOT persist to cross-session history
         if is_failure_decision(final.decision):
             print(f"    [{final.decision}] {final.rationale}")
@@ -2861,16 +2817,6 @@ Provide a narrowed Boolean."""
                 final._panel_stuck = True
             return final
 
-        # Append to cross-session history (only for terminal decisions)
-        append_jsonl(self.history_path, {
-            "profile_url": snippet.profile_url,
-            "candidate_name": snippet.name,
-            "outcome": final.decision,
-            "confidence": final.confidence,
-            "capability_area": final.path if final.path != "none" else "",
-            "source_string_id": snippet.source_string_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
         self._prior_outcomes[snippet.profile_url] = final.decision
         self._mark_terminal(snippet.profile_url)
         self._finish_runtime_stage_success(
@@ -2937,11 +2883,31 @@ Provide a narrowed Boolean."""
                         await self.browser.scroll_restore(px)
                 if saved:
                     self.stats["saved"] += 1
+                if self._runtime_bridge and self._runtime_run_id:
+                    self._runtime_bridge.record_side_effect_result(
+                        run_id=self._runtime_run_id,
+                        search_string=runtime_search_string,
+                        snippet=snippet,
+                        attempt_id=full_attempt_id,
+                        effect_type="linkedin_save",
+                        status="succeeded" if saved else "failed",
+                        payload={"test_mode": False},
+                    )
                 log_event(self.log_path, "candidate_saved", name=snippet.name, linkedin_save=saved)
 
             else:
                 # test_mode: count decision as saved (no browser interaction)
                 self.stats["saved"] += 1
+                if self._runtime_bridge and self._runtime_run_id:
+                    self._runtime_bridge.record_side_effect_result(
+                        run_id=self._runtime_run_id,
+                        search_string=runtime_search_string,
+                        snippet=snippet,
+                        attempt_id=full_attempt_id,
+                        effect_type="linkedin_save",
+                        status="succeeded",
+                        payload={"test_mode": True},
+                    )
 
             if page_report:
                 page_report.add_saved(snippet, final)

@@ -6,9 +6,14 @@ from .admin import (
     rebuild_compat_projections,
     requeue_work_unit,
 )
+from .github import GitHubRuntimeStateBridge
 from .lock import RuntimeStateLock
 from .projections import (
+    project_github_facial_judgments,
+    project_github_final_judgments,
+    project_github_profile_summaries,
     project_github_progress,
+    project_github_snippets,
     project_linkedin_candidate_history,
     project_linkedin_facial_judgments,
     project_linkedin_final_judgments,
@@ -31,8 +36,13 @@ __all__ = [
     "LINKEDIN_STRING_KIND",
     "RuntimeStateLock",
     "RuntimeStateStore",
+    "GitHubRuntimeStateBridge",
     "LinkedInResumeState",
     "LinkedInRuntimeStateBridge",
+    "project_github_snippets",
+    "project_github_facial_judgments",
+    "project_github_profile_summaries",
+    "project_github_final_judgments",
     "clear_candidate_terminal_state",
     "inspect_orphaned_attempts",
     "project_github_progress",

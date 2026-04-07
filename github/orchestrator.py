@@ -15,9 +15,8 @@ import datetime
 import signal
 import sys
 import time
-from dataclasses import asdict, is_dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 
 from github.client import GitHubClient
 from github.enricher import GitHubEnricher
@@ -37,13 +36,10 @@ from github.query_validator import ExhaustionState
 from github.observability import SessionObserver
 from shared.contact_discovery import merge_profile_contact
 
-from shared.failures import (
-    RECOVERABLE_ERROR,
-    classify_runtime_failure,
-    judgment_failure_decision,
-)
-from shared.runtime_state import RuntimeStateLock, RuntimeStateStore
-from shared.runtime_state.projections import write_github_progress_projection
+from shared.failures import judgment_failure_decision
+from shared.execution import CandidateExecutionEngine
+from shared.execution.types import CandidateExecutionEnvelope
+from shared.runtime_state import GitHubRuntimeStateBridge, RuntimeStateLock, RuntimeStateStore
 from shared.runtime_state.store import GITHUB_QUERY_KIND
 from shared.schemas import CandidateSnippet, CandidateProfileSummary, OpusDecision
 from shared.judger import facial_judge, full_judge, init_judger, github_facial_judge, github_facial_judge_batch, github_full_judge, extract_priority_rank, is_failure_decision
@@ -131,6 +127,18 @@ class GitHubPipeline:
         self._runtime_state = RuntimeStateStore(self.runtime_db_path)
         self._runtime_lock = RuntimeStateLock(self.output_dir)
         self._runtime_run_id: Optional[int] = None
+        self._runtime_bridge = GitHubRuntimeStateBridge(
+            store=self._runtime_state,
+            output_dir=self.output_dir,
+            brief_id=self.brief_obj.id,
+            brief_name=self.brief_obj.id,
+        )
+        self._execution_engine = CandidateExecutionEngine(
+            store=self._runtime_state,
+            output_dir=str(self.output_dir),
+            brief_id=self.brief_obj.id,
+            source="github",
+        )
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -230,8 +238,28 @@ class GitHubPipeline:
                 from github.export import export_saved_candidates_csv
                 csv_path = export_saved_candidates_csv(self.output_dir)
                 self._observer.console.emit_info(f"CSV export: {csv_path}")
+                if self._runtime_run_id:
+                    self._runtime_state.record_event(
+                        run_id=self._runtime_run_id,
+                        event_type="side_effect_result",
+                        payload={
+                            "effect_type": "github_csv_export",
+                            "status": "succeeded",
+                            "path": str(csv_path),
+                        },
+                    )
             except Exception as e:
                 self._observer.console.emit_warn(f"CSV export failed: {e}")
+                if self._runtime_run_id:
+                    self._runtime_state.record_event(
+                        run_id=self._runtime_run_id,
+                        event_type="side_effect_result",
+                        payload={
+                            "effect_type": "github_csv_export",
+                            "status": "failed",
+                            "error": str(e),
+                        },
+                    )
 
         return self.stats
 
@@ -601,30 +629,24 @@ class GitHubPipeline:
         progress.candidates_discovered += 1
         self.stats["candidates_discovered"] += 1
         source_query = query.query or query.target_repo or query.target_org
-        query_work_unit_id = self._get_query_work_unit_id(query)
         runtime_cursor = self._build_runtime_cursor(query, result_rank)
-        candidate_id = self._runtime_state.record_candidate_discovery(
-            run_id=self._runtime_run_id or 0,
-            work_unit_id=query_work_unit_id,
-            source="github",
-            brief_id=self.brief_obj.id,
-            identity_key=username,
-            display_name=username,
-            profile_url=f"https://github.com/{username}",
-            payload=runtime_cursor,
-        ) if self._runtime_run_id else None
-        prep_attempt_id = self._runtime_state.start_attempt(
-            run_id=self._runtime_run_id or 0,
-            source="github",
-            brief_id=self.brief_obj.id,
-            identity_key=username,
-            stage="preparation",
-            work_unit_id=query_work_unit_id,
-            payload={"cursor": runtime_cursor},
-            source_cursor=runtime_cursor,
-            display_name=username,
-            profile_url=f"https://github.com/{username}",
-        ) if self._runtime_run_id else None
+        envelope = self._execution_envelope(
+            username=username,
+            query=query,
+            result_rank=result_rank,
+        )
+        if self._runtime_run_id:
+            self._execution_engine.runtime.record_discovery(
+                envelope,
+                payload=runtime_cursor,
+            )
+            prep_attempt_id = self._execution_engine.runtime.start_stage(
+                envelope,
+                stage="preparation",
+                payload={"cursor": runtime_cursor},
+            )
+        else:
+            prep_attempt_id = None
 
         try:
             candidate = await enricher.light_enrich(
@@ -635,6 +657,9 @@ class GitHubPipeline:
         except Exception as exc:
             self._finish_runtime_failure(
                 attempt_id=prep_attempt_id,
+                username=username,
+                query=query,
+                result_rank=result_rank,
                 error=exc,
                 payload={"cursor": runtime_cursor},
             )
@@ -642,13 +667,15 @@ class GitHubPipeline:
             raise
         if not candidate:
             if prep_attempt_id:
-                self._runtime_state.finish_attempt_failure(
+                self._execution_engine.runtime.finish_stage_failure(
                     attempt_id=prep_attempt_id,
-                    failure_kind="empty_enrichment",
-                    failure_reason="light_enrich returned no candidate",
-                    retryable=True,
-                    payload={"cursor": runtime_cursor},
-                    run_id=self._runtime_run_id,
+                    envelope=envelope,
+                    stage="preparation",
+                    error_or_failure_decision=RuntimeError("light_enrich returned no candidate"),
+                    extra_payload={
+                        "cursor": runtime_cursor,
+                        "failure_kind_override": "empty_enrichment",
+                    },
                 )
             self._in_flight_usernames.discard(username)
             return None
@@ -692,6 +719,10 @@ class GitHubPipeline:
         except Exception as exc:
             self._finish_runtime_failure(
                 attempt_id=prep_attempt_id,
+                username=username,
+                query=query,
+                result_rank=result_rank,
+                candidate=candidate,
                 error=exc,
                 payload={
                     "cursor": runtime_cursor,
@@ -750,14 +781,20 @@ class GitHubPipeline:
             return None
 
         if prep_attempt_id:
-            self._runtime_state.finish_attempt_success(
+            self._execution_engine.runtime.finish_attempt_success(
                 attempt_id=prep_attempt_id,
+                envelope=self._execution_envelope(
+                    username=username,
+                    query=query,
+                    result_rank=result_rank,
+                    candidate=candidate,
+                    metadata={"candidate_record": candidate_record},
+                ),
                 new_state="snippet_extracted",
                 payload={
                     "cursor": runtime_cursor,
                     "candidate_record": candidate_record,
                 },
-                run_id=self._runtime_run_id,
             )
 
         return candidate
@@ -777,19 +814,24 @@ class GitHubPipeline:
 
         for (username, candidate), facial_decision in zip(batch_candidates, facial_decisions):
             try:
-                query_work_unit_id = self._get_query_work_unit_id(query)
-                runtime_cursor = self._build_runtime_cursor(query, 0)
                 candidate_record = self._candidate_record(candidate)
+                envelope = self._execution_envelope(
+                    username=username,
+                    query=query,
+                    result_rank=0,
+                    candidate=candidate,
+                    metadata={"candidate_record": candidate_record},
+                )
                 facial_decision.candidate_name = candidate.user.name or username
                 facial_decision.profile_url = candidate.user.profile_url
-                append_jsonl(self.facial_path, facial_decision.to_dict())
                 facial_attempt_id = self._start_stage_attempt(
                     username=username,
                     stage="facial",
                     query=query,
                     candidate=candidate,
+                    result_rank=0,
                     payload={
-                        "cursor": runtime_cursor,
+                        "cursor": envelope.source_cursor,
                         "candidate_record": candidate_record,
                     },
                 )
@@ -809,8 +851,12 @@ class GitHubPipeline:
                     self.stats["parse_failures"] += 1
                     self._finish_failure_decision_attempt(
                         attempt_id=facial_attempt_id,
+                        username=username,
                         stage="facial",
                         decision=facial_decision,
+                        query=query,
+                        result_rank=0,
+                        candidate=candidate,
                         candidate_record=candidate_record,
                     )
                     self._observer.on_facial_decision(username, facial_decision.decision, facial_decision.rationale, query)
@@ -818,34 +864,25 @@ class GitHubPipeline:
 
                 if facial_decision.decision == "FACIAL_NO":
                     self.stats["facial_no"] += 1
-                    if facial_attempt_id:
-                        self._runtime_state.finish_attempt_success(
-                            attempt_id=facial_attempt_id,
-                            new_state="facial_terminal",
-                            terminal_decision="FACIAL_NO",
-                            payload={
-                                "cursor": runtime_cursor,
-                                "candidate_record": candidate_record,
-                                "facial_decision": facial_decision.to_dict(),
-                            },
-                            run_id=self._runtime_run_id,
-                        )
+                    self._execution_engine.runtime.finish_stage_success(
+                        attempt_id=facial_attempt_id,
+                        envelope=envelope,
+                        stage="facial",
+                        decision=facial_decision,
+                        extra_payload={"candidate_record": candidate_record},
+                    )
                     self._observer.on_facial_decision(username, "FACIAL_NO", facial_decision.rationale, query)
                     self._mark_terminal(username)
                     continue
 
                 self.stats["facial_yes"] += 1
-                if facial_attempt_id:
-                    self._runtime_state.finish_attempt_success(
-                        attempt_id=facial_attempt_id,
-                        new_state="facial_terminal",
-                        payload={
-                            "cursor": runtime_cursor,
-                            "candidate_record": candidate_record,
-                            "facial_decision": facial_decision.to_dict(),
-                        },
-                        run_id=self._runtime_run_id,
-                    )
+                self._execution_engine.runtime.finish_stage_success(
+                    attempt_id=facial_attempt_id,
+                    envelope=envelope,
+                    stage="facial",
+                    decision=facial_decision,
+                    extra_payload={"candidate_record": candidate_record},
+                )
                 self._observer.on_facial_decision(username, "FACIAL_YES", "", query)
 
                 evidence_text = candidate.to_evidence_text()
@@ -854,8 +891,9 @@ class GitHubPipeline:
                     stage="full",
                     query=query,
                     candidate=candidate,
+                    result_rank=0,
                     payload={
-                        "cursor": runtime_cursor,
+                        "cursor": envelope.source_cursor,
                         "candidate_record": candidate_record,
                         "facial_decision": facial_decision.to_dict(),
                     },
@@ -873,8 +911,6 @@ class GitHubPipeline:
                 full_decision.candidate_name = candidate.user.name or username
                 full_decision.profile_url = candidate.user.profile_url
 
-                append_jsonl(self.final_path, full_decision.to_dict())
-
                 if self._bias_monitor:
                     self._bias_monitor.record_decision(DecisionRecord(
                         candidate_id=username,
@@ -890,8 +926,12 @@ class GitHubPipeline:
                     self.stats["parse_failures"] += 1
                     self._finish_failure_decision_attempt(
                         attempt_id=full_attempt_id,
+                        username=username,
                         stage="full",
                         decision=full_decision,
+                        query=query,
+                        result_rank=0,
+                        candidate=candidate,
                         candidate_record=candidate_record,
                     )
                     continue
@@ -915,10 +955,24 @@ class GitHubPipeline:
                     if outreach and outreach.get("message"):
                         candidate.outreach_copy = outreach
                         append_jsonl(self.outreach_path, outreach)
+                        self._execution_engine.runtime.record_side_effect_result(
+                            envelope=envelope,
+                            attempt_id=full_attempt_id,
+                            effect_type="github_outreach",
+                            status="succeeded",
+                            payload={"has_message": True},
+                        )
                     else:
                         self.stats.setdefault("outreach_failures", 0)
                         self.stats["outreach_failures"] += 1
                         self._observer.on_outreach_failure(username, query)
+                        self._execution_engine.runtime.record_side_effect_result(
+                            envelope=envelope,
+                            attempt_id=full_attempt_id,
+                            effect_type="github_outreach",
+                            status="failed",
+                            payload={"has_message": False},
+                        )
 
                     priority_rank = extract_priority_rank(full_decision.path)
                     append_jsonl(self.saves_path, {
@@ -966,18 +1020,13 @@ class GitHubPipeline:
                     progress.candidates_rejected += 1
                     self._observer.on_reject(username, candidate, full_decision, query)
 
-                if full_attempt_id:
-                    self._runtime_state.finish_attempt_success(
-                        attempt_id=full_attempt_id,
-                        new_state="full_terminal",
-                        terminal_decision=full_decision.decision,
-                        payload={
-                            "cursor": runtime_cursor,
-                            "candidate_record": candidate_record,
-                            "full_decision": full_decision.to_dict(),
-                        },
-                        run_id=self._runtime_run_id,
-                    )
+                self._execution_engine.runtime.finish_stage_success(
+                    attempt_id=full_attempt_id,
+                    envelope=envelope,
+                    stage="full",
+                    decision=full_decision,
+                    extra_payload={"candidate_record": candidate_record},
+                )
                 self._mark_terminal(username)
 
                 if (progress.candidates_enriched % _CHECKPOINT_EVERY) == 0:
@@ -1013,14 +1062,21 @@ class GitHubPipeline:
             # GitHub facial triage using portfolio text
             portfolio_text = candidate.to_portfolio_text()
             candidate_record = self._candidate_record(candidate)
-            runtime_cursor = self._build_runtime_cursor(query, result_rank)
+            envelope = self._execution_envelope(
+                username=username,
+                query=query,
+                result_rank=result_rank,
+                candidate=candidate,
+                metadata={"candidate_record": candidate_record},
+            )
             facial_attempt_id = self._start_stage_attempt(
                 username=username,
                 stage="facial",
                 query=query,
                 candidate=candidate,
+                result_rank=result_rank,
                 payload={
-                    "cursor": runtime_cursor,
+                    "cursor": envelope.source_cursor,
                     "candidate_record": candidate_record,
                 },
             )
@@ -1044,19 +1100,27 @@ class GitHubPipeline:
                 result_rank=result_rank,
             )
             candidate_record = self._candidate_record(candidate)
-            runtime_cursor = self._build_runtime_cursor(query, result_rank)
+            envelope = self._execution_envelope(
+                username=username,
+                query=query,
+                result_rank=result_rank,
+                candidate=candidate,
+                snippet=snippet,
+                metadata={"candidate_record": candidate_record},
+            )
             facial_attempt_id = self._start_stage_attempt(
                 username=username,
                 stage="facial",
                 query=query,
                 candidate=candidate,
+                result_rank=result_rank,
+                snippet=snippet,
                 payload={
-                    "cursor": runtime_cursor,
+                    "cursor": envelope.source_cursor,
                     "candidate_record": candidate_record,
                     "snippet": snippet.to_dict(),
                 },
             )
-            append_jsonl(self.snippets_path, snippet.to_dict())
             try:
                 facial_decision = facial_judge(snippet)
             except Exception as e:
@@ -1067,8 +1131,6 @@ class GitHubPipeline:
                     error=e,
                     source="judgment",
                 )
-
-        append_jsonl(self.facial_path, facial_decision.to_dict())
 
         if self._bias_monitor:
             self._bias_monitor.record_decision(DecisionRecord(
@@ -1085,9 +1147,14 @@ class GitHubPipeline:
             self.stats["parse_failures"] += 1
             self._finish_failure_decision_attempt(
                 attempt_id=facial_attempt_id,
+                username=username,
                 stage="facial",
                 decision=facial_decision,
+                query=query,
+                result_rank=result_rank,
+                candidate=candidate,
                 candidate_record=candidate_record,
+                snippet=snippet if not self.brief_obj.has_v2_schema else None,
                 extra_payload={"snippet": snippet.to_dict()} if not self.brief_obj.has_v2_schema else None,
             )
             self._observer.on_facial_decision(username, facial_decision.decision, facial_decision.rationale, query)
@@ -1095,36 +1162,31 @@ class GitHubPipeline:
 
         if facial_decision.decision == "FACIAL_NO":
             self.stats["facial_no"] += 1
-            if facial_attempt_id:
-                self._runtime_state.finish_attempt_success(
-                    attempt_id=facial_attempt_id,
-                    new_state="facial_terminal",
-                    terminal_decision="FACIAL_NO",
-                    payload={
-                        "cursor": runtime_cursor,
-                        "candidate_record": candidate_record,
-                        "facial_decision": facial_decision.to_dict(),
-                        **({"snippet": snippet.to_dict()} if not self.brief_obj.has_v2_schema else {}),
-                    },
-                    run_id=self._runtime_run_id,
-                )
+            self._execution_engine.runtime.finish_stage_success(
+                attempt_id=facial_attempt_id,
+                envelope=envelope,
+                stage="facial",
+                decision=facial_decision,
+                extra_payload={
+                    "candidate_record": candidate_record,
+                    **({"snippet": snippet.to_dict()} if not self.brief_obj.has_v2_schema else {}),
+                },
+            )
             self._observer.on_facial_decision(username, "FACIAL_NO", facial_decision.rationale, query)
             self._mark_terminal(username)
             return
 
         self.stats["facial_yes"] += 1
-        if facial_attempt_id:
-            self._runtime_state.finish_attempt_success(
-                attempt_id=facial_attempt_id,
-                new_state="facial_terminal",
-                payload={
-                    "cursor": runtime_cursor,
-                    "candidate_record": candidate_record,
-                    "facial_decision": facial_decision.to_dict(),
-                    **({"snippet": snippet.to_dict()} if not self.brief_obj.has_v2_schema else {}),
-                },
-                run_id=self._runtime_run_id,
-            )
+        self._execution_engine.runtime.finish_stage_success(
+            attempt_id=facial_attempt_id,
+            envelope=envelope,
+            stage="facial",
+            decision=facial_decision,
+            extra_payload={
+                "candidate_record": candidate_record,
+                **({"snippet": snippet.to_dict()} if not self.brief_obj.has_v2_schema else {}),
+            },
+        )
         self._observer.on_facial_decision(username, "FACIAL_YES", "", query)
 
         # Full evaluation
@@ -1133,8 +1195,9 @@ class GitHubPipeline:
             stage="full",
             query=query,
             candidate=candidate,
+            result_rank=result_rank,
             payload={
-                "cursor": runtime_cursor,
+                "cursor": envelope.source_cursor,
                 "candidate_record": candidate_record,
                 "facial_decision": facial_decision.to_dict(),
             },
@@ -1155,7 +1218,6 @@ class GitHubPipeline:
             full_decision.profile_url = candidate.user.profile_url
         else:
             profile_summary = candidate.to_profile_summary()
-            append_jsonl(self.profiles_path, profile_summary.to_dict())
             try:
                 full_decision = full_judge(profile_summary)
             except Exception as e:
@@ -1166,8 +1228,6 @@ class GitHubPipeline:
                     error=e,
                     source="judgment",
                 )
-
-        append_jsonl(self.final_path, full_decision.to_dict())
 
         if self._bias_monitor:
             self._bias_monitor.record_decision(DecisionRecord(
@@ -1184,9 +1244,14 @@ class GitHubPipeline:
             self.stats["parse_failures"] += 1
             self._finish_failure_decision_attempt(
                 attempt_id=full_attempt_id,
+                username=username,
                 stage="full",
                 decision=full_decision,
+                query=query,
+                result_rank=result_rank,
+                candidate=candidate,
                 candidate_record=candidate_record,
+                snippet=snippet if not self.brief_obj.has_v2_schema else None,
                 extra_payload={"profile_summary": profile_summary.to_dict()} if not self.brief_obj.has_v2_schema else None,
             )
             return
@@ -1211,10 +1276,24 @@ class GitHubPipeline:
             if outreach and outreach.get("message"):
                 candidate.outreach_copy = outreach
                 append_jsonl(self.outreach_path, outreach)
+                self._execution_engine.runtime.record_side_effect_result(
+                    envelope=envelope,
+                    attempt_id=full_attempt_id,
+                    effect_type="github_outreach",
+                    status="succeeded",
+                    payload={"has_message": True},
+                )
             else:
                 self.stats.setdefault("outreach_failures", 0)
                 self.stats["outreach_failures"] += 1
                 self._observer.on_outreach_failure(username, query)
+                self._execution_engine.runtime.record_side_effect_result(
+                    envelope=envelope,
+                    attempt_id=full_attempt_id,
+                    effect_type="github_outreach",
+                    status="failed",
+                    payload={"has_message": False},
+                )
 
             # Write consolidated save record
             priority_rank = extract_priority_rank(full_decision.path)
@@ -1264,21 +1343,14 @@ class GitHubPipeline:
             progress.candidates_rejected += 1
             self._observer.on_reject(username, candidate, full_decision, query)
 
-        if full_attempt_id:
-            payload = {
-                "cursor": runtime_cursor,
-                "candidate_record": candidate_record,
-                "full_decision": full_decision.to_dict(),
-            }
-            if not self.brief_obj.has_v2_schema:
-                payload["profile_summary"] = profile_summary.to_dict()
-            self._runtime_state.finish_attempt_success(
-                attempt_id=full_attempt_id,
-                new_state="full_terminal",
-                terminal_decision=full_decision.decision,
-                payload=payload,
-                run_id=self._runtime_run_id,
-            )
+        self._execution_engine.runtime.finish_stage_success(
+            attempt_id=full_attempt_id,
+            envelope=envelope,
+            stage="full",
+            decision=full_decision,
+            extra_payload={"candidate_record": candidate_record},
+            profile_summary=profile_summary if not self.brief_obj.has_v2_schema else None,
+        )
         self._mark_terminal(username)
 
         # Checkpoint periodically
@@ -1603,8 +1675,8 @@ class GitHubPipeline:
     def _dedup_usernames(self, usernames: list[str]) -> list[str]:
         """Filter out already-seen or in-flight usernames."""
         blocked = set()
-        if getattr(self, "_runtime_state", None):
-            blocked = self._runtime_state.get_github_blocked_usernames(self.brief_obj.id, [u for u in usernames if u])
+        if getattr(self, "_runtime_bridge", None):
+            blocked = self._runtime_bridge.load_blocked_usernames([u for u in usernames if u])
         new = []
         for u in usernames:
             if (
@@ -1619,48 +1691,13 @@ class GitHubPipeline:
 
     def _load_or_create_progress(self, resume: bool = False) -> GitHubProgress:
         self._ensure_runtime_state()
-        self._runtime_state.reconcile_open_attempts(source="github", brief_id=self.brief_obj.id)
-
-        latest_run = self._runtime_state.get_latest_run(source="github", brief_id=self.brief_obj.id)
-
-        if resume and latest_run and self._runtime_state.has_work_units(int(latest_run["id"])):
-            self._runtime_run_id = self._runtime_state.start_run(
-                source="github",
-                brief_id=self.brief_obj.id,
-                output_dir=str(self.output_dir),
-                mode="resume",
-                resume_state=self._runtime_state.get_run_resume_state(int(latest_run["id"])),
-                resumed_from_run_id=int(latest_run["id"]),
-                clone_work_units_from_run_id=int(latest_run["id"]),
-            )
-            progress = self._runtime_state.load_github_progress(self._runtime_run_id)
-            self._seen_usernames = set(progress.discovered_usernames)
-            write_github_progress_projection(self._runtime_state, self._runtime_run_id, self.progress_path)
-            return progress
-
-        self._runtime_run_id = self._runtime_state.start_run(
-            source="github",
-            brief_id=self.brief_obj.id,
-            output_dir=str(self.output_dir),
-            mode="resume" if resume else "fresh",
-            resume_state={"brief_name": self.brief_obj.id},
-            resumed_from_run_id=int(latest_run["id"]) if resume and latest_run else None,
+        self._runtime_run_id, progress = self._runtime_bridge.start_or_resume_run(resume=resume)
+        self._seen_usernames = set(progress.discovered_usernames)
+        self._execution_engine.runtime.mark_progress_dirty()
+        self._execution_engine.runtime.flush_projections_if_needed(
+            run_id=self._runtime_run_id,
+            force_artifacts=True,
         )
-
-        if resume and self.progress_path.exists():
-            try:
-                progress = GitHubProgress.from_file(str(self.progress_path))
-                self._runtime_state.sync_github_progress(self._runtime_run_id, progress)
-                self._seen_usernames = set(progress.discovered_usernames)
-                write_github_progress_projection(self._runtime_state, self._runtime_run_id, self.progress_path)
-                return progress
-            except Exception:
-                pass
-
-        progress = GitHubProgress(brief_name=self.brief_obj.id)
-        self._runtime_state.sync_github_progress(self._runtime_run_id, progress)
-        write_github_progress_projection(self._runtime_state, self._runtime_run_id, self.progress_path)
-        self._seen_usernames = set()
         return progress
 
     def _save_progress(self):
@@ -1669,8 +1706,9 @@ class GitHubPipeline:
             if self._client:
                 self._progress.api_calls_made = self._client.limiter.total_calls
             if getattr(self, "_runtime_run_id", None):
-                self._runtime_state.sync_github_progress(self._runtime_run_id, self._progress)
-                write_github_progress_projection(self._runtime_state, self._runtime_run_id, self.progress_path)
+                self._runtime_bridge.sync_progress(self._runtime_run_id, self._progress)
+                self._execution_engine.runtime.mark_progress_dirty()
+                self._execution_engine.runtime.flush_projections_if_needed(run_id=self._runtime_run_id)
                 self._seen_usernames = set(
                     self._runtime_state.list_terminal_identity_keys(
                         source="github",
@@ -1744,6 +1782,20 @@ class GitHubPipeline:
             self._runtime_state = RuntimeStateStore(self.runtime_db_path)
         if not hasattr(self, "_runtime_lock") or self._runtime_lock is None:
             self._runtime_lock = RuntimeStateLock(output_dir)
+        if not hasattr(self, "_runtime_bridge") or self._runtime_bridge is None:
+            self._runtime_bridge = GitHubRuntimeStateBridge(
+                store=self._runtime_state,
+                output_dir=output_dir,
+                brief_id=self.brief_obj.id,
+                brief_name=self.brief_obj.id,
+            )
+        if not hasattr(self, "_execution_engine") or self._execution_engine is None:
+            self._execution_engine = CandidateExecutionEngine(
+                store=self._runtime_state,
+                output_dir=str(output_dir),
+                brief_id=self.brief_obj.id,
+                source="github",
+            )
         if not hasattr(self, "_runtime_run_id"):
             self._runtime_run_id = None
 
@@ -1761,18 +1813,6 @@ class GitHubPipeline:
         return {"username": candidate.user.username, **candidate.to_dict()}
 
     @staticmethod
-    def _to_payload_dict(payload: Any) -> dict:
-        if payload is None:
-            return {}
-        if hasattr(payload, "to_dict"):
-            return payload.to_dict()
-        if is_dataclass(payload):
-            return asdict(payload)
-        if isinstance(payload, dict):
-            return payload
-        raise TypeError(f"unsupported payload type: {type(payload)!r}")
-
-    @staticmethod
     def _build_runtime_cursor(query: GitHubSearchQuery, result_rank: int) -> dict:
         return {
             "query_id": query.id,
@@ -1782,6 +1822,38 @@ class GitHubPipeline:
             "result_rank": result_rank,
         }
 
+    def _execution_envelope(
+        self,
+        *,
+        username: str,
+        query: GitHubSearchQuery,
+        result_rank: int,
+        candidate: GitHubCandidate | None = None,
+        snippet: CandidateSnippet | None = None,
+        metadata: dict | None = None,
+    ):
+        display_name = username
+        profile_url = f"https://github.com/{username}"
+        if candidate is not None:
+            display_name = candidate.user.name or username
+            profile_url = candidate.user.profile_url
+        elif snippet is not None:
+            display_name = snippet.name
+            profile_url = snippet.profile_url
+        return CandidateExecutionEnvelope(
+            source="github",
+            brief_id=self.brief_obj.id,
+            run_id=getattr(self, "_runtime_run_id", 0) or 0,
+            work_unit_kind=GITHUB_QUERY_KIND,
+            work_unit_source_id=str(query.id),
+            identity_key=username,
+            display_name=display_name,
+            profile_url=profile_url,
+            snippet=snippet,
+            source_cursor=self._build_runtime_cursor(query, result_rank),
+            metadata=metadata or {},
+        )
+
     def _start_stage_attempt(
         self,
         *,
@@ -1789,57 +1861,58 @@ class GitHubPipeline:
         stage: str,
         query: GitHubSearchQuery,
         candidate: GitHubCandidate,
+        result_rank: int = 0,
+        snippet: CandidateSnippet | None = None,
         payload: dict | None = None,
     ) -> int | None:
         if not getattr(self, "_runtime_run_id", None):
             return None
-        state_map = {"facial": "facial_started", "full": "full_started"}
-        self._runtime_state.set_candidate_state(
-            run_id=self._runtime_run_id,
-            source="github",
-            brief_id=self.brief_obj.id,
-            identity_key=username,
-            new_state=state_map[stage],
-            last_work_unit_id=self._get_query_work_unit_id(query),
+        envelope = self._execution_envelope(
+            username=username,
+            query=query,
+            result_rank=result_rank,
+            candidate=candidate,
+            snippet=snippet,
         )
-        return self._runtime_state.start_attempt(
-            run_id=self._runtime_run_id,
-            source="github",
-            brief_id=self.brief_obj.id,
-            identity_key=username,
+        return self._execution_engine.runtime.start_stage(
+            envelope,
             stage=stage,
-            work_unit_id=self._get_query_work_unit_id(query),
             payload=payload or {},
-            source_cursor=self._build_runtime_cursor(query, 0),
-            display_name=candidate.user.name or username,
-            profile_url=candidate.user.profile_url,
         )
 
     def _finish_failure_decision_attempt(
         self,
         *,
         attempt_id: int | None,
+        username: str,
         stage: str,
         decision: OpusDecision,
+        query: GitHubSearchQuery,
+        result_rank: int,
+        candidate: GitHubCandidate,
         candidate_record: dict,
+        snippet: CandidateSnippet | None = None,
         extra_payload: dict | None = None,
     ) -> None:
         if not attempt_id:
             return
-        payload = {
-            "stage": stage,
-            "candidate_record": candidate_record,
-            f"{stage}_decision": self._to_payload_dict(decision),
-        }
+        envelope = self._execution_envelope(
+            username=username,
+            query=query,
+            result_rank=result_rank,
+            candidate=candidate,
+            snippet=snippet,
+            metadata={"candidate_record": candidate_record},
+        )
+        payload = {"candidate_record": candidate_record}
         if extra_payload:
             payload.update(extra_payload)
-        self._runtime_state.finish_attempt_failure(
+        self._execution_engine.runtime.finish_stage_failure(
             attempt_id=attempt_id,
-            failure_kind=decision.decision.lower(),
-            failure_reason=decision.rationale,
-            retryable=True,
-            payload=payload,
-            run_id=self._runtime_run_id,
+            envelope=envelope,
+            stage=stage,
+            error_or_failure_decision=decision,
+            extra_payload=payload,
         )
         self._in_flight_usernames.discard(candidate_record.get("username", ""))
 
@@ -1847,19 +1920,29 @@ class GitHubPipeline:
         self,
         *,
         attempt_id: int | None,
+        username: str,
+        query: GitHubSearchQuery,
+        result_rank: int,
+        candidate: GitHubCandidate | None = None,
+        snippet: CandidateSnippet | None = None,
         error: Exception,
         payload: dict | None = None,
     ) -> None:
         if not attempt_id:
             return
-        classification = classify_runtime_failure(error, source="github")
-        self._runtime_state.finish_attempt_failure(
+        envelope = self._execution_envelope(
+            username=username,
+            query=query,
+            result_rank=result_rank,
+            candidate=candidate,
+            snippet=snippet,
+        )
+        self._execution_engine.runtime.finish_stage_failure(
             attempt_id=attempt_id,
-            failure_kind=classification.reason,
-            failure_reason=classification.detail or str(error),
-            retryable=classification.kind == RECOVERABLE_ERROR,
-            payload=payload or {},
-            run_id=self._runtime_run_id,
+            envelope=envelope,
+            stage="preparation",
+            error_or_failure_decision=error,
+            extra_payload=payload or {},
         )
 
     def _finish_preparation_terminal(
@@ -1875,15 +1958,21 @@ class GitHubPipeline:
     ) -> None:
         if not attempt_id:
             return
+        envelope = self._execution_envelope(
+            username=username,
+            query=query,
+            result_rank=result_rank,
+            candidate=candidate,
+            metadata={"candidate_record": candidate_record or self._candidate_record(candidate)},
+        )
         payload = {
             "cursor": self._build_runtime_cursor(query, result_rank),
             "candidate_record": candidate_record or self._candidate_record(candidate),
             "terminal_reason": decision,
         }
-        self._runtime_state.finish_attempt_success(
+        self._execution_engine.runtime.record_terminal_runtime_decision(
             attempt_id=attempt_id,
-            new_state="failed_terminal",
-            terminal_decision=decision,
+            envelope=envelope,
+            decision=decision,
             payload=payload,
-            run_id=self._runtime_run_id,
         )

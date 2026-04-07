@@ -23,6 +23,59 @@ def write_github_progress_projection(store: RuntimeStateStore, run_id: int, path
     return progress
 
 
+def project_github_snippets(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+    return _project_attempt_payloads(
+        store,
+        source="github",
+        brief_id=brief_id,
+        stage="facial",
+        payload_key="snippet",
+    )
+
+
+def project_github_facial_judgments(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+    return _project_attempt_payloads(
+        store,
+        source="github",
+        brief_id=brief_id,
+        stage="facial",
+        payload_key="facial_decision",
+    )
+
+
+def project_github_profile_summaries(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+    return _project_attempt_payloads(
+        store,
+        source="github",
+        brief_id=brief_id,
+        stage="full",
+        payload_key="profile_summary",
+    )
+
+
+def project_github_final_judgments(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+    return _project_attempt_payloads(
+        store,
+        source="github",
+        brief_id=brief_id,
+        stage="full",
+        payload_key="full_decision",
+    )
+
+
+def write_github_stage_projections(
+    store: RuntimeStateStore,
+    *,
+    brief_id: str,
+    output_dir: str | Path,
+) -> None:
+    output_dir = Path(output_dir)
+    _write_jsonl_atomic(output_dir / "snippets.jsonl", project_github_snippets(store, brief_id=brief_id))
+    _write_jsonl_atomic(output_dir / "facial_judgments.jsonl", project_github_facial_judgments(store, brief_id=brief_id))
+    _write_jsonl_atomic(output_dir / "profile_summaries.jsonl", project_github_profile_summaries(store, brief_id=brief_id))
+    _write_jsonl_atomic(output_dir / "final_judgments.jsonl", project_github_final_judgments(store, brief_id=brief_id))
+
+
 def project_linkedin_progress(store: RuntimeStateStore, run_id: int) -> Progress:
     run = store.get_run(run_id)
     if not run:
@@ -170,19 +223,43 @@ def write_linkedin_search_memory_projection(
 
 
 def project_linkedin_snippets(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
-    return _project_linkedin_attempt_payloads(store, brief_id=brief_id, stage="snippet", payload_key="snippet")
+    return _project_attempt_payloads(
+        store,
+        source="linkedin",
+        brief_id=brief_id,
+        stage="snippet",
+        payload_key="snippet",
+    )
 
 
 def project_linkedin_facial_judgments(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
-    return _project_linkedin_attempt_payloads(store, brief_id=brief_id, stage="facial", payload_key="facial_decision")
+    return _project_attempt_payloads(
+        store,
+        source="linkedin",
+        brief_id=brief_id,
+        stage="facial",
+        payload_key="facial_decision",
+    )
 
 
 def project_linkedin_profile_summaries(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
-    return _project_linkedin_attempt_payloads(store, brief_id=brief_id, stage="full", payload_key="profile_summary")
+    return _project_attempt_payloads(
+        store,
+        source="linkedin",
+        brief_id=brief_id,
+        stage="full",
+        payload_key="profile_summary",
+    )
 
 
 def project_linkedin_final_judgments(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
-    return _project_linkedin_attempt_payloads(store, brief_id=brief_id, stage="full", payload_key="final_decision")
+    return _project_attempt_payloads(
+        store,
+        source="linkedin",
+        brief_id=brief_id,
+        stage="full",
+        payload_key="final_decision",
+    )
 
 
 def write_linkedin_stage_projections(
@@ -222,9 +299,10 @@ def _json_loads(raw: str | None) -> Any:
     return json.loads(raw)
 
 
-def _project_linkedin_attempt_payloads(
+def _project_attempt_payloads(
     store: RuntimeStateStore,
     *,
+    source: str,
     brief_id: str,
     stage: str,
     payload_key: str,
@@ -235,10 +313,10 @@ def _project_linkedin_attempt_payloads(
             SELECT ca.payload_json
             FROM candidate_attempts ca
             JOIN candidates c ON c.id = ca.candidate_id
-            WHERE c.source = 'linkedin' AND c.brief_id = ? AND ca.stage = ?
+            WHERE c.source = ? AND c.brief_id = ? AND ca.stage = ?
             ORDER BY ca.started_at ASC, ca.id ASC
             """,
-            (brief_id, stage),
+            (source, brief_id, stage),
         ).fetchall()
     projected: list[dict] = []
     for row in rows:

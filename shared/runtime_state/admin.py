@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .projections import (
+    write_github_stage_projections,
     write_github_progress_projection,
     write_linkedin_candidate_history_projection,
     write_linkedin_progress_projection,
@@ -28,6 +29,11 @@ def rebuild_compat_projections(
     brief_id = run["brief_id"]
     if source == "github":
         write_github_progress_projection(store, run_id, output_dir / "progress.json")
+        write_github_stage_projections(
+            store,
+            brief_id=brief_id,
+            output_dir=output_dir,
+        )
     elif source == "linkedin":
         write_linkedin_progress_projection(store, run_id, output_dir / "progress.json")
         write_linkedin_candidate_history_projection(

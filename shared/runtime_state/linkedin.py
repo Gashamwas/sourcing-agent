@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from shared.failures import RECOVERABLE_ERROR, classify_runtime_failure
 from shared.runtime_state.admin import rebuild_compat_projections
 from shared.runtime_state.projections import (
     project_linkedin_candidate_history,
@@ -62,6 +61,14 @@ class LinkedInRuntimeStateBridge:
         self.facial_path = self.output_dir / "facial_judgments.jsonl"
         self.profiles_path = self.output_dir / "profile_summaries.jsonl"
         self.final_path = self.output_dir / "final_judgments.jsonl"
+        from shared.execution import CandidateExecutionEngine
+
+        self._execution_engine = CandidateExecutionEngine(
+            store=self.store,
+            output_dir=str(self.output_dir),
+            brief_id=self.brief_id,
+            source="linkedin",
+        )
 
     def has_runtime_state(self) -> bool:
         latest_run = self.store.get_latest_run(source="linkedin", brief_id=self.brief_id)
@@ -221,44 +228,30 @@ class LinkedInRuntimeStateBridge:
         if not snippet.profile_url:
             self.record_missing_identity(run_id=run_id, search_string=search_string, snippet=snippet)
             return None
-        work_unit_id = self.store.get_work_unit_id(
-            run_id,
-            kind=LINKEDIN_STRING_KIND,
-            source_unit_id=str(search_string.id),
+        envelope = self._execution_engine.envelope(
+            source="linkedin",
+            brief_id=self.brief_id,
+            run_id=run_id,
+            work_unit_kind=LINKEDIN_STRING_KIND,
+            work_unit_source_id=str(search_string.id),
+            identity_key=snippet.profile_url,
+            display_name=snippet.name,
+            profile_url=snippet.profile_url,
+            snippet=snippet,
+            source_cursor=self._cursor(search_string, snippet),
         )
         payload = {
-            "cursor": self._cursor(search_string, snippet),
+            "cursor": envelope.source_cursor,
             "snippet": snippet.to_dict(),
         }
-        self.store.record_candidate_discovery(
-            run_id=run_id,
-            work_unit_id=work_unit_id,
-            source="linkedin",
-            brief_id=self.brief_id,
-            identity_key=snippet.profile_url,
-            display_name=snippet.name,
-            profile_url=snippet.profile_url,
+        self._execution_engine.runtime.record_discovery(
+            envelope,
             payload=payload["cursor"],
         )
-        attempt_id = self.store.start_attempt(
-            run_id=run_id,
-            source="linkedin",
-            brief_id=self.brief_id,
-            identity_key=snippet.profile_url,
-            stage="snippet",
-            work_unit_id=work_unit_id,
+        return self._execution_engine.runtime.record_snippet_extracted(
+            envelope,
             payload=payload,
-            source_cursor=payload["cursor"],
-            display_name=snippet.name,
-            profile_url=snippet.profile_url,
         )
-        self.store.finish_attempt_success(
-            attempt_id=attempt_id,
-            new_state="snippet_extracted",
-            payload=payload,
-            run_id=run_id,
-        )
-        return attempt_id
 
     def start_stage_attempt(
         self,
@@ -271,37 +264,28 @@ class LinkedInRuntimeStateBridge:
     ) -> int | None:
         if not snippet.profile_url:
             return None
-        work_unit_id = self.store.get_work_unit_id(
-            run_id,
-            kind=LINKEDIN_STRING_KIND,
-            source_unit_id=str(search_string.id),
-        )
-        state = {"facial": "facial_started", "full": "full_started"}[stage]
-        self.store.set_candidate_state(
-            run_id=run_id,
-            source="linkedin",
-            brief_id=self.brief_id,
-            identity_key=snippet.profile_url,
-            new_state=state,
-            last_work_unit_id=work_unit_id,
-        )
         attempt_payload = {
             "cursor": self._cursor(search_string, snippet),
             "snippet": snippet.to_dict(),
         }
         if payload:
             attempt_payload.update(payload)
-        return self.store.start_attempt(
-            run_id=run_id,
+        envelope = self._execution_engine.envelope(
             source="linkedin",
             brief_id=self.brief_id,
+            run_id=run_id,
+            work_unit_kind=LINKEDIN_STRING_KIND,
+            work_unit_source_id=str(search_string.id),
             identity_key=snippet.profile_url,
-            stage=stage,
-            work_unit_id=work_unit_id,
-            payload=attempt_payload,
-            source_cursor=attempt_payload["cursor"],
             display_name=snippet.name,
             profile_url=snippet.profile_url,
+            snippet=snippet,
+            source_cursor=attempt_payload["cursor"],
+        )
+        return self._execution_engine.runtime.start_stage(
+            envelope,
+            stage=stage,
+            payload=attempt_payload,
         )
 
     def finish_stage_success(
@@ -316,27 +300,28 @@ class LinkedInRuntimeStateBridge:
     ) -> None:
         if not attempt_id:
             return
-        new_state = "facial_terminal" if stage == "facial" else "full_terminal"
-        payload = {
-            "cursor": {
-                "source_string_id": snippet.source_string_id,
-                "source_string_name": snippet.source_string_name,
-                "page": snippet.page,
-                "result_rank": snippet.result_rank,
-            },
-            "snippet": snippet.to_dict(),
-            f"{stage}_decision": decision.to_dict(),
-            "source_string_id": snippet.source_string_id,
-            "timestamp": self._timestamp_from_decision_payload(decision),
-        }
-        if profile_summary is not None:
-            payload["profile_summary"] = profile_summary.to_dict()
-        self.store.finish_attempt_success(
-            attempt_id=attempt_id,
-            new_state=new_state,
-            terminal_decision=decision.decision,
-            payload=payload,
+        envelope = self._execution_engine.envelope(
+            source="linkedin",
+            brief_id=self.brief_id,
             run_id=run_id,
+            work_unit_kind=LINKEDIN_STRING_KIND,
+            work_unit_source_id=str(snippet.source_string_id),
+            identity_key=snippet.profile_url,
+            display_name=snippet.name,
+            profile_url=snippet.profile_url,
+            snippet=snippet,
+            source_cursor=self._cursor(search_string=SearchString(id=snippet.source_string_id, name=snippet.source_string_name, boolean=""), snippet=snippet),
+        )
+        self._execution_engine.runtime.finish_stage_success(
+            attempt_id=attempt_id,
+            envelope=envelope,
+            stage=stage,
+            decision=decision,
+            extra_payload={
+                "source_string_id": snippet.source_string_id,
+                "timestamp": self._timestamp_from_decision_payload(decision),
+            },
+            profile_summary=profile_summary,
         )
 
     def finish_stage_failure(
@@ -350,28 +335,24 @@ class LinkedInRuntimeStateBridge:
     ) -> None:
         if not attempt_id:
             return
-        classification = classify_runtime_failure(error, source="linkedin")
-        failure_payload = {
-            "cursor": {
-                "source_string_id": snippet.source_string_id,
-                "source_string_name": snippet.source_string_name,
-                "page": snippet.page,
-                "result_rank": snippet.result_rank,
-            },
-            "snippet": snippet.to_dict(),
-        }
-        if payload:
-            failure_payload.update(payload)
-        retryable = classification.kind == RECOVERABLE_ERROR or bool(
-            failure_payload.get("profile_extraction_failed") or failure_payload.get("force_retryable")
-        )
-        self.store.finish_attempt_failure(
-            attempt_id=attempt_id,
-            failure_kind=classification.reason,
-            failure_reason=classification.detail or str(error),
-            retryable=retryable,
-            payload=failure_payload,
+        envelope = self._execution_engine.envelope(
+            source="linkedin",
+            brief_id=self.brief_id,
             run_id=run_id,
+            work_unit_kind=LINKEDIN_STRING_KIND,
+            work_unit_source_id=str(snippet.source_string_id),
+            identity_key=snippet.profile_url,
+            display_name=snippet.name,
+            profile_url=snippet.profile_url,
+            snippet=snippet,
+            source_cursor=self._cursor(SearchString(id=snippet.source_string_id, name=snippet.source_string_name, boolean=""), snippet),
+        )
+        self._execution_engine.runtime.finish_stage_failure(
+            attempt_id=attempt_id,
+            envelope=envelope,
+            stage="full",
+            error_or_failure_decision=error,
+            extra_payload=payload,
         )
 
     def finish_failure_decision(
@@ -385,25 +366,55 @@ class LinkedInRuntimeStateBridge:
     ) -> None:
         if not attempt_id:
             return
-        failure_payload = {
-            "cursor": {
-                "source_string_id": snippet.source_string_id,
-                "source_string_name": snippet.source_string_name,
-                "page": snippet.page,
-                "result_rank": snippet.result_rank,
-            },
-            "snippet": snippet.to_dict(),
-            f"{decision.stage}_decision": decision.to_dict(),
-        }
-        if payload:
-            failure_payload.update(payload)
-        self.store.finish_attempt_failure(
-            attempt_id=attempt_id,
-            failure_kind=decision.decision.lower(),
-            failure_reason=decision.rationale,
-            retryable=True,
-            payload=failure_payload,
+        envelope = self._execution_engine.envelope(
+            source="linkedin",
+            brief_id=self.brief_id,
             run_id=run_id,
+            work_unit_kind=LINKEDIN_STRING_KIND,
+            work_unit_source_id=str(snippet.source_string_id),
+            identity_key=snippet.profile_url,
+            display_name=snippet.name,
+            profile_url=snippet.profile_url,
+            snippet=snippet,
+            source_cursor=self._cursor(SearchString(id=snippet.source_string_id, name=snippet.source_string_name, boolean=""), snippet),
+        )
+        self._execution_engine.runtime.finish_stage_failure(
+            attempt_id=attempt_id,
+            envelope=envelope,
+            stage=decision.stage,
+            error_or_failure_decision=decision,
+            extra_payload=payload,
+        )
+
+    def record_side_effect_result(
+        self,
+        *,
+        run_id: int,
+        search_string: SearchString,
+        snippet: CandidateSnippet,
+        attempt_id: int | None,
+        effect_type: str,
+        status: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        envelope = self._execution_engine.envelope(
+            source="linkedin",
+            brief_id=self.brief_id,
+            run_id=run_id,
+            work_unit_kind=LINKEDIN_STRING_KIND,
+            work_unit_source_id=str(search_string.id),
+            identity_key=snippet.profile_url,
+            display_name=snippet.name,
+            profile_url=snippet.profile_url,
+            snippet=snippet,
+            source_cursor=self._cursor(search_string, snippet),
+        )
+        self._execution_engine.runtime.record_side_effect_result(
+            envelope=envelope,
+            attempt_id=attempt_id,
+            effect_type=effect_type,
+            status=status,
+            payload=payload,
         )
 
     def rebuild_artifacts(self, run_id: int) -> None:

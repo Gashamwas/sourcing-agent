@@ -7,7 +7,11 @@ import json
 from github.schemas import GitHubProgress, GitHubSearchQuery
 from shared.runtime_state import RuntimeStateStore
 from shared.runtime_state.projections import (
+    project_github_facial_judgments,
+    project_github_final_judgments,
+    project_github_profile_summaries,
     project_github_progress,
+    project_github_snippets,
     project_linkedin_candidate_history,
     project_linkedin_progress,
     project_linkedin_search_memory,
@@ -70,6 +74,127 @@ def test_github_progress_projection_round_trip(tmp_path):
     write_github_progress_projection(store, run_id, path)
     second = path.read_text()
     assert json.loads(first) == json.loads(second)
+
+
+def test_github_stage_projections_round_trip(tmp_path):
+    store = _make_store(tmp_path)
+    run_id = store.start_run(
+        source="github",
+        brief_id="brief-1",
+        output_dir=str(tmp_path),
+        mode="fresh",
+        resume_state={"brief_name": "brief-1"},
+    )
+    store.sync_github_progress(run_id, GitHubProgress(brief_name="brief-1", queries=[
+        GitHubSearchQuery(id=1, name="q1", query="language:python", channel="user_search", status="done"),
+    ]))
+    work_unit_id = store.get_work_unit_id(run_id, kind="github_query", source_unit_id="1")
+    store.record_candidate_discovery(
+        run_id=run_id,
+        work_unit_id=work_unit_id,
+        source="github",
+        brief_id="brief-1",
+        identity_key="alice",
+        display_name="Alice",
+        profile_url="https://github.com/alice",
+        payload={"query_id": 1},
+    )
+    snippet_attempt_id = store.start_attempt(
+        run_id=run_id,
+        source="github",
+        brief_id="brief-1",
+        identity_key="alice",
+        stage="preparation",
+        work_unit_id=work_unit_id,
+        payload={"cursor": {"query_id": 1}},
+        source_cursor={"query_id": 1},
+        display_name="Alice",
+        profile_url="https://github.com/alice",
+    )
+    store.finish_attempt_success(
+        attempt_id=snippet_attempt_id,
+        new_state="snippet_extracted",
+        payload={"cursor": {"query_id": 1}},
+        run_id=run_id,
+    )
+    store.set_candidate_state(
+        run_id=run_id,
+        source="github",
+        brief_id="brief-1",
+        identity_key="alice",
+        new_state="facial_started",
+        last_work_unit_id=work_unit_id,
+    )
+    facial_attempt_id = store.start_attempt(
+        run_id=run_id,
+        source="github",
+        brief_id="brief-1",
+        identity_key="alice",
+        stage="facial",
+        work_unit_id=work_unit_id,
+        payload={
+            "snippet": {"candidate_name": "Alice", "profile_url": "https://github.com/alice"},
+            "facial_decision": {"decision": "FACIAL_YES", "profile_url": "https://github.com/alice"},
+        },
+        source_cursor={"query_id": 1},
+        display_name="Alice",
+        profile_url="https://github.com/alice",
+    )
+    store.finish_attempt_success(
+        attempt_id=facial_attempt_id,
+        new_state="facial_terminal",
+        payload={
+            "snippet": {"candidate_name": "Alice", "profile_url": "https://github.com/alice"},
+            "facial_decision": {"decision": "FACIAL_YES", "profile_url": "https://github.com/alice"},
+        },
+        run_id=run_id,
+    )
+    store.set_candidate_state(
+        run_id=run_id,
+        source="github",
+        brief_id="brief-1",
+        identity_key="alice",
+        new_state="full_started",
+        last_work_unit_id=work_unit_id,
+    )
+    full_attempt_id = store.start_attempt(
+        run_id=run_id,
+        source="github",
+        brief_id="brief-1",
+        identity_key="alice",
+        stage="full",
+        work_unit_id=work_unit_id,
+        payload={
+            "profile_summary": {"name": "Alice", "profile_url": "https://github.com/alice"},
+            "full_decision": {"decision": "SAVE", "profile_url": "https://github.com/alice"},
+        },
+        source_cursor={"query_id": 1},
+        display_name="Alice",
+        profile_url="https://github.com/alice",
+    )
+    store.finish_attempt_success(
+        attempt_id=full_attempt_id,
+        new_state="full_terminal",
+        terminal_decision="SAVE",
+        payload={
+            "profile_summary": {"name": "Alice", "profile_url": "https://github.com/alice"},
+            "full_decision": {"decision": "SAVE", "profile_url": "https://github.com/alice"},
+        },
+        run_id=run_id,
+    )
+
+    assert project_github_snippets(store, brief_id="brief-1") == [
+        {"candidate_name": "Alice", "profile_url": "https://github.com/alice"}
+    ]
+    assert project_github_facial_judgments(store, brief_id="brief-1") == [
+        {"decision": "FACIAL_YES", "profile_url": "https://github.com/alice"}
+    ]
+    assert project_github_profile_summaries(store, brief_id="brief-1") == [
+        {"name": "Alice", "profile_url": "https://github.com/alice"}
+    ]
+    assert project_github_final_judgments(store, brief_id="brief-1") == [
+        {"decision": "SAVE", "profile_url": "https://github.com/alice"}
+    ]
 
 
 def test_linkedin_projections_cover_progress_history_and_search_memory(tmp_path):

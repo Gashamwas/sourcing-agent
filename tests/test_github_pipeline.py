@@ -15,7 +15,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from github.schemas import ContactInfo, GitHubCandidate, GitHubUser
-from shared.runtime_state import RuntimeStateLock, RuntimeStateStore
+from shared.execution import CandidateExecutionEngine
+from shared.runtime_state import GitHubRuntimeStateBridge, RuntimeStateLock, RuntimeStateStore
 
 
 class _FakeExhaustionState:
@@ -194,6 +195,18 @@ def _attach_runtime_state(pipeline, base_dir: Path):
     pipeline.runtime_db_path = pipeline.output_dir / "runtime_state.sqlite3"
     pipeline._runtime_state = RuntimeStateStore(pipeline.runtime_db_path)
     pipeline._runtime_lock = RuntimeStateLock(pipeline.output_dir)
+    pipeline._runtime_bridge = GitHubRuntimeStateBridge(
+        store=pipeline._runtime_state,
+        output_dir=pipeline.output_dir,
+        brief_id=pipeline.brief_obj.id,
+        brief_name=pipeline.brief_obj.id,
+    )
+    pipeline._execution_engine = CandidateExecutionEngine(
+        store=pipeline._runtime_state,
+        output_dir=str(pipeline.output_dir),
+        brief_id=pipeline.brief_obj.id,
+        source="github",
+    )
     pipeline._runtime_run_id = None
     return pipeline
 
