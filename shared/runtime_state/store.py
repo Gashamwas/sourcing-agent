@@ -16,6 +16,7 @@ from shared.contracts import TARGET_CANDIDATE_LIFECYCLE
 GITHUB_QUERY_KIND = "github_query"
 GITHUB_GRAPH_SEED_KIND = "github_graph_seed"
 LINKEDIN_STRING_KIND = "linkedin_string"
+SIDE_EFFECT_TERMINAL_STATUSES = {"succeeded", "failed", "skipped", "invalidated"}
 
 TERMINAL_WORK_UNIT_STATUSES = {"done", "skipped", "error"}
 DEDUP_BLOCKING_RUNTIME_DECISIONS = {
@@ -85,6 +86,7 @@ class RuntimeStateStore:
                     output_dir TEXT NOT NULL,
                     mode TEXT NOT NULL,
                     status TEXT NOT NULL,
+                    stop_reason TEXT NOT NULL DEFAULT 'normal',
                     started_at TEXT NOT NULL,
                     ended_at TEXT,
                     resumed_from_run_id INTEGER,
@@ -179,11 +181,29 @@ class RuntimeStateStore:
                     FOREIGN KEY(candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
                     FOREIGN KEY(attempt_id) REFERENCES candidate_attempts(id) ON DELETE CASCADE
                 );
+
+                CREATE TABLE IF NOT EXISTS side_effects (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    run_id INTEGER,
+                    candidate_id INTEGER NOT NULL,
+                    attempt_id INTEGER,
+                    effect_type TEXT NOT NULL,
+                    idempotency_key TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    payload_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    invalidated_at TEXT,
+                    FOREIGN KEY(run_id) REFERENCES runs(id) ON DELETE CASCADE,
+                    FOREIGN KEY(candidate_id) REFERENCES candidates(id) ON DELETE CASCADE,
+                    FOREIGN KEY(attempt_id) REFERENCES candidate_attempts(id) ON DELETE SET NULL,
+                    UNIQUE(candidate_id, effect_type, idempotency_key)
+                );
                 """
             )
             conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
-                ("schema_version", "2"),
+                ("schema_version", "3"),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
@@ -200,9 +220,17 @@ class RuntimeStateStore:
             conn.execute(
                 "ALTER TABLE work_units ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '{}'"
             )
+        run_columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+        }
+        if "stop_reason" not in run_columns:
+            conn.execute(
+                "ALTER TABLE runs ADD COLUMN stop_reason TEXT NOT NULL DEFAULT 'normal'"
+            )
         conn.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
-            ("schema_version", "2"),
+            ("schema_version", "3"),
         )
 
     # ------------------------------------------------------------------
@@ -290,13 +318,25 @@ class RuntimeStateStore:
             self._insert_event(conn, run_id=run_id, event_type="run_started", payload={"mode": mode})
             return run_id
 
-    def finish_run(self, run_id: int, status: str) -> None:
+    def finish_run(self, run_id: int, status: str, *, stop_reason: str = "normal") -> None:
         with self.connect() as conn:
             conn.execute(
-                "UPDATE runs SET status = ?, ended_at = ? WHERE id = ?",
-                (status, _utc_now(), run_id),
+                "UPDATE runs SET status = ?, stop_reason = ?, ended_at = ? WHERE id = ?",
+                (status, stop_reason, _utc_now(), run_id),
             )
-            self._insert_event(conn, run_id=run_id, event_type="run_finished", payload={"status": status})
+            self._insert_event(
+                conn,
+                run_id=run_id,
+                event_type="run_finished",
+                payload={"status": status, "stop_reason": stop_reason},
+            )
+
+    def set_run_stop_reason(self, run_id: int, stop_reason: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "UPDATE runs SET stop_reason = ? WHERE id = ?",
+                (stop_reason, run_id),
+            )
 
     def get_latest_run(self, *, source: str, brief_id: str) -> dict | None:
         with self.connect() as conn:
@@ -310,6 +350,19 @@ class RuntimeStateStore:
                 (source, brief_id),
             ).fetchone()
             return _row_to_dict(row) if row else None
+
+    def list_runs(self, *, source: str, brief_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM runs
+                WHERE source = ? AND brief_id = ?
+                ORDER BY id DESC
+                """,
+                (source, brief_id),
+            ).fetchall()
+            return [_row_to_dict(row) for row in rows]
 
     def get_run(self, run_id: int) -> dict | None:
         with self.connect() as conn:
@@ -1030,6 +1083,286 @@ class RuntimeStateStore:
                 )
                 reconciled += 1
             return reconciled
+
+    # ------------------------------------------------------------------
+    # Candidate side effects
+    # ------------------------------------------------------------------
+
+    def begin_candidate_side_effect(
+        self,
+        *,
+        run_id: int | None,
+        source: str,
+        brief_id: str,
+        identity_key: str,
+        attempt_id: int | None,
+        effect_type: str,
+        idempotency_key: str,
+        payload: dict | None = None,
+    ) -> dict:
+        candidate = self.get_candidate(source=source, brief_id=brief_id, identity_key=identity_key)
+        if not candidate:
+            raise ValueError(f"candidate not found: {source}:{brief_id}:{identity_key}")
+        now = _utc_now()
+        with self.connect() as conn:
+            existing = conn.execute(
+                """
+                SELECT *
+                FROM side_effects
+                WHERE candidate_id = ? AND effect_type = ? AND idempotency_key = ?
+                """,
+                (int(candidate["id"]), effect_type, idempotency_key),
+            ).fetchone()
+            if existing:
+                existing_dict = _row_to_dict(existing)
+                if existing["status"] == "invalidated":
+                    conn.execute(
+                        """
+                        UPDATE side_effects
+                        SET run_id = ?, attempt_id = ?, status = 'pending', payload_json = ?, updated_at = ?, invalidated_at = NULL
+                        WHERE id = ?
+                        """,
+                        (
+                            run_id,
+                            attempt_id,
+                            _json_dumps(payload or {}),
+                            now,
+                            int(existing["id"]),
+                        ),
+                    )
+                    self._insert_event(
+                        conn,
+                        run_id=run_id,
+                        candidate_id=int(candidate["id"]),
+                        attempt_id=attempt_id,
+                        event_type="side_effect_pending",
+                        payload={
+                            "effect_type": effect_type,
+                            "idempotency_key": idempotency_key,
+                            "replayed_from_invalidated": True,
+                        },
+                    )
+                    existing_dict.update(
+                        {
+                            "run_id": run_id,
+                            "attempt_id": attempt_id,
+                            "status": "pending",
+                            "payload_json": _json_dumps(payload or {}),
+                            "updated_at": now,
+                            "invalidated_at": None,
+                        }
+                    )
+                    return {"should_execute": True, "side_effect": existing_dict}
+
+                self._insert_event(
+                    conn,
+                    run_id=run_id,
+                    candidate_id=int(candidate["id"]),
+                    attempt_id=attempt_id,
+                    event_type="side_effect_result",
+                    payload={
+                        "effect_type": effect_type,
+                        "status": "skipped",
+                        "idempotency_key": idempotency_key,
+                        "skip_reason": f"existing_{existing['status']}",
+                    },
+                )
+                return {"should_execute": False, "side_effect": _row_to_dict(existing)}
+
+            cursor = conn.execute(
+                """
+                INSERT INTO side_effects(
+                    run_id, candidate_id, attempt_id, effect_type, idempotency_key,
+                    status, payload_json, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    int(candidate["id"]),
+                    attempt_id,
+                    effect_type,
+                    idempotency_key,
+                    _json_dumps(payload or {}),
+                    now,
+                    now,
+                ),
+            )
+            side_effect_id = int(cursor.lastrowid)
+            self._insert_event(
+                conn,
+                run_id=run_id,
+                candidate_id=int(candidate["id"]),
+                attempt_id=attempt_id,
+                event_type="side_effect_pending",
+                payload={
+                    "effect_type": effect_type,
+                    "idempotency_key": idempotency_key,
+                },
+            )
+            row = conn.execute("SELECT * FROM side_effects WHERE id = ?", (side_effect_id,)).fetchone()
+            return {"should_execute": True, "side_effect": _row_to_dict(row)}
+
+    def complete_candidate_side_effect(
+        self,
+        *,
+        side_effect_id: int,
+        status: str,
+        payload: dict | None = None,
+    ) -> None:
+        if status not in SIDE_EFFECT_TERMINAL_STATUSES:
+            raise ValueError(f"invalid side_effect status: {status}")
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM side_effects WHERE id = ?", (side_effect_id,)).fetchone()
+            if not row:
+                raise ValueError(f"side effect not found: {side_effect_id}")
+            conn.execute(
+                """
+                UPDATE side_effects
+                SET status = ?, payload_json = ?, updated_at = ?, invalidated_at = CASE
+                    WHEN ? = 'invalidated' THEN ?
+                    ELSE invalidated_at
+                END
+                WHERE id = ?
+                """,
+                (
+                    status,
+                    _json_dumps(payload or {}),
+                    _utc_now(),
+                    status,
+                    _utc_now(),
+                    side_effect_id,
+                ),
+            )
+            self._insert_event(
+                conn,
+                run_id=row["run_id"],
+                candidate_id=row["candidate_id"],
+                attempt_id=row["attempt_id"],
+                event_type="side_effect_result",
+                payload={
+                    "effect_type": row["effect_type"],
+                    "status": status,
+                    "idempotency_key": row["idempotency_key"],
+                    **(payload or {}),
+                },
+            )
+
+    def list_candidate_side_effects(
+        self,
+        *,
+        source: str,
+        brief_id: str,
+        status: str | None = None,
+        identity_key: str | None = None,
+    ) -> list[dict]:
+        sql = """
+            SELECT se.*, c.identity_key, c.source, c.brief_id
+            FROM side_effects se
+            JOIN candidates c ON c.id = se.candidate_id
+            WHERE c.source = ? AND c.brief_id = ?
+        """
+        params: list[Any] = [source, brief_id]
+        if status is not None:
+            sql += " AND se.status = ?"
+            params.append(status)
+        if identity_key is not None:
+            sql += " AND c.identity_key = ?"
+            params.append(identity_key)
+        sql += " ORDER BY se.id ASC"
+        with self.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+            return [_row_to_dict(row) for row in rows]
+
+    def reconcile_pending_side_effects(self, *, source: str, brief_id: str) -> int:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT se.*, c.identity_key
+                FROM side_effects se
+                JOIN candidates c ON c.id = se.candidate_id
+                WHERE se.status = 'pending' AND c.source = ? AND c.brief_id = ?
+                ORDER BY se.id ASC
+                """,
+                (source, brief_id),
+            ).fetchall()
+            reconciled = 0
+            for row in rows:
+                conn.execute(
+                    """
+                    UPDATE side_effects
+                    SET status = 'failed',
+                        payload_json = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        _json_dumps({"reason": "interrupted"}),
+                        _utc_now(),
+                        int(row["id"]),
+                    ),
+                )
+                self._insert_event(
+                    conn,
+                    run_id=row["run_id"],
+                    candidate_id=row["candidate_id"],
+                    attempt_id=row["attempt_id"],
+                    event_type="side_effect_result",
+                    payload={
+                        "effect_type": row["effect_type"],
+                        "status": "failed",
+                        "idempotency_key": row["idempotency_key"],
+                        "reason": "interrupted",
+                    },
+                )
+                reconciled += 1
+            return reconciled
+
+    def invalidate_candidate_side_effects(
+        self,
+        *,
+        source: str,
+        brief_id: str,
+        identity_key: str,
+        effect_type: str | None = None,
+    ) -> int:
+        candidate = self.get_candidate(source=source, brief_id=brief_id, identity_key=identity_key)
+        if not candidate:
+            return 0
+        sql = """
+            SELECT id, run_id, candidate_id, attempt_id, effect_type, idempotency_key
+            FROM side_effects
+            WHERE candidate_id = ?
+              AND status != 'invalidated'
+        """
+        params: list[Any] = [int(candidate["id"])]
+        if effect_type is not None:
+            sql += " AND effect_type = ?"
+            params.append(effect_type)
+        with self.connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+            for row in rows:
+                conn.execute(
+                    """
+                    UPDATE side_effects
+                    SET status = 'invalidated', updated_at = ?, invalidated_at = ?
+                    WHERE id = ?
+                    """,
+                    (_utc_now(), _utc_now(), int(row["id"])),
+                )
+                self._insert_event(
+                    conn,
+                    run_id=row["run_id"],
+                    candidate_id=row["candidate_id"],
+                    attempt_id=row["attempt_id"],
+                    event_type="side_effect_result",
+                    payload={
+                        "effect_type": row["effect_type"],
+                        "status": "invalidated",
+                        "idempotency_key": row["idempotency_key"],
+                    },
+                )
+            return len(rows)
 
     # ------------------------------------------------------------------
     # GitHub-specific helpers

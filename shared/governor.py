@@ -119,6 +119,14 @@ class SessionGovernor:
         self._profile_opens_session += 1
         cooldown.record_profile_open()
 
+    def record_profile_open(self):
+        """Record one successful profile open explicitly."""
+        self._record_open()
+
+    def check_profile_open_or_raise(self):
+        """Check limits before attempting a profile open."""
+        self._check_limits_or_raise()
+
     # ── Limit checks ───────────────────────────────────────────────
 
     def _check_limits_or_raise(self):

@@ -28,7 +28,6 @@ import logging
 import re
 import base64
 from html.parser import HTMLParser
-from urllib.parse import urljoin
 from typing import Optional
 
 from github.client import GitHubClient
@@ -41,7 +40,7 @@ from github.schemas import (
 from shared.contact_discovery import discover_contacts
 from shared.llm_clients import cheap_llm
 import github.config as gc
-from shared.url_safety import check_url
+from shared.safety import fetch_text_if_safe, validate_public_url
 
 logger = logging.getLogger(__name__)
 
@@ -164,10 +163,11 @@ Analyze this profile and output the structured JSON format."""
 class GitHubEnricher:
     """Multi-step profile enrichment pipeline."""
 
-    def __init__(self, client: GitHubClient, brief=None):
+    def __init__(self, client: GitHubClient, brief=None, safety_event_recorder=None):
         self._client = client
         self._brief = brief
         self._frontier_contributor_cache: dict[str, set[str]] = {}  # repo -> set of contributor logins
+        self._safety_event_recorder = safety_event_recorder
 
     async def light_enrich(
         self,
@@ -449,10 +449,14 @@ class GitHubEnricher:
         if blog and "linkedin.com" not in blog.lower():
             if not blog.startswith("http"):
                 blog = f"https://{blog}"
-            safe, reason = await check_url(blog)
+            safe, reason = await validate_public_url(blog)
             if safe:
                 urls_to_check.append(blog)
             else:
+                self._record_safety_event(
+                    "blocked_external_url",
+                    {"url": blog, "reason": reason, "source": "profile_blog"},
+                )
                 logger.warning("Blocked blog URL for %s: %s (%s)", username, blog, reason)
 
         # Look for URLs in profile README
@@ -462,17 +466,25 @@ class GitHubEnricher:
             for url in found_urls:
                 url_lower = url.lower()
                 if any(domain in url_lower for domain in ("arxiv.org", "scholar.google", "semanticscholar.org", "dl.acm.org")):
-                    safe, reason = await check_url(url)
+                    safe, reason = await validate_public_url(url)
                     if safe:
                         candidate.paper_links.append(url)
                     else:
+                        self._record_safety_event(
+                            "blocked_external_url",
+                            {"url": url, "reason": reason, "source": "readme_paper_link"},
+                        )
                         logger.warning("Blocked paper URL for %s: %s (%s)", username, url, reason)
                 elif "linkedin.com" not in url_lower and "github.com" not in url_lower:
                     if url not in urls_to_check:
-                        safe, reason = await check_url(url)
+                        safe, reason = await validate_public_url(url)
                         if safe:
                             urls_to_check.append(url)
                         else:
+                            self._record_safety_event(
+                                "blocked_external_url",
+                                {"url": url, "reason": reason, "source": "readme_link"},
+                            )
                             logger.warning("Blocked README URL for %s: %s (%s)", username, url, reason)
 
         # Fetch website content (redirect-safe)
@@ -484,29 +496,16 @@ class GitHubEnricher:
                 ssl_ctx = ssl.create_default_context(cafile=certifi.where())
                 connector = aiohttp.TCPConnector(ssl=ssl_ctx)
                 async with aiohttp.ClientSession(connector=connector, timeout=aiohttp.ClientTimeout(total=10)) as session:
-                    target = url
-                    for _ in range(self._MAX_REDIRECTS):
-                        async with session.get(target, allow_redirects=False) as resp:
-                            if resp.status in self._REDIRECT_STATUSES:
-                                location = resp.headers.get("Location")
-                                if not location:
-                                    break
-                                location = urljoin(target, location)
-                                safe, reason = await check_url(location)
-                                if not safe:
-                                    logger.warning("Blocked redirect for %s: %s -> %s (%s)", username, target, location, reason)
-                                    break
-                                target = location
-                                continue
-                            if resp.status == 200:
-                                content_type = resp.headers.get("Content-Type", "")
-                                if "html" in content_type:
-                                    html = await resp.text()
-                                    candidate.website_text = _html_to_text(html, gc.MAX_WEBSITE_FETCH_SIZE)
-                                    # Look for paper links in website
-                                    paper_urls = re.findall(r'https?://arxiv\.org/abs/[^\s\)\]>\"\'<]+', html)
-                                    candidate.paper_links.extend(paper_urls)
-                            break
+                    result = await fetch_text_if_safe(
+                        session=session,
+                        url=url,
+                        max_redirects=self._MAX_REDIRECTS,
+                        on_event=self._async_record_safety_event,
+                    )
+                    if result.status == "ok":
+                        candidate.website_text = _html_to_text(result.body, gc.MAX_WEBSITE_FETCH_SIZE)
+                        paper_urls = re.findall(r'https?://arxiv\.org/abs/[^\s\)\]>\"\'<]+', result.body)
+                        candidate.paper_links.extend(paper_urls)
             except Exception:
                 pass  # Not critical
 
@@ -591,3 +590,10 @@ class GitHubEnricher:
             return "(no language data)"
         sorted_langs = sorted(languages.items(), key=lambda x: x[1], reverse=True)
         return ", ".join(f"{lang} ({weight})" for lang, weight in sorted_langs[:15])
+
+    def _record_safety_event(self, event_type: str, payload: dict) -> None:
+        if self._safety_event_recorder:
+            self._safety_event_recorder(event_type, payload)
+
+    async def _async_record_safety_event(self, event_type: str, payload: dict) -> None:
+        self._record_safety_event(event_type, payload)

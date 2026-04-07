@@ -149,9 +149,9 @@ async def _run_sourcing_session(
         output_dir=output_dir,
         input_mode=input_mode,
     )
+    pipeline._governor = governor
 
     await pipeline.browser.connect()
-    governor.wrap_browser(pipeline.browser)
 
     # Set up pause/resume events for decoy interleaving
     pause_requested = asyncio.Event()
@@ -280,9 +280,6 @@ async def _run_sourcing_session(
         # Ensure pipeline saves progress
         if pipeline._progress:
             pipeline._progress.save(str(pipeline.progress_path))
-
-        # Unwrap governor hooks and disconnect
-        governor.unwrap_browser(pipeline.browser)
 
     return {
         "stats": pipeline.stats,

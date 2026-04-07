@@ -29,7 +29,7 @@ def test_bootstrap_is_idempotent(tmp_path):
 
     with store.connect() as conn:
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
-        assert row["value"] == "2"
+        assert row["value"] == "3"
 
 
 def test_rejects_invalid_state_transition(tmp_path):
@@ -166,3 +166,78 @@ def test_runtime_lock_enforces_single_writer(tmp_path):
             second.acquire()
     finally:
         first.release()
+
+
+def test_finish_run_persists_stop_reason(tmp_path):
+    store = _make_store(tmp_path)
+    run_id = _start_run(store, tmp_path)
+
+    store.finish_run(run_id, "interrupted", stop_reason="governor_limit")
+
+    run = store.get_run(run_id)
+    assert run["status"] == "interrupted"
+    assert run["stop_reason"] == "governor_limit"
+
+
+def test_reconciles_pending_candidate_side_effects_and_allows_manual_replay(tmp_path):
+    store = _make_store(tmp_path)
+    run_id = _start_run(store, tmp_path, source="linkedin")
+    store.record_candidate_discovery(
+        run_id=run_id,
+        work_unit_id=None,
+        source="linkedin",
+        brief_id="brief-1",
+        identity_key="/talent/profile/ada",
+        display_name="Ada",
+        profile_url="/talent/profile/ada",
+    )
+
+    started = store.begin_candidate_side_effect(
+        run_id=run_id,
+        source="linkedin",
+        brief_id="brief-1",
+        identity_key="/talent/profile/ada",
+        attempt_id=None,
+        effect_type="linkedin_save",
+        idempotency_key="save",
+        payload={"search_string_id": 1},
+    )
+    assert started["should_execute"] is True
+
+    reconciled = store.reconcile_pending_side_effects(source="linkedin", brief_id="brief-1")
+    assert reconciled == 1
+
+    rows = store.list_candidate_side_effects(source="linkedin", brief_id="brief-1")
+    assert rows[0]["status"] == "failed"
+
+    skipped = store.begin_candidate_side_effect(
+        run_id=run_id,
+        source="linkedin",
+        brief_id="brief-1",
+        identity_key="/talent/profile/ada",
+        attempt_id=None,
+        effect_type="linkedin_save",
+        idempotency_key="save",
+        payload={"search_string_id": 1},
+    )
+    assert skipped["should_execute"] is False
+
+    invalidated = store.invalidate_candidate_side_effects(
+        source="linkedin",
+        brief_id="brief-1",
+        identity_key="/talent/profile/ada",
+        effect_type="linkedin_save",
+    )
+    assert invalidated == 1
+
+    replay = store.begin_candidate_side_effect(
+        run_id=run_id,
+        source="linkedin",
+        brief_id="brief-1",
+        identity_key="/talent/profile/ada",
+        attempt_id=None,
+        effect_type="linkedin_save",
+        idempotency_key="save",
+        payload={"search_string_id": 1},
+    )
+    assert replay["should_execute"] is True

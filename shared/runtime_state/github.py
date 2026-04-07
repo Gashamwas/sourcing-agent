@@ -29,6 +29,7 @@ class GitHubRuntimeStateBridge:
 
     def start_or_resume_run(self, *, resume: bool) -> tuple[int, GitHubProgress]:
         self.store.reconcile_open_attempts(source="github", brief_id=self.brief_id)
+        self.store.reconcile_pending_side_effects(source="github", brief_id=self.brief_id)
         latest_run = self.store.get_latest_run(source="github", brief_id=self.brief_id)
 
         if resume and latest_run and self.store.has_work_units(int(latest_run["id"])):

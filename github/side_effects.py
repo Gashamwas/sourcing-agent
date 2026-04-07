@@ -67,31 +67,61 @@ class GitHubSideEffectsService:
         )
 
         outreach_generated = False
-        outreach = await generate_outreach(candidate, pipeline.brief_obj, full_decision)
-        if outreach and outreach.get("message"):
-            candidate.outreach_copy = outreach
-            append_jsonl(pipeline.outreach_path, outreach)
-            outreach_generated = True
-            if getattr(pipeline, "_execution_engine", None):
-                pipeline._execution_engine.runtime.record_side_effect_result(
-                    envelope=envelope,
-                    attempt_id=full_attempt_id,
-                    effect_type="github_outreach",
-                    status="succeeded",
-                    payload={"has_message": True},
-                )
+        outreach_side_effect = None
+        if getattr(pipeline, "_execution_engine", None) and envelope.run_id > 0 and full_attempt_id:
+            outreach_side_effect = pipeline._execution_engine.runtime.begin_candidate_side_effect(
+                envelope=envelope,
+                attempt_id=full_attempt_id,
+                effect_type="github_outreach",
+                idempotency_key="outreach",
+                payload={"decision": full_decision.decision},
+            )
+        if outreach_side_effect and not outreach_side_effect["should_execute"]:
+            pipeline._execution_engine.runtime.record_side_effect_result(
+                envelope=envelope,
+                attempt_id=full_attempt_id,
+                effect_type="github_outreach",
+                status="skipped",
+                payload={"skip_reason": f"existing_{outreach_side_effect['side_effect']['status']}"},
+            )
         else:
-            pipeline.stats.setdefault("outreach_failures", 0)
-            pipeline.stats["outreach_failures"] += 1
-            pipeline._observer.on_outreach_failure(username, query)
-            if getattr(pipeline, "_execution_engine", None):
-                pipeline._execution_engine.runtime.record_side_effect_result(
-                    envelope=envelope,
-                    attempt_id=full_attempt_id,
-                    effect_type="github_outreach",
-                    status="failed",
-                    payload={"has_message": False},
-                )
+            outreach = await generate_outreach(candidate, pipeline.brief_obj, full_decision)
+            if outreach and outreach.get("message"):
+                candidate.outreach_copy = outreach
+                append_jsonl(pipeline.outreach_path, outreach)
+                outreach_generated = True
+                if outreach_side_effect:
+                    pipeline._execution_engine.runtime.complete_candidate_side_effect(
+                        side_effect_id=int(outreach_side_effect["side_effect"]["id"]),
+                        status="succeeded",
+                        payload={"has_message": True},
+                    )
+                if getattr(pipeline, "_execution_engine", None):
+                    pipeline._execution_engine.runtime.record_side_effect_result(
+                        envelope=envelope,
+                        attempt_id=full_attempt_id,
+                        effect_type="github_outreach",
+                        status="succeeded",
+                        payload={"has_message": True},
+                    )
+            else:
+                pipeline.stats.setdefault("outreach_failures", 0)
+                pipeline.stats["outreach_failures"] += 1
+                pipeline._observer.on_outreach_failure(username, query)
+                if outreach_side_effect:
+                    pipeline._execution_engine.runtime.complete_candidate_side_effect(
+                        side_effect_id=int(outreach_side_effect["side_effect"]["id"]),
+                        status="failed",
+                        payload={"has_message": False},
+                    )
+                if getattr(pipeline, "_execution_engine", None):
+                    pipeline._execution_engine.runtime.record_side_effect_result(
+                        envelope=envelope,
+                        attempt_id=full_attempt_id,
+                        effect_type="github_outreach",
+                        status="failed",
+                        payload={"has_message": False},
+                    )
 
         priority_rank = extract_priority_rank(full_decision.path)
         append_jsonl(

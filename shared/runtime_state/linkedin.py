@@ -81,6 +81,7 @@ class LinkedInRuntimeStateBridge:
         initial_progress: Progress | None = None,
     ) -> tuple[int, Progress]:
         self.store.reconcile_open_attempts(source="linkedin", brief_id=self.brief_id)
+        self.store.reconcile_pending_side_effects(source="linkedin", brief_id=self.brief_id)
         latest_run = self.store.get_latest_run(source="linkedin", brief_id=self.brief_id)
         had_runtime_before = bool(
             latest_run or self.store.has_candidates(source="linkedin", brief_id=self.brief_id)
@@ -417,6 +418,50 @@ class LinkedInRuntimeStateBridge:
             payload=payload,
         )
 
+    def begin_candidate_side_effect(
+        self,
+        *,
+        run_id: int,
+        search_string: SearchString,
+        snippet: CandidateSnippet,
+        attempt_id: int | None,
+        effect_type: str,
+        idempotency_key: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        envelope = self._execution_engine.envelope(
+            source="linkedin",
+            brief_id=self.brief_id,
+            run_id=run_id,
+            work_unit_kind=LINKEDIN_STRING_KIND,
+            work_unit_source_id=str(search_string.id),
+            identity_key=snippet.profile_url,
+            display_name=snippet.name,
+            profile_url=snippet.profile_url,
+            snippet=snippet,
+            source_cursor=self._cursor(search_string, snippet),
+        )
+        return self._execution_engine.runtime.begin_candidate_side_effect(
+            envelope=envelope,
+            attempt_id=attempt_id,
+            effect_type=effect_type,
+            idempotency_key=idempotency_key,
+            payload=payload,
+        )
+
+    def complete_candidate_side_effect(
+        self,
+        *,
+        side_effect_id: int,
+        status: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        self._execution_engine.runtime.complete_candidate_side_effect(
+            side_effect_id=side_effect_id,
+            status=status,
+            payload=payload,
+        )
+
     def rebuild_artifacts(self, run_id: int) -> None:
         rebuild_compat_projections(
             self.store,
@@ -649,6 +694,11 @@ class LinkedInRuntimeStateBridge:
             )
             for identity_key in candidate_keys_to_clear:
                 self.store.clear_candidate_terminal_state(
+                    source="linkedin",
+                    brief_id=self.brief_id,
+                    identity_key=identity_key,
+                )
+                self.store.invalidate_candidate_side_effects(
                     source="linkedin",
                     brief_id=self.brief_id,
                     identity_key=identity_key,

@@ -35,6 +35,7 @@ from shared.extractors import (
 from shared.failures import judgment_failure_decision
 from shared.judger import facial_judge, full_judge, init_judger, is_failure_decision
 from shared.runtime_state import LinkedInRuntimeStateBridge, RuntimeStateLock, RuntimeStateStore
+from shared.safety import LinkedInRecoveryService, RunSafetyCoordinator, RunStopReason
 from shared.storage import append_jsonl, read_jsonl, read_jsonl_set, log_event, write_json, read_json
 from shared.brief_loader import load_brief, Brief
 from shared.bias_controls import BiasMonitor, DecisionRecord
@@ -198,9 +199,20 @@ class Pipeline:
             brief_id=self._brief_id,
             brief_name=self.brief_obj.id,
         )
+        self._safety = RunSafetyCoordinator(
+            store=self._runtime_state,
+            output_dir=self.output_dir,
+            source="linkedin",
+            brief_id=self._brief_id,
+        )
+        self._recovery_service = LinkedInRecoveryService(
+            coordinator=self._safety,
+            browser=self.browser,
+        )
         self._work_unit_service = LinkedInWorkUnitService(self)
         self._acquisition_service = LinkedInAcquisitionService(self)
         self._side_effects_service = LinkedInSideEffectsService(self)
+        self._governor = None
 
         # Kit strings (populated by run_full)
         self._kit_strings: list[KitString] = []
@@ -329,7 +341,27 @@ class Pipeline:
             )
         if not hasattr(self, "_runtime_run_id"):
             self._runtime_run_id = None
+        if not hasattr(self, "_safety") or self._safety is None:
+            self._safety = RunSafetyCoordinator(
+                store=self._runtime_state,
+                output_dir=output_dir,
+                source="linkedin",
+                brief_id=self._brief_id,
+            )
+        if not hasattr(self, "_recovery_service") or self._recovery_service is None:
+            self._recovery_service = LinkedInRecoveryService(
+                coordinator=self._safety,
+                browser=self.browser,
+            )
         self._ensure_services()
+
+    def _record_safety_event(self, event_type: str, payload: dict) -> None:
+        if self._runtime_run_id:
+            self._runtime_state.record_event(
+                run_id=self._runtime_run_id,
+                event_type=event_type,
+                payload=payload,
+            )
 
     def _ensure_services(self) -> None:
         if not hasattr(self, "_work_unit_service") or self._work_unit_service is None:
@@ -454,8 +486,17 @@ class Pipeline:
         self._ensure_runtime_state()
         lock_acquired = False
         run_status = "completed"
-        self._runtime_lock.acquire()
-        lock_acquired = True
+        stop_reason = RunStopReason.NORMAL
+        try:
+            self._runtime_lock.acquire()
+            lock_acquired = True
+        except RuntimeError as exc:
+            stop_reason = RunStopReason.LOCK_CONFLICT
+            self._runtime_state.record_event(
+                event_type="runtime_lock_conflict",
+                payload={"error": str(exc), "output_dir": str(self.output_dir)},
+            )
+            raise
 
         await self.browser.connect()
         log_event(self.log_path, "pipeline_start", mode="full")
@@ -502,10 +543,12 @@ class Pipeline:
         except KeyboardInterrupt:
             print("\n\n  [!] Interrupted. Progress saved.")
             run_status = "interrupted"
+            stop_reason = RunStopReason.OPERATOR_STOP
         except Exception as e:
             print(f"\n  [ERROR] {e}")
             log_event(self.log_path, "pipeline_error", error=str(e))
             run_status = "error"
+            stop_reason = RunStopReason.FATAL_RUNTIME_ERROR
             raise
         finally:
             self._checkpoint_progress(progress)
@@ -513,7 +556,11 @@ class Pipeline:
             self._print_summary()
             log_event(self.log_path, "pipeline_end", **self.stats)
             if self._runtime_run_id:
-                self._runtime_state.finish_run(self._runtime_run_id, run_status)
+                self._safety.finish_run(
+                    run_id=self._runtime_run_id,
+                    status=run_status,
+                    stop_reason=stop_reason,
+                )
             if lock_acquired:
                 self._runtime_lock.release()
 
@@ -622,8 +669,17 @@ class Pipeline:
         self._ensure_runtime_state()
         lock_acquired = False
         run_status = "completed"
-        self._runtime_lock.acquire()
-        lock_acquired = True
+        stop_reason = RunStopReason.NORMAL
+        try:
+            self._runtime_lock.acquire()
+            lock_acquired = True
+        except RuntimeError as exc:
+            stop_reason = RunStopReason.LOCK_CONFLICT
+            self._runtime_state.record_event(
+                event_type="runtime_lock_conflict",
+                payload={"error": str(exc), "output_dir": str(self.output_dir)},
+            )
+            raise
 
         await self.browser.connect()
         log_event(self.log_path, "pipeline_start", mode="full_run_resume" if resume else "full_run")
@@ -867,6 +923,7 @@ class Pipeline:
                         await self._process_string(search_string, progress)
                         break
                     except SessionExpired:
+                        stop_reason = RunStopReason.SESSION_EXPIRED
                         self._checkpoint_progress(
                             progress,
                             search_string=search_string,
@@ -877,6 +934,13 @@ class Pipeline:
                         raise
                     except GovernorLimitReached as e:
                         print(f"\n  [GOVERNOR] Session limit reached: {e.reason}")
+                        stop_reason = RunStopReason.GOVERNOR_LIMIT
+                        if self._runtime_run_id:
+                            self._safety.record_governor_limit(
+                                run_id=self._runtime_run_id,
+                                reason=e.reason,
+                                payload={"string_id": search_string.id},
+                            )
                         self._checkpoint_progress(
                             progress,
                             search_string=search_string,
@@ -896,9 +960,10 @@ class Pipeline:
                                 page_num=progress.current_page or None,
                             )
                             recovery_url = self._last_good_url or self._get_project_url()
-                            recovered = await self.browser.recover_from_target_crash(recovery_url=recovery_url)
-                            if not recovered:
-                                recovered = await self._attempt_reconnect(recovery_url=recovery_url)
+                            recovered = await self._recovery_service.recover(
+                                run_id=self._runtime_run_id,
+                                recovery_url=recovery_url,
+                            )
                             if recovered and browser_recovery_attempts <= 2:
                                 print(
                                     f"  [!] Recovery succeeded. Retrying string #{search_string.id} "
@@ -913,6 +978,7 @@ class Pipeline:
                                 continue
 
                             print(f"  [!] Recovery failed. Saving progress and exiting.")
+                            stop_reason = RunStopReason.BROWSER_DISCONNECT_UNRECOVERED
                             raise
 
                         # Non-crash error: mark string as failed, save, continue to next
@@ -957,13 +1023,30 @@ class Pipeline:
                     current_block, block_strings, progress, adapt_after_block
                 )
 
+        except SessionExpired:
+            print("\n\n  [!] Session duration cap reached. Progress saved.")
+            run_status = "interrupted"
+            stop_reason = RunStopReason.SESSION_EXPIRED
+            raise
+        except GovernorLimitReached as e:
+            print(f"\n\n  [!] Governor limit reached: {e.reason}. Progress saved.")
+            run_status = "governor_limit_reached"
+            stop_reason = RunStopReason.GOVERNOR_LIMIT
+            raise
         except KeyboardInterrupt:
             print("\n\n  [!] Interrupted. Progress saved.")
             run_status = "interrupted"
+            stop_reason = RunStopReason.OPERATOR_STOP
         except Exception as e:
             print(f"\n  [ERROR] {e}")
             log_event(self.log_path, "pipeline_error", error=str(e))
-            run_status = "error"
+            run_status = (
+                "interrupted"
+                if stop_reason == RunStopReason.BROWSER_DISCONNECT_UNRECOVERED
+                else "error"
+            )
+            if stop_reason == RunStopReason.NORMAL:
+                stop_reason = RunStopReason.FATAL_RUNTIME_ERROR
             raise
         finally:
             if self._progress:
@@ -976,7 +1059,11 @@ class Pipeline:
                 self._generate_run_report(self._progress)
             log_event(self.log_path, "pipeline_end", **self.stats)
             if self._runtime_run_id:
-                self._runtime_state.finish_run(self._runtime_run_id, run_status)
+                self._safety.finish_run(
+                    run_id=self._runtime_run_id,
+                    status=run_status,
+                    stop_reason=stop_reason,
+                )
             if lock_acquired:
                 self._runtime_lock.release()
 

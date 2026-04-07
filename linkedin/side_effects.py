@@ -29,9 +29,48 @@ class LinkedInSideEffectsService:
         attempt_id: int | None,
     ) -> SideEffectOutcome:
         pipeline = self.pipeline
+        side_effect_row = None
+
+        if (
+            pipeline._runtime_bridge
+            and getattr(pipeline, "_runtime_run_id", None)
+            and getattr(pipeline._runtime_bridge, "begin_candidate_side_effect", None)
+            and snippet.profile_url
+        ):
+            side_effect_start = pipeline._runtime_bridge.begin_candidate_side_effect(
+                run_id=pipeline._runtime_run_id,
+                search_string=runtime_search_string,
+                snippet=snippet,
+                attempt_id=attempt_id,
+                effect_type="linkedin_save",
+                idempotency_key="save",
+                payload={"search_string_id": runtime_search_string.id},
+            )
+            side_effect_row = side_effect_start["side_effect"]
+            if not side_effect_start["should_execute"]:
+                pipeline._runtime_bridge.record_side_effect_result(
+                    run_id=pipeline._runtime_run_id,
+                    search_string=runtime_search_string,
+                    snippet=snippet,
+                    attempt_id=attempt_id,
+                    effect_type="linkedin_save",
+                    status="skipped",
+                    payload={"skip_reason": f"existing_{side_effect_row['status']}"},
+                )
+                return SideEffectOutcome(
+                    effect_type="linkedin_save",
+                    status="skipped",
+                    payload={"skip_reason": f"existing_{side_effect_row['status']}"},
+                )
 
         if pipeline.test_mode:
             pipeline.stats["saved"] += 1
+            if side_effect_row and getattr(pipeline._runtime_bridge, "complete_candidate_side_effect", None):
+                pipeline._runtime_bridge.complete_candidate_side_effect(
+                    side_effect_id=int(side_effect_row["id"]),
+                    status="succeeded",
+                    payload={"test_mode": True},
+                )
             if pipeline._runtime_bridge and getattr(pipeline, "_runtime_run_id", None):
                 pipeline._runtime_bridge.record_side_effect_result(
                     run_id=pipeline._runtime_run_id,
@@ -73,6 +112,13 @@ class LinkedInSideEffectsService:
 
         if saved:
             pipeline.stats["saved"] += 1
+
+        if side_effect_row and getattr(pipeline._runtime_bridge, "complete_candidate_side_effect", None):
+            pipeline._runtime_bridge.complete_candidate_side_effect(
+                side_effect_id=int(side_effect_row["id"]),
+                status="succeeded" if saved else "failed",
+                payload={"test_mode": False},
+            )
 
         if pipeline._runtime_bridge and getattr(pipeline, "_runtime_run_id", None):
             pipeline._runtime_bridge.record_side_effect_result(

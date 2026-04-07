@@ -2,7 +2,9 @@
 
 from .admin import (
     clear_candidate_terminal_state,
+    inspect_candidate_side_effects,
     inspect_orphaned_attempts,
+    replay_candidate_side_effect,
     rebuild_compat_projections,
     requeue_work_unit,
 )
@@ -44,6 +46,7 @@ __all__ = [
     "project_github_profile_summaries",
     "project_github_final_judgments",
     "clear_candidate_terminal_state",
+    "inspect_candidate_side_effects",
     "inspect_orphaned_attempts",
     "project_github_progress",
     "project_linkedin_candidate_history",
@@ -53,6 +56,7 @@ __all__ = [
     "project_linkedin_progress",
     "project_linkedin_search_memory",
     "project_linkedin_snippets",
+    "replay_candidate_side_effect",
     "rebuild_compat_projections",
     "requeue_work_unit",
 ]

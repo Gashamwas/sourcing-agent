@@ -14,14 +14,14 @@ from unittest.mock import AsyncMock, patch, MagicMock
 
 import pytest
 
+import shared.llm_clients as _llm
 from shared.url_safety import check_url, check_ip
 
 # ---------------------------------------------------------------------------
 # Stub heavy deps so we can import github.enricher without aiohttp installed
 # ---------------------------------------------------------------------------
 
-for _mod_name in ("aiohttp", "certifi", "github.client", "shared.contact_discovery",
-                  "shared.llm_clients"):
+for _mod_name in ("aiohttp", "certifi", "github.client", "shared.contact_discovery"):
     if _mod_name not in sys.modules:
         sys.modules[_mod_name] = types.ModuleType(_mod_name)
 
@@ -39,7 +39,6 @@ _client.GitHubClient = MagicMock
 _contact = sys.modules["shared.contact_discovery"]
 _contact.discover_contacts = MagicMock()
 
-_llm = sys.modules["shared.llm_clients"]
 _llm.cheap_llm = MagicMock()
 
 from github.schemas import GitHubUser, GitHubCandidate

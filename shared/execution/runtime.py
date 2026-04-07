@@ -278,6 +278,39 @@ class SharedExecutionRuntime:
             },
         )
 
+    def begin_candidate_side_effect(
+        self,
+        *,
+        envelope: CandidateExecutionEnvelope,
+        attempt_id: int | None,
+        effect_type: str,
+        idempotency_key: str,
+        payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return self.store.begin_candidate_side_effect(
+            run_id=envelope.run_id,
+            source=envelope.source,
+            brief_id=envelope.brief_id,
+            identity_key=envelope.identity_key,
+            attempt_id=attempt_id,
+            effect_type=effect_type,
+            idempotency_key=idempotency_key,
+            payload=payload,
+        )
+
+    def complete_candidate_side_effect(
+        self,
+        *,
+        side_effect_id: int,
+        status: str,
+        payload: dict[str, Any] | None = None,
+    ) -> None:
+        self.store.complete_candidate_side_effect(
+            side_effect_id=side_effect_id,
+            status=status,
+            payload=payload,
+        )
+
     def mark_progress_dirty(self) -> None:
         self._progress_dirty = True
 

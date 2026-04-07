@@ -44,6 +44,7 @@ from shared.execution import CandidateExecutionEngine
 from shared.execution.types import CandidateExecutionEnvelope
 from shared.runtime_state import GitHubRuntimeStateBridge, RuntimeStateLock, RuntimeStateStore
 from shared.runtime_state.store import GITHUB_QUERY_KIND
+from shared.safety import RunSafetyCoordinator, RunStopReason
 from shared.schemas import CandidateSnippet, CandidateProfileSummary, OpusDecision
 from shared.judger import facial_judge, full_judge, init_judger, github_facial_judge, github_facial_judge_batch, github_full_judge, extract_priority_rank, is_failure_decision
 from github.outreach import generate_outreach
@@ -142,6 +143,12 @@ class GitHubPipeline:
             brief_id=self.brief_obj.id,
             source="github",
         )
+        self._safety = RunSafetyCoordinator(
+            store=self._runtime_state,
+            output_dir=self.output_dir,
+            source="github",
+            brief_id=self.brief_obj.id,
+        )
         self._work_unit_service = GitHubWorkUnitService(self)
         self._acquisition_service = GitHubAcquisitionService(self)
         self._side_effects_service = GitHubSideEffectsService(self)
@@ -174,11 +181,20 @@ class GitHubPipeline:
 
         progress: Optional[GitHubProgress] = None
         run_status = "completed"
+        stop_reason = RunStopReason.NORMAL
         lock_acquired = False
 
         try:
-            self._runtime_lock.acquire()
-            lock_acquired = True
+            try:
+                self._runtime_lock.acquire()
+                lock_acquired = True
+            except RuntimeError as exc:
+                stop_reason = RunStopReason.LOCK_CONFLICT
+                self._runtime_state.record_event(
+                    event_type="runtime_lock_conflict",
+                    payload={"error": str(exc), "output_dir": str(self.output_dir)},
+                )
+                raise
 
             # Load or create progress
             progress = self._load_or_create_progress(resume)
@@ -192,7 +208,11 @@ class GitHubPipeline:
 
             async with GitHubClient() as client:
                 self._client = client
-                enricher = GitHubEnricher(client, brief=self.brief_obj)
+                enricher = GitHubEnricher(
+                    client,
+                    brief=self.brief_obj,
+                    safety_event_recorder=self._record_safety_event,
+                )
 
                 # Step 1: Strategy (if not resuming with existing queries)
                 if not progress.queries or not resume:
@@ -212,14 +232,23 @@ class GitHubPipeline:
                     await self._execute_queries(client, enricher, progress)
                     if self._shutdown_requested:
                         run_status = "interrupted"
+                        stop_reason = RunStopReason.OPERATOR_STOP
                 except GitHubGovernorLimitReached as e:
                     run_status = "governor_limit_reached"
+                    stop_reason = RunStopReason.GOVERNOR_LIMIT
+                    if getattr(self, "_runtime_run_id", None):
+                        self._safety.record_governor_limit(
+                            run_id=self._runtime_run_id,
+                            reason=e.reason,
+                        )
                     self._observer.console.emit_info(f"Governor limit reached: {e.reason}")
                 except KeyboardInterrupt:
                     run_status = "interrupted"
+                    stop_reason = RunStopReason.OPERATOR_STOP
                     self._observer.console.emit_info("Graceful shutdown — saving progress...")
                 except Exception as e:
                     run_status = "error"
+                    stop_reason = RunStopReason.FATAL_RUNTIME_ERROR
                     self._observer.on_error("pipeline", e)
                     import traceback
                     traceback.print_exc()
@@ -230,7 +259,11 @@ class GitHubPipeline:
         finally:
             self._client = None
             if getattr(self, "_runtime_run_id", None):
-                self._runtime_state.finish_run(self._runtime_run_id, run_status)
+                self._safety.finish_run(
+                    run_id=self._runtime_run_id,
+                    status=run_status,
+                    stop_reason=stop_reason,
+                )
             if lock_acquired:
                 self._runtime_lock.release()
 
@@ -1000,16 +1033,6 @@ class GitHubPipeline:
             )
             return
 
-        await self._side_effects_service.handle_full_decision(
-            username=username,
-            candidate=candidate,
-            query=query,
-            progress=progress,
-            full_decision=full_decision,
-            envelope=envelope,
-            full_attempt_id=full_attempt_id,
-        )
-
         self._execution_engine.runtime.finish_stage_success(
             attempt_id=full_attempt_id,
             envelope=envelope,
@@ -1019,6 +1042,16 @@ class GitHubPipeline:
             profile_summary=profile_summary if not self.brief_obj.has_v2_schema else None,
         )
         self._mark_terminal(username)
+
+        await self._side_effects_service.handle_full_decision(
+            username=username,
+            candidate=candidate,
+            query=query,
+            progress=progress,
+            full_decision=full_decision,
+            envelope=envelope,
+            full_attempt_id=full_attempt_id,
+        )
 
         # Checkpoint periodically
         if (progress.candidates_enriched % _CHECKPOINT_EVERY) == 0:
@@ -1387,6 +1420,13 @@ class GitHubPipeline:
             )
         if not hasattr(self, "_runtime_run_id"):
             self._runtime_run_id = None
+        if not hasattr(self, "_safety") or self._safety is None:
+            self._safety = RunSafetyCoordinator(
+                store=self._runtime_state,
+                output_dir=output_dir,
+                source="github",
+                brief_id=self.brief_obj.id,
+            )
         self._ensure_services()
 
     def _ensure_services(self) -> None:
@@ -1451,6 +1491,14 @@ class GitHubPipeline:
             source_cursor=self._build_runtime_cursor(query, result_rank),
             metadata=metadata or {},
         )
+
+    def _record_safety_event(self, event_type: str, payload: dict) -> None:
+        if getattr(self, "_runtime_run_id", None):
+            self._runtime_state.record_event(
+                run_id=self._runtime_run_id,
+                event_type=event_type,
+                payload=payload,
+            )
 
     def _start_stage_attempt(
         self,

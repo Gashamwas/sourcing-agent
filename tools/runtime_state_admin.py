@@ -12,7 +12,9 @@ from shared.runtime_state import (
     LinkedInRuntimeStateBridge,
     RuntimeStateStore,
     clear_candidate_terminal_state,
+    inspect_candidate_side_effects,
     inspect_orphaned_attempts,
+    replay_candidate_side_effect,
     rebuild_compat_projections,
     requeue_work_unit,
 )
@@ -47,6 +49,8 @@ def main() -> None:
 
     subparsers.add_parser("rebuild-projections", help="Rebuild compatibility projections from runtime_state")
     subparsers.add_parser("inspect-orphans", help="List orphaned in-flight attempts")
+    subparsers.add_parser("inspect-stop-reasons", help="List persisted run stop reasons")
+    subparsers.add_parser("inspect-side-effects", help="List candidate-scoped side effects")
     subparsers.add_parser("rebuild-linkedin-artifacts", help="Rebuild LinkedIn projections and stage artifacts")
     subparsers.add_parser("inspect-linkedin-orphans", help="List orphaned LinkedIn attempts")
     subparsers.add_parser("import-legacy-linkedin", help="Import legacy LinkedIn progress/history into runtime_state")
@@ -57,6 +61,10 @@ def main() -> None:
 
     clear_parser = subparsers.add_parser("clear-terminal", help="Clear a candidate terminal state for retry")
     clear_parser.add_argument("--identity-key", required=True, help="Candidate identity key")
+
+    replay_parser = subparsers.add_parser("replay-side-effect", help="Invalidate a candidate side effect so it can be replayed intentionally")
+    replay_parser.add_argument("--identity-key", required=True, help="Candidate identity key")
+    replay_parser.add_argument("--effect-type", required=True, help="Side-effect type, e.g. github_outreach")
 
     restart_parser = subparsers.add_parser("restart-linkedin-string", help="Restart one LinkedIn string through runtime_state")
     restart_parser.add_argument("--string-id", required=True, type=int, help="LinkedIn search string ID")
@@ -74,6 +82,19 @@ def main() -> None:
 
         if args.command == "inspect-orphans":
             rows = inspect_orphaned_attempts(store, source=args.source, brief_id=args.brief_id)
+            print(json.dumps(rows, indent=2))
+            return
+
+        if args.command == "inspect-stop-reasons":
+            print(json.dumps(store.list_runs(source=args.source, brief_id=args.brief_id), indent=2))
+            return
+
+        if args.command == "inspect-side-effects":
+            rows = inspect_candidate_side_effects(
+                store,
+                source=args.source,
+                brief_id=args.brief_id,
+            )
             print(json.dumps(rows, indent=2))
             return
 
@@ -122,6 +143,19 @@ def main() -> None:
             rebuild_compat_projections(store, run_id=run_id, output_dir=args.output_dir)
             print(
                 f"Cleared terminal state for {args.identity_key} on {args.source}:{args.brief_id} and rebuilt projections"
+            )
+            return
+
+        if args.command == "replay-side-effect":
+            replayed = replay_candidate_side_effect(
+                store,
+                source=args.source,
+                brief_id=args.brief_id,
+                identity_key=args.identity_key,
+                effect_type=args.effect_type,
+            )
+            print(
+                f"Invalidated {replayed} {args.effect_type} side-effect row(s) for {args.identity_key}"
             )
             return
 

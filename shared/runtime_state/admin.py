@@ -82,3 +82,40 @@ def clear_candidate_terminal_state(
     identity_key: str,
 ) -> None:
     store.clear_candidate_terminal_state(source=source, brief_id=brief_id, identity_key=identity_key)
+    store.invalidate_candidate_side_effects(
+        source=source,
+        brief_id=brief_id,
+        identity_key=identity_key,
+    )
+
+
+def inspect_candidate_side_effects(
+    store: RuntimeStateStore,
+    *,
+    source: str,
+    brief_id: str,
+    status: str | None = None,
+    identity_key: str | None = None,
+) -> list[dict]:
+    return store.list_candidate_side_effects(
+        source=source,
+        brief_id=brief_id,
+        status=status,
+        identity_key=identity_key,
+    )
+
+
+def replay_candidate_side_effect(
+    store: RuntimeStateStore,
+    *,
+    source: str,
+    brief_id: str,
+    identity_key: str,
+    effect_type: str,
+) -> int:
+    return store.invalidate_candidate_side_effects(
+        source=source,
+        brief_id=brief_id,
+        identity_key=identity_key,
+        effect_type=effect_type,
+    )

@@ -112,7 +112,9 @@ class LinkedInAcquisitionService:
         opened = False
         if snippet.profile_url:
             try:
+                self._check_governor_before_open()
                 await pipeline.browser.open_profile_by_url(snippet.profile_url)
+                self._record_governor_open()
                 opened = True
             except GovernorLimitReached:
                 raise
@@ -121,7 +123,9 @@ class LinkedInAcquisitionService:
                     raise
                 print(f"    [warn] URL-based open failed ({url_err}), falling back to name match...")
         if not opened:
+            self._check_governor_before_open()
             await pipeline.browser.open_profile(snippet.name)
+            self._record_governor_open()
 
         await pipeline.browser.simulate_profile_read()
         profile_text = await pipeline.browser.get_profile_innertext()
@@ -131,3 +135,13 @@ class LinkedInAcquisitionService:
             profile_summary=summary,
             metadata={"profile_text_size": len(profile_text)},
         )
+
+    def _check_governor_before_open(self) -> None:
+        governor = getattr(self.pipeline, "_governor", None)
+        if governor:
+            governor.check_profile_open_or_raise()
+
+    def _record_governor_open(self) -> None:
+        governor = getattr(self.pipeline, "_governor", None)
+        if governor:
+            governor.record_profile_open()
