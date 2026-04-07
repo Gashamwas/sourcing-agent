@@ -19,6 +19,7 @@ from pathlib import Path
 from datetime import datetime
 
 OUTPUT_DIR = Path("output/github-colombia")
+RUNTIME_DB_PATH = OUTPUT_DIR / "runtime_state.sqlite3"
 
 # Degraded query IDs: checkpoints 4-7 (after API credits exhausted)
 DEGRADED_IDS = {
@@ -69,6 +70,11 @@ def save_jsonl(path, records):
 
 
 def main():
+    if RUNTIME_DB_PATH.exists():
+        raise SystemExit(
+            "runtime_state.sqlite3 is present; use tools/runtime_state_admin.py instead of editing JSON artifacts directly"
+        )
+
     # Step 1: Backup
     backup_files()
 

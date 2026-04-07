@@ -15,6 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from github.schemas import ContactInfo, GitHubCandidate, GitHubUser
+from shared.runtime_state import RuntimeStateLock, RuntimeStateStore
 
 
 class _FakeExhaustionState:
@@ -184,6 +185,17 @@ def _make_candidate(username: str, name: str) -> GitHubCandidate:
         contact=ContactInfo(),
         portfolio_summary={"profile_summary": f"{name} builds ML systems"},
     )
+
+
+def _attach_runtime_state(pipeline, base_dir: Path):
+    pipeline.output_dir = Path(base_dir)
+    pipeline.output_dir.mkdir(parents=True, exist_ok=True)
+    pipeline.progress_path = pipeline.output_dir / "progress.json"
+    pipeline.runtime_db_path = pipeline.output_dir / "runtime_state.sqlite3"
+    pipeline._runtime_state = RuntimeStateStore(pipeline.runtime_db_path)
+    pipeline._runtime_lock = RuntimeStateLock(pipeline.output_dir)
+    pipeline._runtime_run_id = None
+    return pipeline
 
 
 # ---------------------------------------------------------------------------
@@ -413,3 +425,93 @@ class TestDeferredDedup:
         result = pipeline._dedup_usernames(["alice", "bob", "charlie"])
         assert result == ["charlie"]
         assert "charlie" in pipeline._in_flight_usernames
+
+    def test_runtime_state_blocks_terminal_candidates(self, tmp_path):
+        """Canonical candidate state should block dedup even without progress.json."""
+        pipeline = _attach_runtime_state(_make_pipeline(), tmp_path)
+        progress = pipeline._load_or_create_progress(resume=False)
+        pipeline._progress = progress
+
+        pipeline._runtime_state.record_candidate_discovery(
+            run_id=pipeline._runtime_run_id,
+            work_unit_id=None,
+            source="github",
+            brief_id=pipeline.brief_obj.id,
+            identity_key="alice",
+            display_name="Alice",
+            profile_url="https://github.com/alice",
+        )
+        pipeline._runtime_state.set_candidate_state(
+            run_id=pipeline._runtime_run_id,
+            source="github",
+            brief_id=pipeline.brief_obj.id,
+            identity_key="alice",
+            new_state="failed_terminal",
+            terminal_decision="SAVE",
+        )
+
+        result = pipeline._dedup_usernames(["alice", "bob"])
+        assert result == ["bob"]
+
+    def test_resume_uses_runtime_state_when_progress_json_is_missing(self, tmp_path):
+        """Resume should be deterministic from runtime_state even if progress.json was deleted."""
+        pipeline = _attach_runtime_state(_make_pipeline(), tmp_path)
+        progress = pipeline._load_or_create_progress(resume=False)
+        progress.queries = [
+            _make_query(id=1, status="done"),
+            _make_query(id=2, status="queued"),
+        ]
+        pipeline._progress = progress
+        pipeline._seen_usernames = {"alice"}
+        pipeline._save_progress()
+
+        pipeline.progress_path.unlink()
+
+        resumed = _attach_runtime_state(_make_pipeline(), tmp_path)
+        loaded = resumed._load_or_create_progress(resume=True)
+
+        assert [q.id for q in loaded.queries] == [1, 2]
+        assert loaded.queries[0].status == "done"
+        assert loaded.queries[1].status == "queued"
+        assert "alice" in loaded.discovered_usernames
+
+    def test_resume_reconciles_orphaned_attempts(self, tmp_path):
+        """Open attempts from an interrupted run should become failed_retryable on resume."""
+        pipeline = _attach_runtime_state(_make_pipeline(), tmp_path)
+        pipeline._load_or_create_progress(resume=False)
+
+        pipeline._runtime_state.record_candidate_discovery(
+            run_id=pipeline._runtime_run_id,
+            work_unit_id=None,
+            source="github",
+            brief_id=pipeline.brief_obj.id,
+            identity_key="alice",
+            display_name="Alice",
+            profile_url="https://github.com/alice",
+        )
+        attempt_id = pipeline._runtime_state.start_attempt(
+            run_id=pipeline._runtime_run_id,
+            source="github",
+            brief_id=pipeline.brief_obj.id,
+            identity_key="alice",
+            stage="facial",
+            payload={},
+            source_cursor={},
+            display_name="Alice",
+            profile_url="https://github.com/alice",
+        )
+        assert attempt_id > 0
+
+        resumed = _attach_runtime_state(_make_pipeline(), tmp_path)
+        resumed._load_or_create_progress(resume=True)
+
+        candidate = resumed._runtime_state.get_candidate(
+            source="github",
+            brief_id=resumed.brief_obj.id,
+            identity_key="alice",
+        )
+        assert candidate["current_lifecycle_state"] == "failed_retryable"
+        assert resumed._runtime_state.list_orphaned_attempts(
+            source="github",
+            brief_id=resumed.brief_obj.id,
+        ) == []
