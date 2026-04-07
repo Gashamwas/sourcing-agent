@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 from github.client import GitHubClient
+from github.acquisition import GitHubAcquisitionService
 from github.enricher import GitHubEnricher
 from github.schemas import (
     GitHubCandidate,
@@ -26,7 +27,9 @@ from github.schemas import (
     GitHubProgress,
     GitHubBatchReport,
 )
+from github.side_effects import GitHubSideEffectsService
 from github.strategy import form_github_strategy, adapt_after_batch
+from github.work_units import GitHubWorkUnitService
 from github.governor import (
     GitHubGovernor,
     GitHubGovernorLimitReached,
@@ -139,6 +142,9 @@ class GitHubPipeline:
             brief_id=self.brief_obj.id,
             source="github",
         )
+        self._work_unit_service = GitHubWorkUnitService(self)
+        self._acquisition_service = GitHubAcquisitionService(self)
+        self._side_effects_service = GitHubSideEffectsService(self)
 
     # ------------------------------------------------------------------
     # Main entry point
@@ -153,6 +159,7 @@ class GitHubPipeline:
         4. Adaptation after batches
         """
         self._ensure_runtime_state()
+        self._ensure_services()
 
         # Create session observer
         session_ts = time.strftime("%Y%m%d_%H%M%S")
@@ -234,32 +241,7 @@ class GitHubPipeline:
 
         # Export CSV for Gem/Greenhouse import
         if self.stats["saved"] > 0:
-            try:
-                from github.export import export_saved_candidates_csv
-                csv_path = export_saved_candidates_csv(self.output_dir)
-                self._observer.console.emit_info(f"CSV export: {csv_path}")
-                if self._runtime_run_id:
-                    self._runtime_state.record_event(
-                        run_id=self._runtime_run_id,
-                        event_type="side_effect_result",
-                        payload={
-                            "effect_type": "github_csv_export",
-                            "status": "succeeded",
-                            "path": str(csv_path),
-                        },
-                    )
-            except Exception as e:
-                self._observer.console.emit_warn(f"CSV export failed: {e}")
-                if self._runtime_run_id:
-                    self._runtime_state.record_event(
-                        run_id=self._runtime_run_id,
-                        event_type="side_effect_result",
-                        payload={
-                            "effect_type": "github_csv_export",
-                            "status": "failed",
-                            "error": str(e),
-                        },
-                    )
+            self._side_effects_service.export_saved_candidates_csv()
 
         return self.stats
 
@@ -625,179 +607,15 @@ class GitHubPipeline:
         progress: GitHubProgress,
         result_rank: int = 0,
     ) -> GitHubCandidate | None:
-        """Run light/full enrichment and gating before any LLM evaluation."""
-        progress.candidates_discovered += 1
-        self.stats["candidates_discovered"] += 1
-        source_query = query.query or query.target_repo or query.target_org
-        runtime_cursor = self._build_runtime_cursor(query, result_rank)
-        envelope = self._execution_envelope(
-            username=username,
-            query=query,
+        self._ensure_services()
+        result = await self._acquisition_service.prepare_candidate_for_evaluation(
+            enricher,
+            username,
+            query,
+            progress,
             result_rank=result_rank,
         )
-        if self._runtime_run_id:
-            self._execution_engine.runtime.record_discovery(
-                envelope,
-                payload=runtime_cursor,
-            )
-            prep_attempt_id = self._execution_engine.runtime.start_stage(
-                envelope,
-                stage="preparation",
-                payload={"cursor": runtime_cursor},
-            )
-        else:
-            prep_attempt_id = None
-
-        try:
-            candidate = await enricher.light_enrich(
-                username,
-                source_strategy=query.channel,
-                source_query=source_query,
-            )
-        except Exception as exc:
-            self._finish_runtime_failure(
-                attempt_id=prep_attempt_id,
-                username=username,
-                query=query,
-                result_rank=result_rank,
-                error=exc,
-                payload={"cursor": runtime_cursor},
-            )
-            self._in_flight_usernames.discard(username)
-            raise
-        if not candidate:
-            if prep_attempt_id:
-                self._execution_engine.runtime.finish_stage_failure(
-                    attempt_id=prep_attempt_id,
-                    envelope=envelope,
-                    stage="preparation",
-                    error_or_failure_decision=RuntimeError("light_enrich returned no candidate"),
-                    extra_payload={
-                        "cursor": runtime_cursor,
-                        "failure_kind_override": "empty_enrichment",
-                    },
-                )
-            self._in_flight_usernames.discard(username)
-            return None
-
-        if query.channel != "user_search":
-            if not self._passes_geography_check(candidate, query):
-                self.stats.setdefault("geo_filtered", 0)
-                self.stats["geo_filtered"] += 1
-                self.stats.setdefault("geo_filtered_light", 0)
-                self.stats["geo_filtered_light"] += 1
-                self._observer.on_geo_filtered(username, candidate.user.location or "no location", query, "light")
-                self._finish_preparation_terminal(
-                    attempt_id=prep_attempt_id,
-                    username=username,
-                    decision="GEO_FILTERED",
-                    query=query,
-                    candidate=candidate,
-                    result_rank=result_rank,
-                )
-                self._mark_terminal(username)
-                return None
-
-        prescreen = self._prescreen_light(candidate)
-        if prescreen == "hard_skip":
-            self.stats.setdefault("prescreen_filtered", 0)
-            self.stats["prescreen_filtered"] += 1
-            self._observer.on_prescreen_filtered(username, candidate, query)
-            self._finish_preparation_terminal(
-                attempt_id=prep_attempt_id,
-                username=username,
-                decision="PRESCREEN_SKIP",
-                query=query,
-                candidate=candidate,
-                result_rank=result_rank,
-            )
-            self._mark_terminal(username)
-            return None
-
-        try:
-            candidate = await enricher.full_enrich(candidate)
-        except Exception as exc:
-            self._finish_runtime_failure(
-                attempt_id=prep_attempt_id,
-                username=username,
-                query=query,
-                result_rank=result_rank,
-                candidate=candidate,
-                error=exc,
-                payload={
-                    "cursor": runtime_cursor,
-                    "candidate_record": self._candidate_record(candidate),
-                },
-            )
-            self._in_flight_usernames.discard(username)
-            raise
-
-        candidate.contact = merge_profile_contact(
-            candidate.contact,
-            candidate.user.email,
-            candidate.user.twitter_username,
-            candidate.user.blog,
-        )
-
-        self._governor.record_enrichment()
-        self._observer.on_enrichment()
-        progress.candidates_enriched += 1
-        self.stats["candidates_enriched"] += 1
-
-        candidate_record = self._candidate_record(candidate)
-        append_jsonl(self.candidates_path, candidate_record)
-
-        if not self._passes_geography_check(candidate, query):
-            self.stats.setdefault("geo_filtered", 0)
-            self.stats["geo_filtered"] += 1
-            self._observer.on_geo_filtered(username, candidate.user.location or "no location", query, "full")
-            self._finish_preparation_terminal(
-                attempt_id=prep_attempt_id,
-                username=username,
-                decision="GEO_FILTERED",
-                query=query,
-                candidate=candidate,
-                result_rank=result_rank,
-                candidate_record=candidate_record,
-            )
-            self._mark_terminal(username)
-            return None
-
-        if candidate.data_sufficiency == "insufficient":
-            self.stats["insufficient"] += 1
-            progress.candidates_insufficient += 1
-            log_event(self.log_path, "insufficient_data", username=username)
-            self._observer.on_insufficient_data(username, query)
-            self._finish_preparation_terminal(
-                attempt_id=prep_attempt_id,
-                username=username,
-                decision="INSUFFICIENT_DATA",
-                query=query,
-                candidate=candidate,
-                result_rank=result_rank,
-                candidate_record=candidate_record,
-            )
-            self._mark_terminal(username)
-            return None
-
-        if prep_attempt_id:
-            self._execution_engine.runtime.finish_attempt_success(
-                attempt_id=prep_attempt_id,
-                envelope=self._execution_envelope(
-                    username=username,
-                    query=query,
-                    result_rank=result_rank,
-                    candidate=candidate,
-                    metadata={"candidate_record": candidate_record},
-                ),
-                new_state="snippet_extracted",
-                payload={
-                    "cursor": runtime_cursor,
-                    "candidate_record": candidate_record,
-                },
-            )
-
-        return candidate
+        return result.candidate
 
     async def _process_v2_candidates_batch(
         self,
@@ -936,89 +754,15 @@ class GitHubPipeline:
                     )
                     continue
 
-                if full_decision.decision in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE", "SIGNAL_SAVE"):
-                    self.stats["saved"] += 1
-                    progress.candidates_saved += 1
-                    query.saves.append(candidate.user.name or username)
-
-                    self._observer.on_save(username, candidate, full_decision, query)
-
-                    log_event(self.log_path, "save",
-                              username=username,
-                              name=candidate.user.name,
-                              confidence=full_decision.confidence,
-                              decision_path=full_decision.path,
-                              contact_emails=candidate.contact.emails,
-                              query_id=query.id)
-
-                    outreach = await generate_outreach(candidate, self.brief_obj, full_decision)
-                    if outreach and outreach.get("message"):
-                        candidate.outreach_copy = outreach
-                        append_jsonl(self.outreach_path, outreach)
-                        self._execution_engine.runtime.record_side_effect_result(
-                            envelope=envelope,
-                            attempt_id=full_attempt_id,
-                            effect_type="github_outreach",
-                            status="succeeded",
-                            payload={"has_message": True},
-                        )
-                    else:
-                        self.stats.setdefault("outreach_failures", 0)
-                        self.stats["outreach_failures"] += 1
-                        self._observer.on_outreach_failure(username, query)
-                        self._execution_engine.runtime.record_side_effect_result(
-                            envelope=envelope,
-                            attempt_id=full_attempt_id,
-                            effect_type="github_outreach",
-                            status="failed",
-                            payload={"has_message": False},
-                        )
-
-                    priority_rank = extract_priority_rank(full_decision.path)
-                    append_jsonl(self.saves_path, {
-                        "username": username,
-                        "name": candidate.user.name,
-                        "github_url": candidate.user.profile_url,
-                        "location": candidate.user.location,
-                        "bio": candidate.user.bio,
-                        "company": candidate.user.company,
-                        "emails": candidate.contact.emails,
-                        "blog": candidate.user.blog,
-                        "twitter": candidate.user.twitter_username,
-                        "decision": full_decision.decision,
-                        "confidence": full_decision.confidence,
-                        "decision_path": full_decision.path,
-                        "priority_rank": priority_rank,
-                        "rationale": full_decision.rationale,
-                        "outreach": candidate.outreach_copy if candidate.outreach_copy else None,
-                        "source_query": query.name,
-                        "source_channel": query.channel,
-                        "expansion_seed": query.query if query.channel == "graph_expansion" else None,
-                    })
-
-                    if full_decision.confidence >= gc.GRAPH_EXPANSION_MIN_CONFIDENCE:
-                        progress.graph_expansion_queue.append({
-                            "username": username,
-                            "reason": full_decision.decision,
-                            "confidence": full_decision.confidence,
-                            "capability_area": full_decision.path,
-                            "added_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                        })
-                        if self._runtime_run_id:
-                            self._runtime_state.enqueue_graph_expansion_seed(
-                                run_id=self._runtime_run_id,
-                                username=username,
-                                reason=full_decision.decision,
-                                confidence=full_decision.confidence,
-                                capability_area=full_decision.path,
-                            )
-                        self._observer.on_graph_expansion_queued(
-                            username, full_decision.confidence, full_decision.path
-                        )
-                else:
-                    self.stats["rejected"] += 1
-                    progress.candidates_rejected += 1
-                    self._observer.on_reject(username, candidate, full_decision, query)
+                await self._side_effects_service.handle_full_decision(
+                    username=username,
+                    candidate=candidate,
+                    query=query,
+                    progress=progress,
+                    full_decision=full_decision,
+                    envelope=envelope,
+                    full_attempt_id=full_attempt_id,
+                )
 
                 self._execution_engine.runtime.finish_stage_success(
                     attempt_id=full_attempt_id,
@@ -1256,92 +1000,15 @@ class GitHubPipeline:
             )
             return
 
-        if full_decision.decision in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE", "SIGNAL_SAVE"):
-            self.stats["saved"] += 1
-            progress.candidates_saved += 1
-            query.saves.append(candidate.user.name or username)
-
-            self._observer.on_save(username, candidate, full_decision, query)
-
-            log_event(self.log_path, "save",
-                      username=username,
-                      name=candidate.user.name,
-                      confidence=full_decision.confidence,
-                      decision_path=full_decision.path,
-                      contact_emails=candidate.contact.emails,
-                      query_id=query.id)
-
-            # Generate and store outreach copy
-            outreach = await generate_outreach(candidate, self.brief_obj, full_decision)
-            if outreach and outreach.get("message"):
-                candidate.outreach_copy = outreach
-                append_jsonl(self.outreach_path, outreach)
-                self._execution_engine.runtime.record_side_effect_result(
-                    envelope=envelope,
-                    attempt_id=full_attempt_id,
-                    effect_type="github_outreach",
-                    status="succeeded",
-                    payload={"has_message": True},
-                )
-            else:
-                self.stats.setdefault("outreach_failures", 0)
-                self.stats["outreach_failures"] += 1
-                self._observer.on_outreach_failure(username, query)
-                self._execution_engine.runtime.record_side_effect_result(
-                    envelope=envelope,
-                    attempt_id=full_attempt_id,
-                    effect_type="github_outreach",
-                    status="failed",
-                    payload={"has_message": False},
-                )
-
-            # Write consolidated save record
-            priority_rank = extract_priority_rank(full_decision.path)
-            append_jsonl(self.saves_path, {
-                "username": username,
-                "name": candidate.user.name,
-                "github_url": candidate.user.profile_url,
-                "location": candidate.user.location,
-                "bio": candidate.user.bio,
-                "company": candidate.user.company,
-                "emails": candidate.contact.emails,
-                "blog": candidate.user.blog,
-                "twitter": candidate.user.twitter_username,
-                "decision": full_decision.decision,
-                "confidence": full_decision.confidence,
-                "decision_path": full_decision.path,
-                "priority_rank": priority_rank,
-                "rationale": full_decision.rationale,
-                "outreach": candidate.outreach_copy if candidate.outreach_copy else None,
-                "source_query": query.name,
-                "source_channel": query.channel,
-                "expansion_seed": query.query if query.channel == "graph_expansion" else None,
-            })
-
-            # Add to graph expansion queue (only above confidence threshold)
-            if full_decision.confidence >= gc.GRAPH_EXPANSION_MIN_CONFIDENCE:
-                progress.graph_expansion_queue.append({
-                    "username": username,
-                    "reason": full_decision.decision,
-                    "confidence": full_decision.confidence,
-                    "capability_area": full_decision.path,
-                    "added_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                })
-                if self._runtime_run_id:
-                    self._runtime_state.enqueue_graph_expansion_seed(
-                        run_id=self._runtime_run_id,
-                        username=username,
-                        reason=full_decision.decision,
-                        confidence=full_decision.confidence,
-                        capability_area=full_decision.path,
-                    )
-                self._observer.on_graph_expansion_queued(
-                    username, full_decision.confidence, full_decision.path
-                )
-        else:
-            self.stats["rejected"] += 1
-            progress.candidates_rejected += 1
-            self._observer.on_reject(username, candidate, full_decision, query)
+        await self._side_effects_service.handle_full_decision(
+            username=username,
+            candidate=candidate,
+            query=query,
+            progress=progress,
+            full_decision=full_decision,
+            envelope=envelope,
+            full_attempt_id=full_attempt_id,
+        )
 
         self._execution_engine.runtime.finish_stage_success(
             attempt_id=full_attempt_id,
@@ -1587,51 +1254,8 @@ class GitHubPipeline:
         progress: GitHubProgress,
         queries: list[GitHubSearchQuery],
     ):
-        """Process the graph expansion queue — add follower/following queries.
-
-        Uses _insert_queries_by_priority so expansion queries get interleaved
-        after user_search queries rather than appended to the end of the queue.
-        """
-        # Pick top seeds by confidence
-        unprocessed = [
-            entry for entry in progress.graph_expansion_queue
-            if entry["username"] not in progress.graph_expansion_processed
-        ]
-        if not unprocessed:
-            return
-
-        # Sort by confidence, take top 5
-        unprocessed.sort(key=lambda x: x.get("confidence", 0), reverse=True)
-        seeds = unprocessed[:5]
-
-        next_id = max((q.id for q in queries), default=0) + 1
-        new_queries = []
-        for seed in seeds:
-            username = seed["username"]
-            new_queries.append(GitHubSearchQuery(
-                id=next_id,
-                name=f"Graph expansion: followers/following of {username}",
-                query=username,
-                channel="graph_expansion",
-            ))
-            next_id += 1
-
-        if new_queries:
-            # Find current execution position
-            current_idx = max(
-                (i for i, q in enumerate(queries) if q.status in ("done", "in_progress")),
-                default=0,
-            )
-            self._insert_queries_by_priority(queries, new_queries, current_idx)
-            self._observer.on_graph_expansion_processed(seeds, len(new_queries))
-            if self._runtime_run_id:
-                for seed in seeds:
-                    username = seed.get("username")
-                    if username:
-                        self._runtime_state.mark_graph_expansion_seed_processed(self._runtime_run_id, username)
-                        if username not in progress.graph_expansion_processed:
-                            progress.graph_expansion_processed.append(username)
-        progress.queries = queries
+        self._ensure_services()
+        await self._work_unit_service.process_graph_expansion_queue(progress, queries)
 
     @staticmethod
     def _insert_queries_by_priority(
@@ -1673,51 +1297,16 @@ class GitHubPipeline:
         self._seen_usernames.add(username)
 
     def _dedup_usernames(self, usernames: list[str]) -> list[str]:
-        """Filter out already-seen or in-flight usernames."""
-        blocked = set()
-        if getattr(self, "_runtime_bridge", None):
-            blocked = self._runtime_bridge.load_blocked_usernames([u for u in usernames if u])
-        new = []
-        for u in usernames:
-            if (
-                u
-                and u not in blocked
-                and u not in self._seen_usernames
-                and u not in self._in_flight_usernames
-            ):
-                self._in_flight_usernames.add(u)
-                new.append(u)
-        return new
+        self._ensure_services()
+        return self._work_unit_service.dedup_usernames(usernames)
 
     def _load_or_create_progress(self, resume: bool = False) -> GitHubProgress:
-        self._ensure_runtime_state()
-        self._runtime_run_id, progress = self._runtime_bridge.start_or_resume_run(resume=resume)
-        self._seen_usernames = set(progress.discovered_usernames)
-        self._execution_engine.runtime.mark_progress_dirty()
-        self._execution_engine.runtime.flush_projections_if_needed(
-            run_id=self._runtime_run_id,
-            force_artifacts=True,
-        )
-        return progress
+        self._ensure_services()
+        return self._work_unit_service.load_or_create_progress(resume=resume)
 
     def _save_progress(self):
-        if self._progress:
-            self._progress.discovered_usernames = list(self._seen_usernames)
-            if self._client:
-                self._progress.api_calls_made = self._client.limiter.total_calls
-            if getattr(self, "_runtime_run_id", None):
-                self._runtime_bridge.sync_progress(self._runtime_run_id, self._progress)
-                self._execution_engine.runtime.mark_progress_dirty()
-                self._execution_engine.runtime.flush_projections_if_needed(run_id=self._runtime_run_id)
-                self._seen_usernames = set(
-                    self._runtime_state.list_terminal_identity_keys(
-                        source="github",
-                        brief_id=self.brief_obj.id,
-                    )
-                )
-                self._progress.discovered_usernames = list(self._seen_usernames)
-            else:
-                self._progress.save(str(self.progress_path))
+        self._ensure_services()
+        self._work_unit_service.save_progress()
 
     def _build_batch_report(self, batch_stats: list[dict]) -> GitHubBatchReport:
         report = GitHubBatchReport(
@@ -1798,6 +1387,15 @@ class GitHubPipeline:
             )
         if not hasattr(self, "_runtime_run_id"):
             self._runtime_run_id = None
+        self._ensure_services()
+
+    def _ensure_services(self) -> None:
+        if not hasattr(self, "_work_unit_service") or self._work_unit_service is None:
+            self._work_unit_service = GitHubWorkUnitService(self)
+        if not hasattr(self, "_acquisition_service") or self._acquisition_service is None:
+            self._acquisition_service = GitHubAcquisitionService(self)
+        if not hasattr(self, "_side_effects_service") or self._side_effects_service is None:
+            self._side_effects_service = GitHubSideEffectsService(self)
 
     def _get_query_work_unit_id(self, query: GitHubSearchQuery) -> int | None:
         if not getattr(self, "_runtime_run_id", None):

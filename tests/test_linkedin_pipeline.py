@@ -496,14 +496,14 @@ def test_extract_card_snippet_uses_dom_metadata():
         from shared.schemas import SearchString
         search_string = SearchString(id=9, name="seq", boolean="(test)")
 
-        with patch("linkedin.orchestrator.extract_snippet_from_card_innertext", return_value=_make_snippet(
+        with patch("linkedin.acquisition.extract_snippet_from_card_innertext", return_value=_make_snippet(
             name="LLM Name",
             profile_url="",
             source_string_id=9,
             source_string_name="seq",
             page=2,
             result_rank=3,
-        )), patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+        )), patch("linkedin.acquisition.human_delay_correlated", return_value=0.0):
             snippet = asyncio.run(p._extract_card_snippet(search_string, page_num=2, card_index=2))
 
         assert snippet is not None
@@ -528,7 +528,7 @@ def test_extract_card_snippet_returns_none_when_card_text_missing():
         from shared.schemas import SearchString
         search_string = SearchString(id=9, name="seq", boolean="(test)")
 
-        with patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+        with patch("linkedin.acquisition.human_delay_correlated", return_value=0.0):
             snippet = asyncio.run(p._extract_card_snippet(search_string, page_num=1, card_index=0))
 
     assert snippet is None
@@ -549,7 +549,7 @@ def test_extract_card_snippet_uses_dom_metadata_when_card_text_missing():
         search_string = SearchString(id=9, name="seq", boolean="(test)")
 
         with patch(
-            "linkedin.orchestrator.extract_snippet_from_card_innertext",
+            "linkedin.acquisition.extract_snippet_from_card_innertext",
             return_value=_make_snippet(
                 name="Ada Lovelace",
                 profile_url="",
@@ -558,7 +558,7 @@ def test_extract_card_snippet_uses_dom_metadata_when_card_text_missing():
                 page=1,
                 result_rank=1,
             ),
-        ) as extract_mock, patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+        ) as extract_mock, patch("linkedin.acquisition.human_delay_correlated", return_value=0.0):
             snippet = asyncio.run(p._extract_card_snippet(search_string, page_num=1, card_index=0))
 
         assert snippet is not None
@@ -580,7 +580,7 @@ def test_extract_card_snippet_returns_none_on_slot_rehydration_error():
 
         search_string = SearchString(id=16, name="seq", boolean="(test)")
 
-        with patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+        with patch("linkedin.acquisition.human_delay_correlated", return_value=0.0):
             snippet = asyncio.run(p._extract_card_snippet(search_string, page_num=1, card_index=5))
 
         assert snippet is None

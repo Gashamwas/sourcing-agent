@@ -27,6 +27,13 @@ candidate-stage lifecycle state into `RuntimeStateStore`.
 
 GitHub and LinkedIn still own their source-specific outer loops.
 
+Each source now follows the same boundary shape:
+
+- planner
+- acquisition
+- work-units
+- side-effects
+
 GitHub keeps ownership of:
 
 - query planning and adaptation
@@ -44,6 +51,29 @@ LinkedIn keeps ownership of:
 
 The adapters should call the shared execution layer for candidate-stage work,
 but they should not reimplement lifecycle or dedup rules locally.
+
+## Adapter Services
+
+The current boundary-first decomposition is intentionally lightweight.
+
+Planner remains the existing strategy modules:
+
+- `github/strategy.py`
+- `linkedin/strategy.py`
+
+Source-owned implementation details now live behind explicit services:
+
+- GitHub:
+  - `github/acquisition.py`
+  - `github/work_units.py`
+  - `github/side_effects.py`
+- LinkedIn:
+  - `linkedin/acquisition.py`
+  - `linkedin/work_units.py`
+  - `linkedin/side_effects.py`
+
+These services own source-specific behavior while the orchestrators remain
+top-level coordinators.
 
 ## Runtime Boundary
 

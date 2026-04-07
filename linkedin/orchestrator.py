@@ -24,7 +24,10 @@ from shared.schemas import (
     SearchString, Progress, KitString, BlockReport, AdaptationResponse,
     ExecutionPlan, GlanceResult,
 )
+from linkedin.acquisition import LinkedInAcquisitionService
 from linkedin.browser import LinkedInBrowser
+from linkedin.side_effects import LinkedInSideEffectsService
+from linkedin.work_units import LinkedInWorkUnitService
 from shared.extractors import (
     extract_snippet_from_card_innertext,
     extract_profile_from_dom,
@@ -195,6 +198,9 @@ class Pipeline:
             brief_id=self._brief_id,
             brief_name=self.brief_obj.id,
         )
+        self._work_unit_service = LinkedInWorkUnitService(self)
+        self._acquisition_service = LinkedInAcquisitionService(self)
+        self._side_effects_service = LinkedInSideEffectsService(self)
 
         # Kit strings (populated by run_full)
         self._kit_strings: list[KitString] = []
@@ -258,38 +264,18 @@ class Pipeline:
 
     def _load_search_memory(self) -> None:
         """Load brief-scoped search family memory if present."""
-        if self._runtime_bridge and self._runtime_bridge.has_runtime_state():
-            self._search_memory = self._runtime_bridge.load_search_memory()
-            families = len(self._search_memory.get("families", {}))
-            print(f"  [memory] Loaded runtime search memory ({families} families)")
-            return
-        if not self.search_memory_path.exists():
-            self._search_memory = {}
-            return
-        self._search_memory = read_json(self.search_memory_path)
-        families = len(self._search_memory.get("families", {}))
-        print(f"  [memory] Loaded search family memory ({families} families)")
+        self._ensure_services()
+        self._search_memory = self._work_unit_service.load_search_memory()
 
     def _save_search_memory(self) -> None:
         """Persist brief-scoped search family memory."""
-        if self._runtime_bridge and self._runtime_run_id:
-            self._runtime_bridge.rebuild_artifacts(self._runtime_run_id)
-            self._search_memory = self._runtime_bridge.load_search_memory()
-            return
-        write_json(self.search_memory_path, self._search_memory)
+        self._ensure_services()
+        self._search_memory = self._work_unit_service.save_search_memory()
 
     def _update_search_memory_from_block(self, block_strings: list[SearchString]) -> None:
         """Update family memory with the completed block's observed performance."""
-        if self._runtime_bridge and self._runtime_run_id and self._progress:
-            self._runtime_bridge.sync_progress(self._runtime_run_id, self._progress)
-            self._search_memory = self._runtime_bridge.load_search_memory()
-            return
-        self._search_memory = update_search_memory(
-            self._search_memory,
-            self._brief_id,
-            block_strings,
-        )
-        self._save_search_memory()
+        self._ensure_services()
+        self._search_memory = self._work_unit_service.update_search_memory_from_block(block_strings)
 
     def _hydrate_search_string_metadata(self, search_string: SearchString) -> None:
         """Backfill family metadata for older progress files or unlabeled strings."""
@@ -319,22 +305,12 @@ class Pipeline:
         page_num: int | None = None,
     ) -> None:
         """Persist current run state without waiting for a full page to finish."""
-        if not progress:
-            return
-
-        if search_string is not None:
-            progress.current_string_id = search_string.id
-            if page_num is not None:
-                progress.current_page = page_num
-                search_string.pages_reviewed = max(search_string.pages_reviewed, page_num)
-
-        progress.candidates_saved = self.stats.get("saved", progress.candidates_saved)
-        progress.candidates_rejected = self.stats.get("rejected", progress.candidates_rejected)
-        if self._runtime_bridge and self._runtime_run_id:
-            self._runtime_bridge.sync_progress(self._runtime_run_id, progress)
-            self._search_memory = self._runtime_bridge.load_search_memory()
-        else:
-            progress.save(str(self.progress_path))
+        self._ensure_services()
+        self._work_unit_service.checkpoint_progress(
+            progress,
+            search_string=search_string,
+            page_num=page_num,
+        )
 
     def _ensure_runtime_state(self) -> None:
         output_dir = Path(self.output_dir)
@@ -353,6 +329,15 @@ class Pipeline:
             )
         if not hasattr(self, "_runtime_run_id"):
             self._runtime_run_id = None
+        self._ensure_services()
+
+    def _ensure_services(self) -> None:
+        if not hasattr(self, "_work_unit_service") or self._work_unit_service is None:
+            self._work_unit_service = LinkedInWorkUnitService(self)
+        if not hasattr(self, "_acquisition_service") or self._acquisition_service is None:
+            self._acquisition_service = LinkedInAcquisitionService(self)
+        if not hasattr(self, "_side_effects_service") or self._side_effects_service is None:
+            self._side_effects_service = LinkedInSideEffectsService(self)
 
     def _record_runtime_snippet(self, search_string: SearchString, snippet: CandidateSnippet) -> None:
         if self._runtime_bridge and self._runtime_run_id:
@@ -442,19 +427,18 @@ class Pipeline:
         ready: bool,
     ) -> None:
         """Persist the current block context across resume boundaries."""
-        if not progress:
-            return
-        progress.pending_block_name = block_name
-        progress.pending_block_string_ids = [s.id for s in block_strings]
-        progress.pending_block_ready = ready
+        self._ensure_services()
+        self._work_unit_service.set_pending_block_adaptation(
+            progress,
+            block_name,
+            block_strings,
+            ready=ready,
+        )
 
     def _clear_pending_block_adaptation(self, progress: Progress | None) -> None:
         """Clear any persisted block-adaptation checkpoint."""
-        if not progress:
-            return
-        progress.pending_block_name = ""
-        progress.pending_block_string_ids = []
-        progress.pending_block_ready = False
+        self._ensure_services()
+        self._work_unit_service.clear_pending_block_adaptation(progress)
 
     # ------------------------------------------------------------------
     # Main entry points
@@ -1324,54 +1308,13 @@ class Pipeline:
         page_num: int,
         card_index: int,
     ) -> CandidateSnippet | None:
-        """Focus one result card, pause briefly, and extract its snippet."""
-        try:
-            await self.browser.focus_card_for_review(card_index)
-            await asyncio.sleep(
-                human_delay_correlated(random.uniform(0.7, 1.8), channel="card_glance")
-            )
-            snapshot = await self.browser.get_card_snapshot(card_index)
-        except Exception as e:
-            print(f"    [warn] Card {card_index + 1} could not be extracted: {e}")
-            log_event(
-                self.log_path,
-                "card_extract_error",
-                string_id=search_string.id,
-                page=page_num,
-                card_index=card_index + 1,
-                error=str(e),
-            )
-            try:
-                await self.browser.go_back_to_results()
-            except Exception:
-                pass
-            return None
-
-        innertext = (snapshot.get("innertext") or "").strip()
-        if not innertext and not snapshot.get("name"):
-            print(f"    [warn] Card {card_index + 1} rendered without readable text")
-            return None
-
-        snippet = extract_snippet_from_card_innertext(
-            innertext,
-            string_id=search_string.id,
-            string_name=search_string.name,
-            page=page_num,
-            result_rank=card_index + 1,
-            dom_name=(snapshot.get("name") or "").strip(),
-            dom_url=(snapshot.get("url") or "").strip(),
+        self._ensure_services()
+        result = await self._acquisition_service.extract_card_snippet(
+            search_string,
+            page_num,
+            card_index,
         )
-        if snippet is None:
-            print(f"    [warn] Could not extract snippet from card {card_index + 1}")
-            return None
-
-        if snapshot.get("name"):
-            snippet.name = snapshot["name"]
-        if snapshot.get("url"):
-            snippet.profile_url = snapshot["url"]
-        snippet.card_index = card_index
-        snippet.already_saved = bool(snapshot.get("already_saved", False))
-        return snippet
+        return result.snippet if result else None
 
     async def _preview_skip_pause(self, reason: str) -> None:
         """Pause on visible skips so the review flow does not feel bursty."""
@@ -2712,40 +2655,10 @@ Provide a narrowed Boolean."""
             stage="full",
         )
 
-        # --- Full profile extraction (cheap model) ---
-        # Emergency recovery check before browser interaction
-        await self._ensure_browser_healthy()
-
-        print(f"    Opening profile for full evaluation...")
-        # Pre-open pause — simulate scanning the snippet before deciding to click
-        scan_time = random.uniform(0.8, 2.2)
-        await asyncio.sleep(human_delay_correlated(scan_time, channel="snippet_scan"))
-
         try:
-            # Re-render the target card's article (LinkedIn virtual scrolling de-renders offscreen)
-            if snippet.card_index >= 0:
-                await self.browser.ensure_card_rendered(snippet.card_index)
-
-            opened = False
-            if snippet.profile_url:
-                try:
-                    await self.browser.open_profile_by_url(snippet.profile_url)
-                    opened = True
-                except GovernorLimitReached:
-                    raise
-                except Exception as url_err:
-                    if _is_browser_disconnect_error(url_err):
-                        raise
-                    print(f"    [warn] URL-based open failed ({url_err}), falling back to name match...")
-            if not opened:
-                await self.browser.open_profile(snippet.name)
-            # Simulate human reading — scroll through profile sections with dwell
-            await self.browser.simulate_profile_read()
-            profile_text = await self.browser.get_profile_innertext()
-            print(f"    Profile text size: {len(profile_text) / 1024:.0f} KB")
-
-            summary = extract_profile_from_dom(profile_text, snippet.profile_url)
-
+            self._ensure_services()
+            acquisition = await self._acquisition_service.extract_profile_summary(snippet)
+            summary = acquisition.profile_summary
         except GovernorLimitReached:
             raise
         except Exception as e:
@@ -2856,58 +2769,11 @@ Provide a narrowed Boolean."""
             tag = final.decision if final.decision in ("INFERENTIAL_SAVE", "TRANSFERABLE_SAVE") else "SAVE"
             print(f"    [{tag}] {final.rationale}")
             self.stats["save_attempts"] += 1
-
-            if not self.test_mode:
-                profile_url = getattr(snippet, "profile_url", None) or ""
-                if profile_url in self._saved_urls:
-                    print(f"    Already saved this session (skipping duplicate)")
-                    saved = True
-                else:
-                    already_saved = await self.browser.is_already_saved()
-                    if already_saved:
-                        print(f"    Already in LinkedIn pipeline (skipping save click)")
-                        saved = True
-                    else:
-                        saved = await self.browser.save_candidate()
-                        if saved:
-                            print(f"    Saved to LinkedIn pipeline")
-                            self._saved_urls.add(profile_url)
-                        else:
-                            print(f"    [warn] LinkedIn save may have failed")
-                        # Post-save linger — scroll back and re-read like a recruiter who just saved
-                        linger = max(2.5, min(8.0, human_delay_correlated(4.5, channel="save_linger")))
-                        chunks_back = random.randint(1, 3)
-                        px = await self.browser.scroll_for_linger(chunks_back)
-                        await asyncio.sleep(linger)
-                        print(f"    [profile-read] SAVE verdict → lingering {linger:.1f}s, scrolled back {chunks_back} chunks")
-                        await self.browser.scroll_restore(px)
-                if saved:
-                    self.stats["saved"] += 1
-                if self._runtime_bridge and self._runtime_run_id:
-                    self._runtime_bridge.record_side_effect_result(
-                        run_id=self._runtime_run_id,
-                        search_string=runtime_search_string,
-                        snippet=snippet,
-                        attempt_id=full_attempt_id,
-                        effect_type="linkedin_save",
-                        status="succeeded" if saved else "failed",
-                        payload={"test_mode": False},
-                    )
-                log_event(self.log_path, "candidate_saved", name=snippet.name, linkedin_save=saved)
-
-            else:
-                # test_mode: count decision as saved (no browser interaction)
-                self.stats["saved"] += 1
-                if self._runtime_bridge and self._runtime_run_id:
-                    self._runtime_bridge.record_side_effect_result(
-                        run_id=self._runtime_run_id,
-                        search_string=runtime_search_string,
-                        snippet=snippet,
-                        attempt_id=full_attempt_id,
-                        effect_type="linkedin_save",
-                        status="succeeded",
-                        payload={"test_mode": True},
-                    )
+            await self._side_effects_service.handle_save_decision(
+                snippet=snippet,
+                runtime_search_string=runtime_search_string,
+                attempt_id=full_attempt_id,
+            )
 
             if page_report:
                 page_report.add_saved(snippet, final)
@@ -3391,110 +3257,12 @@ Provide a narrowed Boolean."""
     # ------------------------------------------------------------------
 
     def _restart_string(self, progress: Progress, string_id: int) -> None:
-        """Reset a specific search string to page 1 and clean up its output files."""
-        if self._runtime_bridge and self._runtime_run_id:
-            self._runtime_bridge.restart_string(
-                run_id=self._runtime_run_id,
-                progress=progress,
-                string_id=string_id,
-            )
-            self._seen_urls = set()
-            self._in_flight_urls = set()
-            self._prior_outcomes = {}
-            self._load_candidate_history()
-            self._load_search_memory()
-            print(f"  String #{string_id} reset to page 1. Ready for re-evaluation.")
-            return
-
-        target = None
-        for s in progress.strings:
-            if s.id == string_id:
-                target = s
-                break
-
-        if not target:
-            print(f"  [warn] String #{string_id} not found in progress — ignoring --restart-string")
-            return
-
-        print(f"\n  --- Restarting String #{string_id}: {target.name[:60]} ---")
-        print(f"  Previous state: status={target.status}, pages_reviewed={target.pages_reviewed}, saves={len(target.saves)}")
-
-        # 1. Reset the string in progress
-        target.status = "queued"
-        target.pages_reviewed = 1
-        target.phase = "scout"
-        target.saves = []
-        target.notes = ""
-        target.refinement_stack = []
-
-        # 2. Collect profile URLs from this string's snippets for cross-referencing
-        urls_to_remove = set()
-        if self.snippets_path.exists():
-            all_snippets = read_jsonl(self.snippets_path)
-            kept_snippets = []
-            for snip in all_snippets:
-                if snip.get("source_string_id") == string_id:
-                    url = snip.get("profile_url", "")
-                    if url:
-                        urls_to_remove.add(url)
-                else:
-                    kept_snippets.append(snip)
-            # Rewrite snippets file without this string's entries
-            self._rewrite_jsonl(self.snippets_path, kept_snippets)
-            print(f"  Removed {len(urls_to_remove)} snippets for string #{string_id}")
-
-        # 3. Filter other JSONL files by removing entries matching removed URLs
-        for path in [self.facial_path, self.final_path, self.profiles_path]:
-            if path.exists():
-                records = read_jsonl(path)
-                kept = [r for r in records if r.get("profile_url", "") not in urls_to_remove]
-                removed = len(records) - len(kept)
-                if removed > 0:
-                    self._rewrite_jsonl(path, kept)
-                    print(f"  Removed {removed} entries from {path.name}")
-
-        # 4. Remove this string's entries from cross-session history
-        if self.history_path.exists():
-            history_records = read_jsonl(self.history_path)
-            def _should_remove(r):
-                if r.get("source_string_id") == string_id:
-                    return True
-                if "source_string_id" not in r and r.get("profile_url", "") in urls_to_remove:
-                    return True
-                return False
-            kept_history = [r for r in history_records if not _should_remove(r)]
-            removed = len(history_records) - len(kept_history)
-            if removed > 0:
-                self._rewrite_jsonl(self.history_path, kept_history)
-                print(f"  Removed {removed} entries from {self.history_path.name}")
-
-        # 5. Purge in-memory dedup state for removed URLs
-        for url in urls_to_remove:
-            self._seen_urls.discard(url)
-            self._prior_outcomes.pop(url, None)
-            self._in_flight_urls.discard(url)
-
-        # 6. Save updated progress
-        if string_id in progress.pending_block_string_ids or progress.pending_block_name == target.block:
-            self._clear_pending_block_adaptation(progress)
-        if progress.current_string_id == string_id:
-            progress.current_string_id = None
-            progress.current_page = 0
-        self._checkpoint_progress(progress)
-        print(f"  String #{string_id} reset to page 1. Ready for re-evaluation.")
+        self._ensure_services()
+        self._work_unit_service.restart_string(progress, string_id)
 
     def _restart_strings(self, progress: Progress, string_ids: list[int]) -> None:
-        """Reset multiple strings while preserving the requested order."""
-        seen_ids: set[int] = set()
-        ordered_ids: list[int] = []
-        for string_id in string_ids:
-            if string_id in seen_ids:
-                continue
-            seen_ids.add(string_id)
-            ordered_ids.append(string_id)
-
-        for string_id in ordered_ids:
-            self._restart_string(progress, string_id)
+        self._ensure_services()
+        self._work_unit_service.restart_strings(progress, string_ids)
 
     @staticmethod
     def _rewrite_jsonl(path, records: list[dict]) -> None:
@@ -3508,35 +3276,8 @@ Provide a narrowed Boolean."""
     # ------------------------------------------------------------------
 
     def _load_or_create_progress(self) -> Progress:
-        self._ensure_runtime_state()
-        if self._runtime_bridge and self._runtime_bridge.has_runtime_state():
-            self._runtime_run_id, progress = self._runtime_bridge.start_or_resume_run(resume=True)
-            return progress
-        if self.progress_path.exists():
-            existing = Progress.from_file(str(self.progress_path))
-            if existing.brief_name == self.brief_obj.id:
-                print("  Resuming from existing progress file...")
-                return existing
-            else:
-                print(f"  Progress file is for '{existing.brief_name}', not '{self.brief_obj.id}'. Starting fresh.")
-
-        strings = []
-        for s in self.search_config.get("strings", []):
-            strings.append(SearchString(
-                id=s["id"],
-                name=s["name"],
-                boolean=s["boolean"],
-            ))
-
-        progress = Progress(
-            brief_name=self.brief_obj.id,
-            strings=strings,
-        )
-        self._runtime_run_id, progress = self._runtime_bridge.start_or_resume_run(
-            resume=False,
-            initial_progress=progress,
-        )
-        return progress
+        self._ensure_services()
+        return self._work_unit_service.load_or_create_progress()
 
     # ------------------------------------------------------------------
     # Reporting

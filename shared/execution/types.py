@@ -24,9 +24,36 @@ class CandidateExecutionEnvelope:
 
 
 @dataclass(frozen=True)
-class SideEffectResult:
+class AcquisitionResult:
+    """Normalized acquisition/evidence payload emitted by source adapters."""
+
+    candidate: Any | None = None
+    snippet: Any | None = None
+    profile_summary: Any | None = None
+    candidate_record: dict[str, Any] | None = None
+    terminal_decision: str | None = None
+    skip_reason: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class WorkUnitCheckpoint:
+    """Small, explicit checkpoint payload emitted by source work-unit services."""
+
+    status: str
+    cursor: dict[str, Any] = field(default_factory=dict)
+    metrics: dict[str, Any] = field(default_factory=dict)
+    payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SideEffectOutcome:
     """Durable record of a post-decision side effect."""
 
     effect_type: str
     status: str
     payload: dict[str, Any] = field(default_factory=dict)
+
+
+# Backwards-compatible export name used by earlier phases.
+SideEffectResult = SideEffectOutcome

@@ -95,7 +95,11 @@ def test_target_candidate_lifecycle_is_frozen_for_phase2():
 def test_run_log_event_vocabulary_matches_current_emitters():
     source_paths = [
         ROOT / "linkedin" / "orchestrator.py",
+        ROOT / "linkedin" / "acquisition.py",
+        ROOT / "linkedin" / "side_effects.py",
         ROOT / "github" / "orchestrator.py",
+        ROOT / "github" / "acquisition.py",
+        ROOT / "github" / "side_effects.py",
     ]
     event_pattern = re.compile(r'log_event\(\s*[^,]+,\s*"([^"]+)"', re.DOTALL)
 
