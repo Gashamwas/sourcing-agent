@@ -32,15 +32,17 @@ def project_linkedin_progress(store: RuntimeStateStore, run_id: int) -> Progress
     strings = []
     for row in work_units:
         payload = _json_loads(row["payload_json"])
+        metrics = _json_loads(row["metrics_json"] if "metrics_json" in row.keys() else None)
+        checkpoint = _json_loads(row["checkpoint_json"])
         payload.update(
             {
                 "status": row["status"],
                 "result_count": row["result_count"],
-                "pages_reviewed": _json_loads(row["checkpoint_json"]).get("pages_reviewed", payload.get("pages_reviewed", 0)),
+                "pages_reviewed": metrics.get("pages_reviewed", checkpoint.get("pages_reviewed", payload.get("pages_reviewed", 0))),
                 "facial_yes_count": row["facial_yes_count"],
                 "facial_no_count": row["facial_no_count"],
                 "candidates_count": row["candidates_discovered"],
-                "duplicates_count": _json_loads(row["checkpoint_json"]).get("duplicates_count", payload.get("duplicates_count", 0)),
+                "duplicates_count": metrics.get("duplicates_count", checkpoint.get("duplicates_count", payload.get("duplicates_count", 0))),
                 "notes": row["notes"] or payload.get("notes", ""),
                 "family_key": row["family_key"],
                 "novelty_bucket": row["novelty_bucket"],
@@ -112,7 +114,7 @@ def project_linkedin_search_memory(store: RuntimeStateStore, *, brief_id: str) -
         rows = conn.execute(
             """
             SELECT payload_json, checkpoint_json, family_key, novelty_bucket, domain_lane, result_count,
-                   candidates_discovered, facial_yes_count, facial_no_count, saves_count, notes
+                   candidates_discovered, facial_yes_count, facial_no_count, saves_count, notes, metrics_json
             FROM work_units
             WHERE source = 'linkedin' AND brief_id = ? AND kind = ? AND status = 'done'
             ORDER BY ordering_index ASC, id ASC
@@ -123,6 +125,7 @@ def project_linkedin_search_memory(store: RuntimeStateStore, *, brief_id: str) -
     for row in rows:
         payload = _json_loads(row["payload_json"])
         checkpoint = _json_loads(row["checkpoint_json"])
+        metrics = _json_loads(row["metrics_json"] if "metrics_json" in row.keys() else None)
         strings.append(
             SearchString.from_dict(
                 {
@@ -131,7 +134,7 @@ def project_linkedin_search_memory(store: RuntimeStateStore, *, brief_id: str) -
                     "boolean": payload.get("boolean", ""),
                     "status": "done",
                     "result_count": row["result_count"],
-                    "pages_reviewed": checkpoint.get("pages_reviewed", payload.get("pages_reviewed", 0)),
+                    "pages_reviewed": metrics.get("pages_reviewed", checkpoint.get("pages_reviewed", payload.get("pages_reviewed", 0))),
                     "saves": list(payload.get("saves", [])),
                     "notes": row["notes"] or payload.get("notes", ""),
                     "block": payload.get("block", ""),
@@ -140,7 +143,7 @@ def project_linkedin_search_memory(store: RuntimeStateStore, *, brief_id: str) -
                     "facial_yes_count": row["facial_yes_count"],
                     "facial_no_count": row["facial_no_count"],
                     "candidates_count": row["candidates_discovered"],
-                    "duplicates_count": checkpoint.get("duplicates_count", payload.get("duplicates_count", 0)),
+                    "duplicates_count": metrics.get("duplicates_count", checkpoint.get("duplicates_count", payload.get("duplicates_count", 0))),
                     "phase": payload.get("phase", "scout"),
                     "original_boolean": payload.get("original_boolean", ""),
                     "refinement_stack": payload.get("refinement_stack", []),
@@ -166,6 +169,35 @@ def write_linkedin_search_memory_projection(
     return memory
 
 
+def project_linkedin_snippets(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+    return _project_linkedin_attempt_payloads(store, brief_id=brief_id, stage="snippet", payload_key="snippet")
+
+
+def project_linkedin_facial_judgments(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+    return _project_linkedin_attempt_payloads(store, brief_id=brief_id, stage="facial", payload_key="facial_decision")
+
+
+def project_linkedin_profile_summaries(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+    return _project_linkedin_attempt_payloads(store, brief_id=brief_id, stage="full", payload_key="profile_summary")
+
+
+def project_linkedin_final_judgments(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+    return _project_linkedin_attempt_payloads(store, brief_id=brief_id, stage="full", payload_key="final_decision")
+
+
+def write_linkedin_stage_projections(
+    store: RuntimeStateStore,
+    *,
+    brief_id: str,
+    output_dir: str | Path,
+) -> None:
+    output_dir = Path(output_dir)
+    _write_jsonl_atomic(output_dir / "snippets.jsonl", project_linkedin_snippets(store, brief_id=brief_id))
+    _write_jsonl_atomic(output_dir / "facial_judgments.jsonl", project_linkedin_facial_judgments(store, brief_id=brief_id))
+    _write_jsonl_atomic(output_dir / "profile_summaries.jsonl", project_linkedin_profile_summaries(store, brief_id=brief_id))
+    _write_jsonl_atomic(output_dir / "final_judgments.jsonl", project_linkedin_final_judgments(store, brief_id=brief_id))
+
+
 def _write_json_atomic(path: str | Path, data: Any) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -188,3 +220,30 @@ def _json_loads(raw: str | None) -> Any:
     if not raw:
         return {}
     return json.loads(raw)
+
+
+def _project_linkedin_attempt_payloads(
+    store: RuntimeStateStore,
+    *,
+    brief_id: str,
+    stage: str,
+    payload_key: str,
+) -> list[dict]:
+    with store.connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT ca.payload_json
+            FROM candidate_attempts ca
+            JOIN candidates c ON c.id = ca.candidate_id
+            WHERE c.source = 'linkedin' AND c.brief_id = ? AND ca.stage = ?
+            ORDER BY ca.started_at ASC, ca.id ASC
+            """,
+            (brief_id, stage),
+        ).fetchall()
+    projected: list[dict] = []
+    for row in rows:
+        payload = _json_loads(row["payload_json"])
+        record = payload.get(payload_key)
+        if record:
+            projected.append(record)
+    return projected

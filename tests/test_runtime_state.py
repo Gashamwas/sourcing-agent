@@ -29,7 +29,7 @@ def test_bootstrap_is_idempotent(tmp_path):
 
     with store.connect() as conn:
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
-        assert row["value"] == "1"
+        assert row["value"] == "2"
 
 
 def test_rejects_invalid_state_transition(tmp_path):

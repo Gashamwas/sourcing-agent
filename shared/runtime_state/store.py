@@ -24,6 +24,18 @@ DEDUP_BLOCKING_RUNTIME_DECISIONS = {
     "PRESCREEN_SKIP",
     "INSUFFICIENT_DATA",
 }
+DEDUP_BLOCKING_LINKEDIN_DECISIONS = {
+    "FACIAL_NO",
+    "FACIAL_SKIP",
+    "SAVE",
+    "REJECT",
+    "INFERENTIAL_SAVE",
+    "TRANSFERABLE_SAVE",
+    "SIGNAL_SAVE",
+}
+DEDUP_BLOCKING_DECISIONS = (
+    DEDUP_BLOCKING_RUNTIME_DECISIONS | DEDUP_BLOCKING_LINKEDIN_DECISIONS
+)
 
 ALLOWED_LIFECYCLE_TRANSITIONS: dict[str, set[str]] = {
     "discovered": {"snippet_extracted", "failed_retryable", "failed_terminal"},
@@ -92,6 +104,7 @@ class RuntimeStateStore:
                     status TEXT NOT NULL,
                     payload_json TEXT NOT NULL DEFAULT '{}',
                     checkpoint_json TEXT NOT NULL DEFAULT '{}',
+                    metrics_json TEXT NOT NULL DEFAULT '{}',
                     family_key TEXT NOT NULL DEFAULT '',
                     novelty_bucket TEXT NOT NULL DEFAULT '',
                     domain_lane TEXT NOT NULL DEFAULT '',
@@ -170,12 +183,27 @@ class RuntimeStateStore:
             )
             conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
-                ("schema_version", "1"),
+                ("schema_version", "2"),
             )
             conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
                 ("target_candidate_lifecycle", json.dumps(TARGET_CANDIDATE_LIFECYCLE)),
             )
+            self._migrate(conn)
+
+    def _migrate(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(work_units)").fetchall()
+        }
+        if "metrics_json" not in columns:
+            conn.execute(
+                "ALTER TABLE work_units ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '{}'"
+            )
+        conn.execute(
+            "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+            ("schema_version", "2"),
+        )
 
     # ------------------------------------------------------------------
     # Runs
@@ -214,7 +242,7 @@ class RuntimeStateStore:
                 rows = conn.execute(
                     """
                     SELECT source, brief_id, kind, source_unit_id, display_name, ordering_index, status,
-                           payload_json, checkpoint_json, family_key, novelty_bucket, domain_lane,
+                           payload_json, checkpoint_json, metrics_json, family_key, novelty_bucket, domain_lane,
                            result_count, candidates_discovered, candidates_enriched, candidates_insufficient,
                            facial_yes_count, facial_no_count, saves_count, rejected_count, notes
                     FROM work_units
@@ -228,10 +256,10 @@ class RuntimeStateStore:
                         """
                         INSERT INTO work_units(
                             run_id, source, brief_id, kind, source_unit_id, display_name, ordering_index, status,
-                            payload_json, checkpoint_json, family_key, novelty_bucket, domain_lane,
+                            payload_json, checkpoint_json, metrics_json, family_key, novelty_bucket, domain_lane,
                             result_count, candidates_discovered, candidates_enriched, candidates_insufficient,
                             facial_yes_count, facial_no_count, saves_count, rejected_count, notes
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             run_id,
@@ -244,6 +272,7 @@ class RuntimeStateStore:
                             row["status"],
                             row["payload_json"],
                             row["checkpoint_json"],
+                            row["metrics_json"],
                             row["family_key"],
                             row["novelty_bucket"],
                             row["domain_lane"],
@@ -348,6 +377,7 @@ class RuntimeStateStore:
         status: str,
         payload: dict | None = None,
         checkpoint: dict | None = None,
+        metrics: dict | None = None,
         family_key: str = "",
         novelty_bucket: str = "",
         domain_lane: str = "",
@@ -356,6 +386,7 @@ class RuntimeStateStore:
     ) -> int:
         payload_json = _json_dumps(payload or {})
         checkpoint_json = _json_dumps(checkpoint or {})
+        metrics_json = _json_dumps(metrics or {})
         counters = counters or {}
         started_at = _utc_now() if status == "in_progress" else None
         ended_at = _utc_now() if status in TERMINAL_WORK_UNIT_STATUSES else None
@@ -375,6 +406,7 @@ class RuntimeStateStore:
                     """
                     UPDATE work_units
                     SET display_name = ?, ordering_index = ?, status = ?, payload_json = ?, checkpoint_json = ?,
+                        metrics_json = ?,
                         family_key = ?, novelty_bucket = ?, domain_lane = ?, result_count = ?, candidates_discovered = ?,
                         candidates_enriched = ?, candidates_insufficient = ?, facial_yes_count = ?, facial_no_count = ?,
                         saves_count = ?, rejected_count = ?, notes = ?, started_at = ?, ended_at = ?
@@ -386,6 +418,7 @@ class RuntimeStateStore:
                         status,
                         payload_json,
                         checkpoint_json,
+                        metrics_json,
                         family_key,
                         novelty_bucket,
                         domain_lane,
@@ -409,11 +442,11 @@ class RuntimeStateStore:
                 """
                 INSERT INTO work_units(
                     run_id, source, brief_id, kind, source_unit_id, display_name, ordering_index, status,
-                    payload_json, checkpoint_json, family_key, novelty_bucket, domain_lane, result_count,
+                    payload_json, checkpoint_json, metrics_json, family_key, novelty_bucket, domain_lane, result_count,
                     candidates_discovered, candidates_enriched, candidates_insufficient, facial_yes_count,
                     facial_no_count, saves_count, rejected_count, notes, started_at, ended_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -426,6 +459,7 @@ class RuntimeStateStore:
                     status,
                     payload_json,
                     checkpoint_json,
+                    metrics_json,
                     family_key,
                     novelty_bucket,
                     domain_lane,
@@ -486,30 +520,38 @@ class RuntimeStateStore:
     # ------------------------------------------------------------------
 
     def list_terminal_identity_keys(self, *, source: str, brief_id: str) -> list[str]:
+        placeholders = ",".join("?" for _ in DEDUP_BLOCKING_DECISIONS)
         with self.connect() as conn:
             rows = conn.execute(
-                """
+                f"""
                 SELECT identity_key
                 FROM candidates
                 WHERE source = ? AND brief_id = ?
-                  AND (terminal_decision IS NOT NULL OR current_lifecycle_state = 'failed_terminal')
+                  AND (
+                    current_lifecycle_state = 'failed_terminal'
+                    OR terminal_decision IN ({placeholders})
+                  )
                 ORDER BY identity_key ASC
                 """,
-                (source, brief_id),
+                (source, brief_id, *sorted(DEDUP_BLOCKING_DECISIONS)),
             ).fetchall()
             return [str(row["identity_key"]) for row in rows]
 
     def is_dedup_blocked(self, *, source: str, brief_id: str, identity_key: str) -> bool:
+        placeholders = ",".join("?" for _ in DEDUP_BLOCKING_DECISIONS)
         with self.connect() as conn:
             row = conn.execute(
-                """
+                f"""
                 SELECT 1
                 FROM candidates
                 WHERE source = ? AND brief_id = ? AND identity_key = ?
-                  AND (terminal_decision IS NOT NULL OR current_lifecycle_state = 'failed_terminal')
+                  AND (
+                    current_lifecycle_state = 'failed_terminal'
+                    OR terminal_decision IN ({placeholders})
+                  )
                 LIMIT 1
                 """,
-                (source, brief_id, identity_key),
+                (source, brief_id, identity_key, *sorted(DEDUP_BLOCKING_DECISIONS)),
             ).fetchone()
             return row is not None
 
@@ -1203,6 +1245,7 @@ class RuntimeStateStore:
         if not usernames:
             return set()
         placeholders = ",".join("?" for _ in usernames)
+        decision_placeholders = ",".join("?" for _ in DEDUP_BLOCKING_DECISIONS)
         with self.connect() as conn:
             rows = conn.execute(
                 f"""
@@ -1210,11 +1253,48 @@ class RuntimeStateStore:
                 FROM candidates
                 WHERE source = 'github' AND brief_id = ?
                   AND identity_key IN ({placeholders})
-                  AND (terminal_decision IS NOT NULL OR current_lifecycle_state = 'failed_terminal')
+                  AND (
+                    current_lifecycle_state = 'failed_terminal'
+                    OR terminal_decision IN ({decision_placeholders})
+                  )
                 """,
-                [brief_id, *usernames],
+                [brief_id, *usernames, *sorted(DEDUP_BLOCKING_DECISIONS)],
             ).fetchall()
             return {str(row["identity_key"]) for row in rows}
+
+    def has_candidates(self, *, source: str, brief_id: str) -> bool:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM candidates
+                WHERE source = ? AND brief_id = ?
+                LIMIT 1
+                """,
+                (source, brief_id),
+            ).fetchone()
+            return row is not None
+
+    def record_event(
+        self,
+        *,
+        event_type: str,
+        payload: dict | None = None,
+        run_id: int | None = None,
+        work_unit_id: int | None = None,
+        candidate_id: int | None = None,
+        attempt_id: int | None = None,
+    ) -> None:
+        with self.connect() as conn:
+            self._insert_event(
+                conn,
+                event_type=event_type,
+                payload=payload,
+                run_id=run_id,
+                work_unit_id=work_unit_id,
+                candidate_id=candidate_id,
+                attempt_id=attempt_id,
+            )
 
     # ------------------------------------------------------------------
     # Events

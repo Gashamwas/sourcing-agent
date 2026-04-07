@@ -9,12 +9,14 @@ import sys
 from pathlib import Path
 
 from shared.runtime_state import (
+    LinkedInRuntimeStateBridge,
     RuntimeStateStore,
     clear_candidate_terminal_state,
     inspect_orphaned_attempts,
     rebuild_compat_projections,
     requeue_work_unit,
 )
+from shared.schemas import Progress
 
 
 def _store_for_output(output_dir: str | Path) -> RuntimeStateStore:
@@ -45,6 +47,9 @@ def main() -> None:
 
     subparsers.add_parser("rebuild-projections", help="Rebuild compatibility projections from runtime_state")
     subparsers.add_parser("inspect-orphans", help="List orphaned in-flight attempts")
+    subparsers.add_parser("rebuild-linkedin-artifacts", help="Rebuild LinkedIn projections and stage artifacts")
+    subparsers.add_parser("inspect-linkedin-orphans", help="List orphaned LinkedIn attempts")
+    subparsers.add_parser("import-legacy-linkedin", help="Import legacy LinkedIn progress/history into runtime_state")
 
     requeue_parser = subparsers.add_parser("requeue-work-unit", help="Requeue a work unit")
     requeue_parser.add_argument("--kind", required=True, help="Work-unit kind, e.g. github_query")
@@ -52,6 +57,9 @@ def main() -> None:
 
     clear_parser = subparsers.add_parser("clear-terminal", help="Clear a candidate terminal state for retry")
     clear_parser.add_argument("--identity-key", required=True, help="Candidate identity key")
+
+    restart_parser = subparsers.add_parser("restart-linkedin-string", help="Restart one LinkedIn string through runtime_state")
+    restart_parser.add_argument("--string-id", required=True, type=int, help="LinkedIn search string ID")
 
     args = parser.parse_args()
 
@@ -67,6 +75,28 @@ def main() -> None:
         if args.command == "inspect-orphans":
             rows = inspect_orphaned_attempts(store, source=args.source, brief_id=args.brief_id)
             print(json.dumps(rows, indent=2))
+            return
+
+        if args.command == "inspect-linkedin-orphans":
+            rows = inspect_orphaned_attempts(store, source="linkedin", brief_id=args.brief_id)
+            print(json.dumps(rows, indent=2))
+            return
+
+        if args.command == "rebuild-linkedin-artifacts":
+            rebuild_compat_projections(store, run_id=run_id, output_dir=args.output_dir)
+            print(f"Rebuilt LinkedIn artifacts for run {run_id} in {Path(args.output_dir)}")
+            return
+
+        if args.command == "import-legacy-linkedin":
+            bridge = LinkedInRuntimeStateBridge(
+                store=store,
+                output_dir=args.output_dir,
+                brief_id=args.brief_id,
+                brief_name=args.brief_id,
+            )
+            bridge.import_legacy_state(run_id)
+            bridge.rebuild_artifacts(run_id)
+            print(f"Imported legacy LinkedIn state into run {run_id} and rebuilt artifacts")
             return
 
         if args.command == "requeue-work-unit":
@@ -93,6 +123,18 @@ def main() -> None:
             print(
                 f"Cleared terminal state for {args.identity_key} on {args.source}:{args.brief_id} and rebuilt projections"
             )
+            return
+
+        if args.command == "restart-linkedin-string":
+            bridge = LinkedInRuntimeStateBridge(
+                store=store,
+                output_dir=args.output_dir,
+                brief_id=args.brief_id,
+                brief_name=args.brief_id,
+            )
+            progress = bridge.load_progress(run_id)
+            bridge.restart_string(run_id=run_id, progress=progress, string_id=args.string_id)
+            print(f"Restarted LinkedIn string {args.string_id} on run {run_id}")
             return
     except Exception as exc:
         print(f"[error] {exc}", file=sys.stderr)

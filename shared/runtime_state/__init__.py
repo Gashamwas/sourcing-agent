@@ -10,9 +10,14 @@ from .lock import RuntimeStateLock
 from .projections import (
     project_github_progress,
     project_linkedin_candidate_history,
+    project_linkedin_facial_judgments,
+    project_linkedin_final_judgments,
+    project_linkedin_profile_summaries,
     project_linkedin_progress,
     project_linkedin_search_memory,
+    project_linkedin_snippets,
 )
+from .linkedin import LinkedInResumeState, LinkedInRuntimeStateBridge
 from .store import (
     GITHUB_GRAPH_SEED_KIND,
     GITHUB_QUERY_KIND,
@@ -26,12 +31,18 @@ __all__ = [
     "LINKEDIN_STRING_KIND",
     "RuntimeStateLock",
     "RuntimeStateStore",
+    "LinkedInResumeState",
+    "LinkedInRuntimeStateBridge",
     "clear_candidate_terminal_state",
     "inspect_orphaned_attempts",
     "project_github_progress",
     "project_linkedin_candidate_history",
+    "project_linkedin_facial_judgments",
+    "project_linkedin_final_judgments",
+    "project_linkedin_profile_summaries",
     "project_linkedin_progress",
     "project_linkedin_search_memory",
+    "project_linkedin_snippets",
     "rebuild_compat_projections",
     "requeue_work_unit",
 ]

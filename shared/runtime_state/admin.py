@@ -9,6 +9,7 @@ from .projections import (
     write_linkedin_candidate_history_projection,
     write_linkedin_progress_projection,
     write_linkedin_search_memory_projection,
+    write_linkedin_stage_projections,
 )
 from .store import RuntimeStateStore
 
@@ -38,6 +39,11 @@ def rebuild_compat_projections(
             store,
             brief_id=brief_id,
             path=output_dir / f"search_memory-{brief_id}.json",
+        )
+        write_linkedin_stage_projections(
+            store,
+            brief_id=brief_id,
+            output_dir=output_dir,
         )
 
 

@@ -31,6 +31,7 @@ from shared.extractors import (
 )
 from shared.failures import judgment_failure_decision
 from shared.judger import facial_judge, full_judge, init_judger, is_failure_decision
+from shared.runtime_state import LinkedInRuntimeStateBridge, RuntimeStateLock, RuntimeStateStore
 from shared.storage import append_jsonl, read_jsonl, read_jsonl_set, log_event, write_json, read_json
 from shared.brief_loader import load_brief, Brief
 from shared.bias_controls import BiasMonitor, DecisionRecord
@@ -147,6 +148,7 @@ class Pipeline:
         self.final_path = self.output_dir / "final_judgments.jsonl"
         self.progress_path = self.output_dir / "progress.json"
         self.log_path = self.output_dir / "run_log.jsonl"
+        self.runtime_db_path = self.output_dir / "runtime_state.sqlite3"
 
         # Browser
         self.browser = LinkedInBrowser(input_mode=input_mode)
@@ -184,6 +186,15 @@ class Pipeline:
 
         # Progress ref for Ctrl+C handler
         self._progress: Optional[Progress] = None
+        self._runtime_state = RuntimeStateStore(self.runtime_db_path)
+        self._runtime_lock = RuntimeStateLock(self.output_dir)
+        self._runtime_run_id: int | None = None
+        self._runtime_bridge = LinkedInRuntimeStateBridge(
+            store=self._runtime_state,
+            output_dir=self.output_dir,
+            brief_id=self._brief_id,
+            brief_name=self.brief_obj.id,
+        )
 
         # Kit strings (populated by run_full)
         self._kit_strings: list[KitString] = []
@@ -219,6 +230,15 @@ class Pipeline:
         Called after per-session dedup loading in all three init paths.
         Additive — merges history URLs into _seen_urls alongside current-session files.
         """
+        if self._runtime_bridge and self._runtime_bridge.has_runtime_state():
+            blocked_urls, prior_outcomes, saved_urls = self._runtime_bridge.load_history()
+            self._seen_urls = set(blocked_urls)
+            self._prior_outcomes = dict(prior_outcomes)
+            self._saved_urls.update(saved_urls)
+            saves = sum(1 for outcome in self._prior_outcomes.values() if outcome in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE", "SIGNAL_SAVE"))
+            rejects = sum(1 for outcome in self._prior_outcomes.values() if outcome == "REJECT")
+            print(f"  [dedup] Runtime history: {len(self._prior_outcomes)} candidates ({saves} saves, {rejects} rejects)")
+            return
         if not self.history_path.exists():
             return
         for entry in read_jsonl(self.history_path):
@@ -238,6 +258,11 @@ class Pipeline:
 
     def _load_search_memory(self) -> None:
         """Load brief-scoped search family memory if present."""
+        if self._runtime_bridge and self._runtime_bridge.has_runtime_state():
+            self._search_memory = self._runtime_bridge.load_search_memory()
+            families = len(self._search_memory.get("families", {}))
+            print(f"  [memory] Loaded runtime search memory ({families} families)")
+            return
         if not self.search_memory_path.exists():
             self._search_memory = {}
             return
@@ -247,10 +272,18 @@ class Pipeline:
 
     def _save_search_memory(self) -> None:
         """Persist brief-scoped search family memory."""
+        if self._runtime_bridge and self._runtime_run_id:
+            self._runtime_bridge.rebuild_artifacts(self._runtime_run_id)
+            self._search_memory = self._runtime_bridge.load_search_memory()
+            return
         write_json(self.search_memory_path, self._search_memory)
 
     def _update_search_memory_from_block(self, block_strings: list[SearchString]) -> None:
         """Update family memory with the completed block's observed performance."""
+        if self._runtime_bridge and self._runtime_run_id and self._progress:
+            self._runtime_bridge.sync_progress(self._runtime_run_id, self._progress)
+            self._search_memory = self._runtime_bridge.load_search_memory()
+            return
         self._search_memory = update_search_memory(
             self._search_memory,
             self._brief_id,
@@ -297,7 +330,108 @@ class Pipeline:
 
         progress.candidates_saved = self.stats.get("saved", progress.candidates_saved)
         progress.candidates_rejected = self.stats.get("rejected", progress.candidates_rejected)
-        progress.save(str(self.progress_path))
+        if self._runtime_bridge and self._runtime_run_id:
+            self._runtime_bridge.sync_progress(self._runtime_run_id, progress)
+            self._search_memory = self._runtime_bridge.load_search_memory()
+        else:
+            progress.save(str(self.progress_path))
+
+    def _ensure_runtime_state(self) -> None:
+        output_dir = Path(self.output_dir)
+        if not hasattr(self, "runtime_db_path") or self.runtime_db_path is None:
+            self.runtime_db_path = output_dir / "runtime_state.sqlite3"
+        if not hasattr(self, "_runtime_state") or self._runtime_state is None:
+            self._runtime_state = RuntimeStateStore(self.runtime_db_path)
+        if not hasattr(self, "_runtime_lock") or self._runtime_lock is None:
+            self._runtime_lock = RuntimeStateLock(output_dir)
+        if not hasattr(self, "_runtime_bridge") or self._runtime_bridge is None:
+            self._runtime_bridge = LinkedInRuntimeStateBridge(
+                store=self._runtime_state,
+                output_dir=output_dir,
+                brief_id=self._brief_id,
+                brief_name=self.brief_obj.id,
+            )
+        if not hasattr(self, "_runtime_run_id"):
+            self._runtime_run_id = None
+
+    def _record_runtime_snippet(self, search_string: SearchString, snippet: CandidateSnippet) -> None:
+        if self._runtime_bridge and self._runtime_run_id:
+            self._runtime_bridge.record_snippet_extracted(
+                run_id=self._runtime_run_id,
+                search_string=search_string,
+                snippet=snippet,
+            )
+
+    def _start_runtime_stage_attempt(
+        self,
+        *,
+        search_string: SearchString,
+        snippet: CandidateSnippet,
+        stage: str,
+        payload: dict | None = None,
+    ) -> int | None:
+        if not self._runtime_bridge or not self._runtime_run_id:
+            return None
+        return self._runtime_bridge.start_stage_attempt(
+            run_id=self._runtime_run_id,
+            search_string=search_string,
+            snippet=snippet,
+            stage=stage,
+            payload=payload,
+        )
+
+    def _finish_runtime_stage_success(
+        self,
+        *,
+        attempt_id: int | None,
+        stage: str,
+        snippet: CandidateSnippet,
+        decision: OpusDecision,
+        profile_summary: CandidateProfileSummary | None = None,
+    ) -> None:
+        if self._runtime_bridge and self._runtime_run_id:
+            self._runtime_bridge.finish_stage_success(
+                run_id=self._runtime_run_id,
+                attempt_id=attempt_id,
+                stage=stage,
+                snippet=snippet,
+                decision=decision,
+                profile_summary=profile_summary,
+            )
+
+    def _finish_runtime_stage_failure(
+        self,
+        *,
+        attempt_id: int | None,
+        snippet: CandidateSnippet,
+        error: Exception,
+        payload: dict | None = None,
+    ) -> None:
+        if self._runtime_bridge and self._runtime_run_id:
+            self._runtime_bridge.finish_stage_failure(
+                run_id=self._runtime_run_id,
+                attempt_id=attempt_id,
+                snippet=snippet,
+                error=error,
+                payload=payload,
+            )
+
+    def _finish_runtime_failure_decision(
+        self,
+        *,
+        attempt_id: int | None,
+        snippet: CandidateSnippet,
+        decision: OpusDecision,
+        payload: dict | None = None,
+    ) -> None:
+        if self._runtime_bridge and self._runtime_run_id:
+            self._runtime_bridge.finish_failure_decision(
+                run_id=self._runtime_run_id,
+                attempt_id=attempt_id,
+                snippet=snippet,
+                decision=decision,
+                payload=payload,
+            )
 
     def _set_pending_block_adaptation(
         self,
@@ -333,6 +467,12 @@ class Pipeline:
         print(f"Brief: {self.brief_obj.id}")
         print("=" * 60)
 
+        self._ensure_runtime_state()
+        lock_acquired = False
+        run_status = "completed"
+        self._runtime_lock.acquire()
+        lock_acquired = True
+
         await self.browser.connect()
         log_event(self.log_path, "pipeline_start", mode="full")
 
@@ -350,7 +490,7 @@ class Pipeline:
         def _sigint_handler(sig, frame):
             print("\n\n  [!] Interrupted. Saving progress...")
             if self._progress:
-                self._progress.save(str(self.progress_path))
+                self._checkpoint_progress(self._progress)
             raise KeyboardInterrupt
 
         if not hasattr(self, '_session_expired'):
@@ -372,20 +512,26 @@ class Pipeline:
                 await self._process_string(search_string, progress)
 
                 search_string.status = "done"
-                progress.save(str(self.progress_path))
+                self._checkpoint_progress(progress, search_string=search_string)
                 log_event(self.log_path, "string_complete", string_id=search_string.id, **self.stats)
 
         except KeyboardInterrupt:
             print("\n\n  [!] Interrupted. Progress saved.")
+            run_status = "interrupted"
         except Exception as e:
             print(f"\n  [ERROR] {e}")
             log_event(self.log_path, "pipeline_error", error=str(e))
+            run_status = "error"
             raise
         finally:
-            progress.save(str(self.progress_path))
+            self._checkpoint_progress(progress)
             await self.browser.disconnect()
             self._print_summary()
             log_event(self.log_path, "pipeline_end", **self.stats)
+            if self._runtime_run_id:
+                self._runtime_state.finish_run(self._runtime_run_id, run_status)
+            if lock_acquired:
+                self._runtime_lock.release()
 
     async def run_single_page(self) -> None:
         """Test mode: process only the current page of results visible in the browser."""
@@ -489,6 +635,12 @@ class Pipeline:
         print(f"Kit URL: {self.brief_obj.kit_url}")
         print("=" * 60)
 
+        self._ensure_runtime_state()
+        lock_acquired = False
+        run_status = "completed"
+        self._runtime_lock.acquire()
+        lock_acquired = True
+
         await self.browser.connect()
         log_event(self.log_path, "pipeline_start", mode="full_run_resume" if resume else "full_run")
 
@@ -521,17 +673,20 @@ class Pipeline:
         def _sigint_handler(sig, frame):
             print("\n\n  [!] Interrupted. Saving progress...")
             if self._progress:
-                self._progress.save(str(self.progress_path))
+                self._checkpoint_progress(self._progress)
             raise KeyboardInterrupt
 
         if not hasattr(self, '_session_expired'):
             signal.signal(signal.SIGINT, _sigint_handler)
 
         try:
-            if resume and self.progress_path.exists():
+            if resume and (
+                (self._runtime_bridge and self._runtime_bridge.has_runtime_state())
+                or self.progress_path.exists()
+            ):
                 # --- Resume: skip kit extraction, strategy, queue building ---
-                print("\n--- Resuming from progress.json ---")
-                progress = Progress.from_file(str(self.progress_path))
+                print("\n--- Resuming from runtime_state ---")
+                self._runtime_run_id, progress = self._runtime_bridge.start_or_resume_run(resume=True)
                 self._progress = progress
 
                 # Preserve persisted queue order. Adaptive strings may be inserted
@@ -643,7 +798,10 @@ class Pipeline:
                     brief_name=self.brief_obj.id,
                     strings=search_strings,
                 )
-                progress.save(str(self.progress_path))
+                self._runtime_run_id, progress = self._runtime_bridge.start_or_resume_run(
+                    resume=False,
+                    initial_progress=progress,
+                )
                 self._progress = progress
 
             # --- Execution ---
@@ -684,7 +842,7 @@ class Pipeline:
                             )
                     else:
                         self._clear_pending_block_adaptation(progress)
-                        progress.save(str(self.progress_path))
+                        self._checkpoint_progress(progress)
 
             string_index = 0
             while string_index < len(progress.strings):
@@ -817,13 +975,15 @@ class Pipeline:
 
         except KeyboardInterrupt:
             print("\n\n  [!] Interrupted. Progress saved.")
+            run_status = "interrupted"
         except Exception as e:
             print(f"\n  [ERROR] {e}")
             log_event(self.log_path, "pipeline_error", error=str(e))
+            run_status = "error"
             raise
         finally:
             if self._progress:
-                self._progress.save(str(self.progress_path))
+                self._checkpoint_progress(self._progress)
             if self._bias_monitor:
                 self._bias_monitor.save_checkpoint(str(self.bias_checkpoint_path))
             await self.browser.disconnect()
@@ -831,6 +991,10 @@ class Pipeline:
             if self._progress:
                 self._generate_run_report(self._progress)
             log_event(self.log_path, "pipeline_end", **self.stats)
+            if self._runtime_run_id:
+                self._runtime_state.finish_run(self._runtime_run_id, run_status)
+            if lock_acquired:
+                self._runtime_lock.release()
 
     # ------------------------------------------------------------------
     # Browser crash recovery
@@ -942,7 +1106,7 @@ class Pipeline:
             print(f"  No results detected (result_count={result_count}). Skipping string.")
             search_string.status = "skipped"
             search_string.notes = (search_string.notes or "") + " Skipped: no results on entry."
-            progress.save(str(self.progress_path))
+            self._checkpoint_progress(progress, search_string=search_string)
             return
 
         # Determine starting phase
@@ -973,7 +1137,7 @@ class Pipeline:
                 if not has_next:
                     print("  No more pages after resume point.")
                     search_string.status = "done"
-                    progress.save(str(self.progress_path))
+                    self._checkpoint_progress(progress, search_string=search_string)
                     return
             page_num = target_page
 
@@ -1266,6 +1430,18 @@ class Pipeline:
                 f"{snippet.current_title or snippet.headline or 'preview only'}"
             )
 
+            if not snippet.profile_url:
+                print(f"    [skip] {snippet.name} — missing durable profile URL")
+                if page_report:
+                    page_report.add_skip_preview(snippet.name, "missing_profile_url")
+                if self._runtime_bridge and self._runtime_run_id:
+                    self._runtime_bridge.record_missing_identity(
+                        run_id=self._runtime_run_id,
+                        search_string=search_string,
+                        snippet=snippet,
+                    )
+                continue
+
             url = snippet.profile_url
             if url and (url in self._seen_urls or url in self._in_flight_urls):
                 if url in self._seen_urls:
@@ -1304,10 +1480,11 @@ class Pipeline:
             if snippet.profile_url:
                 self._in_flight_urls.add(snippet.profile_url)
             append_jsonl(self.snippets_path, snippet.to_dict())
+            self._record_runtime_snippet(search_string, snippet)
             self.stats["snippets_extracted"] += 1
             string_stats["candidates"] += 1
 
-            decision = await self._evaluate_snippet(snippet, page_report)
+            decision = await self._evaluate_snippet(snippet, page_report, search_string)
 
             if decision and hasattr(decision, "rationale") and "[API error" in (decision.rationale or ""):
                 consecutive_api_errors += 1
@@ -1400,12 +1577,12 @@ class Pipeline:
                     break
 
             if progress and hasattr(self, "_session_expired") and self._session_expired.is_set():
-                progress.save(str(self.progress_path))
+                self._checkpoint_progress(progress)
                 raise SessionExpired("session_duration_cap")
 
             if progress and hasattr(self, "_pause_requested") and self._pause_requested.is_set():
                 self._pause_requested.clear()
-                progress.save(str(self.progress_path))
+                self._checkpoint_progress(progress)
                 try:
                     await asyncio.wait_for(self._resume_event.wait(), timeout=300)
                 except asyncio.TimeoutError:
@@ -1457,6 +1634,18 @@ class Pipeline:
                 f"    [card {card_index + 1}/{slot_count}] {snippet.name} — "
                 f"{snippet.current_title or snippet.headline or 'preview only'}"
             )
+
+            if not snippet.profile_url:
+                print(f"    [skip] {snippet.name} — missing durable profile URL")
+                if page_report:
+                    page_report.add_skip_preview(snippet.name, "missing_profile_url")
+                if self._runtime_bridge and self._runtime_run_id:
+                    self._runtime_bridge.record_missing_identity(
+                        run_id=self._runtime_run_id,
+                        search_string=search_string,
+                        snippet=snippet,
+                    )
+                continue
 
             # Dedup check
             url = snippet.profile_url
@@ -1513,6 +1702,17 @@ class Pipeline:
                             "source_string_id": snippet.source_string_id,
                             "timestamp": datetime.now(timezone.utc).isoformat(),
                         })
+                        facial_attempt_id = self._start_runtime_stage_attempt(
+                            search_string=search_string,
+                            snippet=snippet,
+                            stage="facial",
+                        )
+                        self._finish_runtime_stage_success(
+                            attempt_id=facial_attempt_id,
+                            stage="facial",
+                            snippet=snippet,
+                            decision=bl_decision,
+                        )
                         self._prior_outcomes[snippet.profile_url] = "FACIAL_NO"
                         self._mark_terminal(snippet.profile_url)
                         all_candidates.append({
@@ -1531,6 +1731,7 @@ class Pipeline:
             if snippet.profile_url:
                 self._in_flight_urls.add(snippet.profile_url)
             append_jsonl(self.snippets_path, snippet.to_dict())
+            self._record_runtime_snippet(search_string, snippet)
             self.stats["snippets_extracted"] += 1
             string_stats["candidates"] += 1
             eligible_snippets.append(snippet)
@@ -1552,7 +1753,7 @@ class Pipeline:
                     break
 
             if progress and hasattr(self, "_session_expired") and self._session_expired.is_set():
-                progress.save(str(self.progress_path))
+                self._checkpoint_progress(progress)
                 raise SessionExpired("session_duration_cap")
 
         if not eligible_snippets:
@@ -1570,6 +1771,11 @@ class Pipeline:
         page_facial_no = 0
 
         for snippet, facial in zip(eligible_snippets, decisions):
+            facial_attempt_id = self._start_runtime_stage_attempt(
+                search_string=search_string,
+                snippet=snippet,
+                stage="facial",
+            )
             append_jsonl(self.facial_path, facial.to_dict())
 
             # Handle parse/judgment failures
@@ -1583,7 +1789,12 @@ class Pipeline:
                         string_id=str(snippet.source_string_id),
                         stage="facial", decision=facial.decision,
                         confidence=facial.confidence, capability_area=None,
-                    ))
+                ))
+                self._finish_runtime_failure_decision(
+                    attempt_id=facial_attempt_id,
+                    snippet=snippet,
+                    decision=facial,
+                )
                 self._in_flight_urls.discard(snippet.profile_url)
                 all_candidates.append({
                     "name": snippet.name, "title": snippet.current_title,
@@ -1603,6 +1814,12 @@ class Pipeline:
             })
             self._prior_outcomes[snippet.profile_url] = facial.decision
             self._mark_terminal(snippet.profile_url)
+            self._finish_runtime_stage_success(
+                attempt_id=facial_attempt_id,
+                stage="facial",
+                snippet=snippet,
+                decision=facial,
+            )
 
             # Bias monitoring
             if self._bias_monitor:
@@ -1679,7 +1896,7 @@ class Pipeline:
 
         for snippet in facial_yes_snippets:
             if progress and hasattr(self, "_session_expired") and self._session_expired.is_set():
-                progress.save(str(self.progress_path))
+                self._checkpoint_progress(progress)
                 raise SessionExpired("session_duration_cap")
 
             if consecutive_api_errors >= 5:
@@ -1688,7 +1905,7 @@ class Pipeline:
                 await asyncio.sleep(60)
                 consecutive_api_errors = 0
 
-            decision = await self._full_evaluate(snippet, page_report)
+            decision = await self._full_evaluate(snippet, page_report, search_string)
 
             if decision and hasattr(decision, "rationale") and "[API error" in (decision.rationale or ""):
                 consecutive_api_errors += 1
@@ -1727,7 +1944,7 @@ class Pipeline:
 
             if progress and hasattr(self, "_pause_requested") and self._pause_requested.is_set():
                 self._pause_requested.clear()
-                progress.save(str(self.progress_path))
+                self._checkpoint_progress(progress)
                 try:
                     await asyncio.wait_for(self._resume_event.wait(), timeout=300)
                 except asyncio.TimeoutError:
@@ -2359,9 +2576,18 @@ Provide a narrowed Boolean."""
             return None
 
     async def _evaluate_snippet(
-        self, snippet: CandidateSnippet, page_report: _PageReport | None = None,
+        self,
+        snippet: CandidateSnippet,
+        page_report: _PageReport | None = None,
+        search_string: SearchString | None = None,
     ) -> Optional[OpusDecision]:
         """Run snippet through facial judgment -> full profile -> final judgment."""
+        runtime_search_string = search_string or SearchString(
+            id=snippet.source_string_id,
+            name=snippet.source_string_name,
+            boolean="",
+        )
+        facial_attempt_id: int | None = None
 
         # --- Employer blacklist check (no LLM call) ---
         if self.brief_obj.employer_blacklist and snippet.current_company:
@@ -2387,12 +2613,28 @@ Provide a narrowed Boolean."""
                         "source_string_id": snippet.source_string_id,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     })
+                    facial_attempt_id = self._start_runtime_stage_attempt(
+                        search_string=runtime_search_string,
+                        snippet=snippet,
+                        stage="facial",
+                    )
+                    self._finish_runtime_stage_success(
+                        attempt_id=facial_attempt_id,
+                        stage="facial",
+                        snippet=snippet,
+                        decision=blacklist_decision,
+                    )
                     self._prior_outcomes[snippet.profile_url] = "FACIAL_NO"
                     self._mark_terminal(snippet.profile_url)
                     return blacklist_decision
 
         # --- Facial judgment (Opus) ---
         print(f"    Facial judgment (Opus)...")
+        facial_attempt_id = self._start_runtime_stage_attempt(
+            search_string=runtime_search_string,
+            snippet=snippet,
+            stage="facial",
+        )
         try:
             facial = facial_judge(snippet, self.brief_obj, prompt_prefix=self._tightening_prefix)
         except Exception as e:
@@ -2423,6 +2665,11 @@ Provide a narrowed Boolean."""
                     capability_area=None,
                 ))
             # Non-terminal: allow retry later in this session or on resume
+            self._finish_runtime_failure_decision(
+                attempt_id=facial_attempt_id,
+                snippet=snippet,
+                decision=facial,
+            )
             self._in_flight_urls.discard(snippet.profile_url)
             return facial
 
@@ -2437,6 +2684,12 @@ Provide a narrowed Boolean."""
         })
         self._prior_outcomes[snippet.profile_url] = facial.decision
         self._mark_terminal(snippet.profile_url)
+        self._finish_runtime_stage_success(
+            attempt_id=facial_attempt_id,
+            stage="facial",
+            snippet=snippet,
+            decision=facial,
+        )
 
         # Record facial decision for bias monitoring
         if self._bias_monitor:
@@ -2480,12 +2733,25 @@ Provide a narrowed Boolean."""
         print(f"    [FACIAL_YES] {facial.rationale}")
         self.stats["facial_yes"] += 1
 
-        return await self._full_evaluate(snippet, page_report)
+        return await self._full_evaluate(snippet, page_report, runtime_search_string)
 
     async def _full_evaluate(
-        self, snippet: CandidateSnippet, page_report: "_PageReport | None" = None,
+        self,
+        snippet: CandidateSnippet,
+        page_report: "_PageReport | None" = None,
+        search_string: SearchString | None = None,
     ) -> Optional[OpusDecision]:
         """Open profile, extract, and run full evaluation. Called after facial triage passes."""
+        runtime_search_string = search_string or SearchString(
+            id=snippet.source_string_id,
+            name=snippet.source_string_name,
+            boolean="",
+        )
+        full_attempt_id = self._start_runtime_stage_attempt(
+            search_string=runtime_search_string,
+            snippet=snippet,
+            stage="full",
+        )
 
         # --- Full profile extraction (cheap model) ---
         # Emergency recovery check before browser interaction
@@ -2531,14 +2797,22 @@ Provide a narrowed Boolean."""
                 raise
             print(f"    [ERROR] Profile extraction failed: {e}")
             log_event(self.log_path, "profile_error", name=snippet.name, error=str(e))
+            self._finish_runtime_stage_failure(
+                attempt_id=full_attempt_id,
+                snippet=snippet,
+                error=e,
+                payload={"profile_extraction_failed": True},
+            )
             try:
                 await self.browser.go_back_to_results()
             except Exception:
                 pass
-            return OpusDecision(
-                stage="facial", decision="FACIAL_YES", path="none", confidence=1.0,
-                rationale=f"[PROFILE_EXTRACTION_FAILED: {e}]",
-                candidate_name=snippet.name, profile_url=snippet.profile_url,
+            return judgment_failure_decision(
+                stage="full",
+                candidate_name=snippet.name,
+                profile_url=snippet.profile_url,
+                error=e,
+                source="profile_extraction",
             )
 
         # --- Final judgment (Opus) ---
@@ -2573,6 +2847,12 @@ Provide a narrowed Boolean."""
                     capability_area=None,
                 ))
             # Non-terminal: allow same-session retry if candidate appears again
+            self._finish_runtime_failure_decision(
+                attempt_id=full_attempt_id,
+                snippet=snippet,
+                decision=final,
+                payload={"profile_summary": summary.to_dict()},
+            )
             self._in_flight_urls.discard(snippet.profile_url)
             try:
                 await self.browser.go_back_to_results()
@@ -2593,6 +2873,13 @@ Provide a narrowed Boolean."""
         })
         self._prior_outcomes[snippet.profile_url] = final.decision
         self._mark_terminal(snippet.profile_url)
+        self._finish_runtime_stage_success(
+            attempt_id=full_attempt_id,
+            stage="full",
+            snippet=snippet,
+            decision=final,
+            profile_summary=summary,
+        )
 
         # Record full eval decision and check bias alerts
         if self._bias_monitor:
@@ -2904,7 +3191,7 @@ Provide a narrowed Boolean."""
 
         if not remaining:
             self._clear_pending_block_adaptation(progress)
-            progress.save(str(self.progress_path))
+            self._checkpoint_progress(progress)
             print("  No remaining strings — skipping adaptation.")
             return
 
@@ -3023,7 +3310,7 @@ Provide a narrowed Boolean."""
                               recommended=adaptation.pivot_to_architecture)
 
             self._clear_pending_block_adaptation(progress)
-            progress.save(str(self.progress_path))
+            self._checkpoint_progress(progress)
             log_event(self.log_path, "block_adaptation", block=block_name, report=report.to_dict())
 
         except Exception as e:
@@ -3139,6 +3426,20 @@ Provide a narrowed Boolean."""
 
     def _restart_string(self, progress: Progress, string_id: int) -> None:
         """Reset a specific search string to page 1 and clean up its output files."""
+        if self._runtime_bridge and self._runtime_run_id:
+            self._runtime_bridge.restart_string(
+                run_id=self._runtime_run_id,
+                progress=progress,
+                string_id=string_id,
+            )
+            self._seen_urls = set()
+            self._in_flight_urls = set()
+            self._prior_outcomes = {}
+            self._load_candidate_history()
+            self._load_search_memory()
+            print(f"  String #{string_id} reset to page 1. Ready for re-evaluation.")
+            return
+
         target = None
         for s in progress.strings:
             if s.id == string_id:
@@ -3213,7 +3514,7 @@ Provide a narrowed Boolean."""
         if progress.current_string_id == string_id:
             progress.current_string_id = None
             progress.current_page = 0
-        progress.save(str(self.progress_path))
+        self._checkpoint_progress(progress)
         print(f"  String #{string_id} reset to page 1. Ready for re-evaluation.")
 
     def _restart_strings(self, progress: Progress, string_ids: list[int]) -> None:
@@ -3241,6 +3542,10 @@ Provide a narrowed Boolean."""
     # ------------------------------------------------------------------
 
     def _load_or_create_progress(self) -> Progress:
+        self._ensure_runtime_state()
+        if self._runtime_bridge and self._runtime_bridge.has_runtime_state():
+            self._runtime_run_id, progress = self._runtime_bridge.start_or_resume_run(resume=True)
+            return progress
         if self.progress_path.exists():
             existing = Progress.from_file(str(self.progress_path))
             if existing.brief_name == self.brief_obj.id:
@@ -3261,7 +3566,10 @@ Provide a narrowed Boolean."""
             brief_name=self.brief_obj.id,
             strings=strings,
         )
-        progress.save(str(self.progress_path))
+        self._runtime_run_id, progress = self._runtime_bridge.start_or_resume_run(
+            resume=False,
+            initial_progress=progress,
+        )
         return progress
 
     # ------------------------------------------------------------------
