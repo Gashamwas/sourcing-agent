@@ -5,11 +5,39 @@ cd "$(dirname "$0")"
 
 PORT=9222
 PROFILE="$HOME/.chrome-cdp"
+FORCE_RELAUNCH=0
 
-# Check if already running
-if curl -s "http://127.0.0.1:$PORT/json/version" >/dev/null 2>&1; then
+if [ "$1" = "--force" ]; then
+    FORCE_RELAUNCH=1
+fi
+
+cdp_healthy() {
+    local version_ok=1
+    local list_ok=1
+
+    curl -sf "http://127.0.0.1:$PORT/json/version" >/dev/null 2>&1 || version_ok=0
+    curl -sf "http://127.0.0.1:$PORT/json/list" | python3 - <<'PY' >/dev/null 2>&1 || list_ok=0
+import json
+import sys
+
+targets = json.load(sys.stdin)
+if not isinstance(targets, list):
+    raise SystemExit(1)
+PY
+
+    [ "$version_ok" -eq 1 ] && [ "$list_ok" -eq 1 ]
+}
+
+# Check if already running and healthy
+if [ "$FORCE_RELAUNCH" -eq 0 ] && cdp_healthy; then
     echo "Chrome already running on CDP port $PORT."
     exit 0
+fi
+
+if [ "$FORCE_RELAUNCH" -eq 1 ]; then
+    echo "Force relaunch requested — restarting Chrome on CDP port $PORT."
+elif curl -sf "http://127.0.0.1:$PORT/json/version" >/dev/null 2>&1; then
+    echo "Chrome CDP endpoint is up but unhealthy — restarting Chrome."
 fi
 
 pkill -9 -f "Google Chrome" 2>/dev/null

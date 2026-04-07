@@ -341,6 +341,9 @@ class Progress:
     candidates_rejected: int = 0
     current_string_id: Optional[int] = None
     current_page: int = 0
+    pending_block_name: str = ""
+    pending_block_string_ids: list[int] = field(default_factory=list)
+    pending_block_ready: bool = False
     pivot_count: int = 0  # Architecture pivots used this run
 
     def to_dict(self) -> dict:
@@ -359,6 +362,9 @@ class Progress:
             candidates_rejected=d.get("candidates_rejected", 0),
             current_string_id=d.get("current_string_id"),
             current_page=d.get("current_page", 0),
+            pending_block_name=d.get("pending_block_name", ""),
+            pending_block_string_ids=d.get("pending_block_string_ids", []),
+            pending_block_ready=d.get("pending_block_ready", False),
             pivot_count=d.get("pivot_count", 0),
         )
 

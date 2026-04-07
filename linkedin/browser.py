@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import random
 import re
+import subprocess
+import sys
 from typing import Optional, TYPE_CHECKING
 from shared import config
 from shared.human_timing import human_delay_correlated
@@ -21,6 +23,17 @@ if TYPE_CHECKING:
 
 MAX_RETRIES = 3
 RETRY_DELAY_SECONDS = 5
+_TARGET_CRASH_PATTERNS = (
+    "target crashed",
+    "page crashed",
+    "session closed",
+    "target closed",
+)
+
+
+def _is_target_crash_error(error: BaseException | str) -> bool:
+    text = str(error).lower()
+    return any(pattern in text for pattern in _TARGET_CRASH_PATTERNS)
 
 
 async def _retry(coro_fn, retries=MAX_RETRIES, delay=RETRY_DELAY_SECONDS):
@@ -54,32 +67,24 @@ class LinkedInBrowser:
         from rebrowser_playwright.async_api import async_playwright
         self._playwright = await async_playwright().start()
         self._browser = await self._playwright.chromium.connect_over_cdp(config.CDP_URL)
-        contexts = self._browser.contexts
-        if not contexts:
+        if not self._browser.contexts:
             raise RuntimeError("No browser contexts found. Is the browser open?")
 
-        # Search ALL contexts and ALL tabs for a LinkedIn Recruiter page
-        for ctx in contexts:
-            for page in ctx.pages:
-                if "linkedin.com/talent" in page.url:
-                    self._context = ctx
-                    self._page = page
-                    # Auto-detect project ID from URL
-                    m = re.search(r'/talent/hire/(\d+)', page.url)
-                    if m:
-                        self._project_id = m.group(1)
-                    await self._input_backend.initialize(self._page)
-                    print(
-                        f"  Connected to browser ({self._input_backend.status_label}). "
-                        f"Active page: {self._page.url}"
-                    )
-                    return
+        if await self._bind_existing_recruiter_page():
+            print(
+                f"  Connected to browser ({self._input_backend.status_label}). "
+                f"Active page: {self._page.url}"
+            )
+            return
 
         # No Recruiter tab found
         all_urls = []
-        for ctx in contexts:
+        for ctx in self._browser.contexts:
             for page in ctx.pages:
-                all_urls.append(page.url)
+                try:
+                    all_urls.append(page.url)
+                except Exception:
+                    all_urls.append("(unavailable tab url)")
         urls_text = "\n    ".join(all_urls) if all_urls else "(no tabs open)"
         raise RuntimeError(
             f"No LinkedIn Recruiter tab found.\n"
@@ -91,6 +96,28 @@ class LinkedInBrowser:
         await self._input_backend.shutdown()
         if self._playwright:
             await self._playwright.stop()
+
+    async def _bind_existing_recruiter_page(self) -> bool:
+        """Bind to the first healthy LinkedIn Recruiter tab in the attached browser."""
+        if not self._browser:
+            return False
+
+        for ctx in self._browser.contexts:
+            for page in ctx.pages:
+                try:
+                    url = page.url
+                except Exception:
+                    continue
+                if "linkedin.com/talent" not in url:
+                    continue
+                self._context = ctx
+                self._page = page
+                m = re.search(r"/talent/hire/(\d+)", url)
+                if m:
+                    self._project_id = m.group(1)
+                await self._input_backend.initialize(self._page)
+                return True
+        return False
 
     async def _ghost_click(self, selector: str) -> bool:
         """Click using ghost-cursor (Bézier trajectory + Fitts's Law timing).
@@ -120,6 +147,73 @@ class LinkedInBrowser:
         if not handled:
             await self.page.keyboard.press(key)
 
+    async def _send_os_refresh_shortcut(self) -> bool:
+        """Best-effort macOS Cmd+R fallback when Playwright page methods are unhealthy."""
+        if sys.platform != "darwin":
+            return False
+
+        script = (
+            'tell application "Google Chrome" to activate\n'
+            'tell application "System Events"\n'
+            '  keystroke "r" using command down\n'
+            'end tell'
+        )
+        try:
+            await asyncio.to_thread(
+                subprocess.run,
+                ["osascript", "-e", script],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            await asyncio.sleep(4)
+            return True
+        except Exception as e:
+            print(f"  [recovery] OS-level Cmd+R failed: {e}")
+            return False
+
+    async def refresh_active_tab(self) -> bool:
+        """Try increasingly forceful refresh mechanisms for the active Recruiter tab."""
+        try:
+            await self.page.reload(wait_until="domcontentloaded", timeout=30000)
+            await self.page.wait_for_timeout(4000)
+            return True
+        except Exception as reload_error:
+            print(f"  [recovery] Page reload failed: {reload_error}")
+
+        try:
+            await self._press_key("Meta+R")
+            await self.page.wait_for_timeout(4000)
+            return True
+        except Exception as shortcut_error:
+            print(f"  [recovery] Playwright Meta+R failed: {shortcut_error}")
+
+        return await self._send_os_refresh_shortcut()
+
+    async def recover_from_target_crash(self, recovery_url: str | None = None) -> bool:
+        """Recover from a Chromium target crash by refreshing and rebinding the Recruiter page."""
+        print("  [recovery] Detected browser target crash — attempting tab refresh...")
+        if not await self.refresh_active_tab():
+            return False
+
+        for _ in range(3):
+            try:
+                rebound = await self._bind_existing_recruiter_page()
+            except Exception:
+                rebound = False
+
+            if rebound:
+                if recovery_url:
+                    try:
+                        current_url = self.page.url
+                    except Exception:
+                        current_url = ""
+                    if "linkedin.com/talent" not in current_url or "/manage/" in current_url:
+                        await self.navigate_to_search(recovery_url)
+                return True
+            await asyncio.sleep(2)
+        return False
+
     @property
     def page(self) -> Page:
         if not self._page:
@@ -132,6 +226,13 @@ class LinkedInBrowser:
 
     async def check_and_recover(self) -> bool:
         """Detect error/stuck states and attempt recovery. Returns True if recovery happened."""
+        try:
+            _ = self.page.url
+        except Exception as e:
+            if _is_target_crash_error(e):
+                return await self.recover_from_target_crash()
+            return False
+
         try:
             # Check for LinkedIn's "Something went wrong" error page
             error_heading = self.page.locator('text="Something went wrong"').first
@@ -165,7 +266,9 @@ class LinkedInBrowser:
                 await self.page.wait_for_timeout(5000)
                 print("  [recovery] Navigated to LI Recruiter home. Will need to re-enter project.")
                 return True
-        except Exception:
+        except Exception as e:
+            if _is_target_crash_error(e):
+                return await self.recover_from_target_crash()
             pass  # No error page detected — normal state
 
         # Check for blank/empty page (no LinkedIn DOM at all)

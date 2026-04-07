@@ -18,6 +18,7 @@ from shared.llm_clients import opus_llm
 from shared.brief_loader import Brief
 from shared.search_memory import (
     format_search_memory_summary,
+    get_search_memory_families,
     infer_domain_lane,
     normalize_family_key,
     normalize_novelty_bucket,
@@ -92,6 +93,16 @@ _EDGE_CASE_PATTERNS = (
     "research workflow",
     "research copilot",
     "investment memo",
+    "investment research",
+    "advisor copilot",
+    "wealth platform",
+    "portfolio analytics",
+    "portfolio construction",
+    "buy side",
+    "buy-side",
+    "sell side",
+    "sell-side",
+    "hedge fund workflow",
     "client reporting",
     "trade surveillance",
     "market surveillance",
@@ -100,6 +111,12 @@ _EDGE_CASE_PATTERNS = (
     "post trade",
     "post-trade",
     "onboarding automation",
+    "regulatory reporting",
+    "regulatory filing",
+    "filing automation",
+    "transaction monitoring",
+    "adverse media",
+    "case management",
     "claims intake",
     "claims workflow",
     "underwriting workbench",
@@ -108,6 +125,15 @@ _EDGE_CASE_PATTERNS = (
     "model risk",
     "model governance",
     "regulatory response",
+    "payment orchestration",
+    "transaction banking",
+    "real-time payments",
+    "fednow",
+    "swift",
+    "cash management",
+    "treasury management",
+    "issuer processing",
+    "merchant risk",
     "market data workflow",
     "custody workflow",
     "portfolio operations",
@@ -118,8 +144,18 @@ _EDGE_CASE_PATTERNS = (
     "document processing",
     "document understanding",
     "document intelligence",
+    "document extraction",
+    "isda",
+    "10-k",
+    "prospectus",
+    "term sheet",
+    "covenant review",
     "contract analysis",
     "compliance workflow",
+    "founder",
+    "co-founder",
+    "hands-on cto",
+    "startup cto",
     "support automation",
     "developer productivity",
     "internal tools",
@@ -155,6 +191,7 @@ _EDGE_CASE_PATTERNS = (
 )
 
 _EDGE_CASE_COMPANY_PATTERNS = (
+    "exl",
     "deloitte",
     "accenture",
     "bcg",
@@ -302,12 +339,13 @@ def _apply_search_memory_to_plan(
     search_memory: dict | None,
 ) -> str:
     """Demote exhausted search families so prior overlap does not lead the run again."""
-    if not search_memory or not search_memory.get("families"):
+    family_records = get_search_memory_families(search_memory)
+    if not family_records:
         return ""
 
     family_status = {
         family.get("family_key", ""): family
-        for family in search_memory.get("families", [])
+        for family in family_records
     }
     annotated: list[tuple[tuple[int, int], dict]] = []
     demoted = 0
@@ -339,12 +377,13 @@ def _apply_search_memory_to_adaptation(
     remaining_strings: list[SearchString],
     search_memory: dict | None,
 ) -> None:
-    if not search_memory or not search_memory.get("families"):
+    family_records = get_search_memory_families(search_memory)
+    if not family_records:
         return
 
     family_status = {
         family.get("family_key", ""): family
-        for family in search_memory.get("families", [])
+        for family in family_records
     }
 
     adaptation.new_strings.sort(

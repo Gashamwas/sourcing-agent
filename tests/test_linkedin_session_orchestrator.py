@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from linkedin.session_orchestrator import (
+    _classify_session_exception,
     _parse_restart_strings_arg,
     _resume_has_pending_work,
 )
@@ -56,6 +57,21 @@ def test_resume_has_pending_work_true_when_any_string_is_in_progress():
         assert _resume_has_pending_work(td) is True
 
 
+def test_resume_has_pending_work_true_when_block_adaptation_is_pending():
+    with tempfile.TemporaryDirectory() as td:
+        progress_path = Path(td) / "progress.json"
+        progress_path.write_text(json.dumps({
+            "strings": [
+                {"id": 1, "status": "done"},
+                {"id": 2, "status": "skipped"},
+            ],
+            "pending_block_name": "Compound Batch 1",
+            "pending_block_string_ids": [1],
+        }))
+
+        assert _resume_has_pending_work(td) is True
+
+
 def test_governor_can_start_session_when_under_caps():
     governor = SessionGovernor()
     with patch("shared.governor.cooldown.get_sessions_today", return_value=0), \
@@ -63,6 +79,11 @@ def test_governor_can_start_session_when_under_caps():
         ok, reason = governor.can_start_session(session_type="linkedin_sourcing")
         assert ok is True
         assert reason == "ok"
+
+
+def test_classify_session_exception_distinguishes_interrupts_from_errors():
+    assert _classify_session_exception(KeyboardInterrupt()) == "interrupted: KeyboardInterrupt"
+    assert _classify_session_exception(NameError("boom")) == "error: NameError"
 
 
 def test_parse_restart_strings_arg_parses_csv():

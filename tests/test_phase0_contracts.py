@@ -46,8 +46,8 @@ def test_v2_brief_contract_fields_exist():
 
 
 def test_legacy_and_v2_briefs_load_under_current_contracts():
-    legacy = load_brief(ROOT / "config" / "brief-brazil-real.json")
-    v2 = load_brief(ROOT / "config" / "brief-head-fde-enterprise-ai-nyc-v5.json")
+    legacy = load_brief(ROOT / "config" / "FDL-Brazil" / "brief-brazil-real.json")
+    v2 = load_brief(ROOT / "config" / "Head-of-FDE" / "brief-head-fde-enterprise-ai-nyc-v5.json")
 
     assert legacy.has_v2_schema is False
     assert v2.has_v2_schema is True
@@ -97,7 +97,7 @@ def test_run_log_event_vocabulary_matches_current_emitters():
         ROOT / "linkedin" / "orchestrator.py",
         ROOT / "github" / "orchestrator.py",
     ]
-    event_pattern = re.compile(r'log_event\([^,\n]+,\s*"([^"]+)"')
+    event_pattern = re.compile(r'log_event\(\s*[^,]+,\s*"([^"]+)"', re.DOTALL)
 
     discovered = set()
     for path in source_paths:

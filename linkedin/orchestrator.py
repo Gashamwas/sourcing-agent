@@ -42,6 +42,11 @@ from shared.search_memory import (
     normalize_novelty_bucket,
     update_search_memory,
 )
+from shared.run_report_schema import (
+    RunDebriefAnalysis,
+    StructuredRunReport,
+    render_run_report_markdown,
+)
 from shared import config
 from shared.governor import GovernorLimitReached, SessionExpired
 
@@ -293,6 +298,29 @@ class Pipeline:
         progress.candidates_saved = self.stats.get("saved", progress.candidates_saved)
         progress.candidates_rejected = self.stats.get("rejected", progress.candidates_rejected)
         progress.save(str(self.progress_path))
+
+    def _set_pending_block_adaptation(
+        self,
+        progress: Progress | None,
+        block_name: str,
+        block_strings: list[SearchString],
+        *,
+        ready: bool,
+    ) -> None:
+        """Persist the current block context across resume boundaries."""
+        if not progress:
+            return
+        progress.pending_block_name = block_name
+        progress.pending_block_string_ids = [s.id for s in block_strings]
+        progress.pending_block_ready = ready
+
+    def _clear_pending_block_adaptation(self, progress: Progress | None) -> None:
+        """Clear any persisted block-adaptation checkpoint."""
+        if not progress:
+            return
+        progress.pending_block_name = ""
+        progress.pending_block_string_ids = []
+        progress.pending_block_ready = False
 
     # ------------------------------------------------------------------
     # Main entry points
@@ -590,7 +618,9 @@ class Pipeline:
                 if self._search_memory:
                     if prior_data is None:
                         prior_data = {}
-                    prior_data["search_memory_summary"] = self._search_memory
+                    prior_data["search_memory_summary"] = build_search_memory_summary(
+                        self._search_memory
+                    )
 
                 self._execution_plan = form_strategy(self.brief_obj, self._kit_strings, prior_data)
                 write_json(self.output_dir / "execution_plan.json", self._execution_plan.to_dict())
@@ -621,13 +651,40 @@ class Pipeline:
             current_block = ""
             block_strings: list[SearchString] = []
 
-            # On resume, reset any in_progress strings back to queued
-            # (they'll be processed in their original order)
             if resume:
                 for s in progress.strings:
                     if s.status == "in_progress":
                         print(f"\n  Resuming interrupted string #{s.id}: {s.name[:60]}")
-                        s.status = "queued"
+
+                if progress.pending_block_name and progress.pending_block_string_ids:
+                    pending_by_id = {s.id: s for s in progress.strings}
+                    pending_block_strings = [
+                        pending_by_id[sid]
+                        for sid in progress.pending_block_string_ids
+                        if sid in pending_by_id and pending_by_id[sid].status == "done"
+                    ]
+                    if pending_block_strings:
+                        if progress.pending_block_ready:
+                            print(
+                                f"\n  Resuming pending adaptation for "
+                                f"{progress.pending_block_name} ({len(pending_block_strings)} strings)"
+                            )
+                            await self._run_block_adaptation(
+                                progress.pending_block_name,
+                                pending_block_strings,
+                                progress,
+                                adapt_after_block,
+                            )
+                        else:
+                            current_block = progress.pending_block_name
+                            block_strings = pending_block_strings
+                            print(
+                                f"\n  Restored block context for {current_block} "
+                                f"({len(block_strings)} completed strings)"
+                            )
+                    else:
+                        self._clear_pending_block_adaptation(progress)
+                        progress.save(str(self.progress_path))
 
             string_index = 0
             while string_index < len(progress.strings):
@@ -661,40 +718,61 @@ class Pipeline:
 
                 search_string.status = "in_progress"
                 progress.current_string_id = search_string.id
-
-                try:
-                    await self._process_string(search_string, progress)
-                except GovernorLimitReached as e:
-                    print(f"\n  [GOVERNOR] Session limit reached: {e.reason}")
-                    self._checkpoint_progress(
-                        progress,
-                        search_string=search_string,
-                        page_num=progress.current_page or None,
-                    )
-                    raise
-                except Exception as e:
-                    if _is_browser_disconnect_error(e):
-                        print(f"\n  [!] Browser crashed during string #{search_string.id}. Attempting reconnect...")
+                browser_recovery_attempts = 0
+                advance_to_next_string = False
+                while True:
+                    try:
+                        await self._process_string(search_string, progress)
+                        break
+                    except SessionExpired:
                         self._checkpoint_progress(
                             progress,
                             search_string=search_string,
                             page_num=progress.current_page or None,
                         )
-                        reconnected = await self._attempt_reconnect()
-                        if reconnected:
-                            print(f"  [!] Reconnected. Marking string #{search_string.id} as done (partial) and continuing.")
-                            search_string.status = "done"
-                            search_string.notes = (search_string.notes or "") + f" Partial — browser crashed mid-string."
-                            block_strings.append(search_string)
-                            self._checkpoint_progress(progress, search_string=search_string)
-                            log_event(self.log_path, "browser_crash_recovered", string_id=search_string.id)
-                            self._print_session_summary(progress)
-                            string_index += 1
-                            continue
-                        else:
-                            print(f"  [!] Reconnect failed. Saving progress and exiting.")
+                        if self._bias_monitor:
+                            self._bias_monitor.save_checkpoint(str(self.bias_checkpoint_path))
+                        raise
+                    except GovernorLimitReached as e:
+                        print(f"\n  [GOVERNOR] Session limit reached: {e.reason}")
+                        self._checkpoint_progress(
+                            progress,
+                            search_string=search_string,
+                            page_num=progress.current_page or None,
+                        )
+                        raise
+                    except Exception as e:
+                        if _is_browser_disconnect_error(e):
+                            browser_recovery_attempts += 1
+                            print(
+                                f"\n  [!] Browser crashed during string #{search_string.id}. "
+                                f"Recovery attempt {browser_recovery_attempts}/2..."
+                            )
+                            self._checkpoint_progress(
+                                progress,
+                                search_string=search_string,
+                                page_num=progress.current_page or None,
+                            )
+                            recovery_url = self._last_good_url or self._get_project_url()
+                            recovered = await self.browser.recover_from_target_crash(recovery_url=recovery_url)
+                            if not recovered:
+                                recovered = await self._attempt_reconnect(recovery_url=recovery_url)
+                            if recovered and browser_recovery_attempts <= 2:
+                                print(
+                                    f"  [!] Recovery succeeded. Retrying string #{search_string.id} "
+                                    f"from saved progress."
+                                )
+                                log_event(
+                                    self.log_path,
+                                    "browser_crash_recovered",
+                                    string_id=search_string.id,
+                                    attempt=browser_recovery_attempts,
+                                )
+                                continue
+
+                            print(f"  [!] Recovery failed. Saving progress and exiting.")
                             raise
-                    else:
+
                         # Non-crash error: mark string as failed, save, continue to next
                         print(f"\n  [!] String #{search_string.id} failed: {e}")
                         search_string.status = "done"
@@ -702,10 +780,28 @@ class Pipeline:
                         self._checkpoint_progress(progress, search_string=search_string)
                         log_event(self.log_path, "string_error", string_id=search_string.id, error=str(e))
                         string_index += 1
-                        continue
+                        advance_to_next_string = True
+                        break
+
+                if advance_to_next_string:
+                    continue
 
                 search_string.status = "done"
                 block_strings.append(search_string)
+                next_active = next(
+                    (
+                        candidate
+                        for candidate in progress.strings[string_index + 1:]
+                        if candidate.status not in {"done", "skipped"}
+                    ),
+                    None,
+                )
+                self._set_pending_block_adaptation(
+                    progress,
+                    current_block or search_string.block,
+                    block_strings,
+                    ready=next_active is None or next_active.block != (current_block or search_string.block),
+                )
                 self._checkpoint_progress(progress, search_string=search_string)
                 if self._bias_monitor:
                     self._bias_monitor.save_checkpoint(str(self.bias_checkpoint_path))
@@ -740,7 +836,12 @@ class Pipeline:
     # Browser crash recovery
     # ------------------------------------------------------------------
 
-    async def _attempt_reconnect(self, max_attempts: int = 6, wait_seconds: int = 10) -> bool:
+    async def _attempt_reconnect(
+        self,
+        recovery_url: str | None = None,
+        max_attempts: int = 6,
+        wait_seconds: int = 10,
+    ) -> bool:
         """Try to reconnect to Chrome after a crash.
 
         Waits for the user to refresh LinkedIn Recruiter, then reconnects.
@@ -756,6 +857,11 @@ class Pipeline:
                 pass
             try:
                 await self.browser.connect()
+                if recovery_url:
+                    try:
+                        await self.browser.navigate_to_search(recovery_url)
+                    except Exception as nav_error:
+                        print(f"  [reconnect] Reconnected but could not restore search page: {nav_error}")
                 print(f"  [reconnect] Success — reconnected to LinkedIn Recruiter.")
                 return True
             except Exception as e:
@@ -922,20 +1028,40 @@ class Pipeline:
                               if self._execution_plan else ""),
             )
 
-            # Enforce minimum pagination depth — attempt narrow instead of blind continue
+            # Enforce minimum pagination depth.
+            # Forced narrow is allowed only once in scout when page 1 is clearly all-noise.
             if adapt_action in ("abandon", "stop"):
                 min_pages = self._get_min_pages(result_count)
                 if page_num < min_pages:
-                    print(f"  [pagination] Opus wants to {adapt_action}, but page {page_num} < min {min_pages} for {result_count} results. Attempting narrow...")
-                    narrow_result = await self._force_narrow_adapt(
-                        search_string, current_boolean, result_count_text,
-                        all_candidates, string_stats,
-                    )
-                    if narrow_result:
-                        adapt_action = narrow_result  # "narrow:<boolean>"
+                    if self._should_force_narrow_in_scout(
+                        search_string=search_string,
+                        page_num=page_num,
+                        result_count=result_count,
+                        string_stats=string_stats,
+                        glance_result=glance_result,
+                    ):
+                        print(
+                            f"  [pagination] Opus wants to {adapt_action}, but page {page_num} "
+                            f"< min {min_pages} for {result_count} results. Attempting scout narrow..."
+                        )
+                        narrow_result = await self._force_narrow_adapt(
+                            search_string, current_boolean, result_count_text,
+                            all_candidates, string_stats,
+                        )
+                        if narrow_result:
+                            adapt_action = narrow_result
+                        else:
+                            print(
+                                f"  [pagination] Scout narrow unavailable. "
+                                f"Continuing despite {adapt_action}."
+                            )
+                            adapt_action = "continue"
                     else:
-                        # Opus couldn't narrow — honor the original abandon/stop
-                        print(f"  [pagination] Narrow attempt failed. Honoring {adapt_action}.")
+                        print(
+                            f"  [pagination] Opus wants to {adapt_action}, but page {page_num} "
+                            f"< min {min_pages} for {result_count} results. Continuing."
+                        )
+                        adapt_action = "continue"
 
             if adapt_action == "abandon":
                 print(f"  [adapt] Opus says ABANDON this string entirely.")
@@ -1058,7 +1184,7 @@ class Pipeline:
             return None
 
         innertext = (snapshot.get("innertext") or "").strip()
-        if not innertext:
+        if not innertext and not snapshot.get("name"):
             print(f"    [warn] Card {card_index + 1} rendered without readable text")
             return None
 
@@ -1068,6 +1194,8 @@ class Pipeline:
             string_name=search_string.name,
             page=page_num,
             result_rank=card_index + 1,
+            dom_name=(snapshot.get("name") or "").strip(),
+            dom_url=(snapshot.get("url") or "").strip(),
         )
         if snippet is None:
             print(f"    [warn] Could not extract snippet from card {card_index + 1}")
@@ -1618,6 +1746,27 @@ class Pipeline:
             if result_count >= threshold:
                 return min_pages
         return 1
+
+    def _should_force_narrow_in_scout(
+        self,
+        *,
+        search_string: SearchString,
+        page_num: int,
+        result_count: int,
+        string_stats: dict,
+        glance_result: GlanceResult | None,
+    ) -> bool:
+        """Allow forced narrow only for page-1 scout strings that show zero signal."""
+        return (
+            search_string.phase == "scout"
+            and page_num == 1
+            and result_count >= 500
+            and not search_string.refinement_stack
+            and string_stats.get("saves", 0) == 0
+            and string_stats.get("facial_yes", 0) == 0
+            and glance_result is not None
+            and glance_result.action == "reformulate"
+        )
 
     def _get_early_exit_rate(self) -> float:
         """Get facial_no rate threshold for mid-page early exit.
@@ -2754,6 +2903,8 @@ Provide a narrowed Boolean."""
             self._hydrate_search_string_metadata(search_string)
 
         if not remaining:
+            self._clear_pending_block_adaptation(progress)
+            progress.save(str(self.progress_path))
             print("  No remaining strings — skipping adaptation.")
             return
 
@@ -2766,7 +2917,7 @@ Provide a narrowed Boolean."""
                 execution_plan=self._execution_plan,
                 pivot_count=progress.pivot_count,
                 block_aggregate=block_aggregate,
-                search_memory_summary=self._search_memory,
+                search_memory_summary=build_search_memory_summary(self._search_memory),
             )
 
             # Apply adaptations
@@ -2871,6 +3022,7 @@ Provide a narrowed Boolean."""
                     log_event(self.log_path, "pivot_blocked", reason="max_pivots_reached",
                               recommended=adaptation.pivot_to_architecture)
 
+            self._clear_pending_block_adaptation(progress)
             progress.save(str(self.progress_path))
             log_event(self.log_path, "block_adaptation", block=block_name, report=report.to_dict())
 
@@ -3056,6 +3208,11 @@ Provide a narrowed Boolean."""
             self._in_flight_urls.discard(url)
 
         # 6. Save updated progress
+        if string_id in progress.pending_block_string_ids or progress.pending_block_name == target.block:
+            self._clear_pending_block_adaptation(progress)
+        if progress.current_string_id == string_id:
+            progress.current_string_id = None
+            progress.current_page = 0
         progress.save(str(self.progress_path))
         print(f"  String #{string_id} reset to page 1. Ready for re-evaluation.")
 
@@ -3192,113 +3349,231 @@ Provide a narrowed Boolean."""
                     lines.append(f"  - String {sid}: {s['save_rate']:.0%} save rate ({s['saves']} saves / {s['total_full_evals']} evals)")
         return "\n".join(lines) + "\n"
 
+    def _load_run_report_decisions(
+        self,
+        decision_filter: set[str],
+        limit: int = 20,
+    ) -> list[dict]:
+        """Load a compact set of final-judgment examples for debrief generation."""
+        if not self.final_path.exists():
+            return []
+        records: list[dict] = []
+        try:
+            for row in read_jsonl(self.final_path):
+                if not isinstance(row, dict):
+                    continue
+                if row.get("decision") not in decision_filter:
+                    continue
+                records.append(
+                    {
+                        "candidate_name": row.get("candidate_name", ""),
+                        "decision": row.get("decision", ""),
+                        "path": row.get("path", ""),
+                        "confidence": row.get("confidence", 0.0),
+                        "rationale": _normalize_text_for_report(row.get("rationale", ""))[:280],
+                    }
+                )
+                if len(records) >= limit:
+                    break
+        except Exception:
+            return []
+        return records
+
+    def _build_run_report_snapshot(self, progress: Progress) -> dict:
+        """Build a deterministic raw snapshot for structured debrief generation."""
+        done_count = sum(1 for s in progress.strings if s.status == "done")
+        skipped_count = sum(1 for s in progress.strings if s.status == "skipped")
+        total_results = sum(s.result_count for s in progress.strings if s.result_count > 0)
+        total_pages = sum(s.pages_reviewed for s in progress.strings)
+        candidates_evaluated = self.stats["snippets_extracted"]
+        overall_save_rate = self.stats["saved"] / max(candidates_evaluated, 1)
+        facial_yes_rate = self.stats["facial_yes"] / max(candidates_evaluated, 1)
+
+        string_performance = []
+        for s in progress.strings:
+            if s.status not in {"done", "skipped"}:
+                continue
+            save_rate = len(s.saves) / max(s.candidates_count or (s.pages_reviewed * 25), 1)
+            string_performance.append(
+                {
+                    "string_id": s.id,
+                    "name": s.name,
+                    "status": s.status,
+                    "result_count": s.result_count,
+                    "pages_reviewed": s.pages_reviewed,
+                    "saves": len(s.saves),
+                    "save_rate": round(save_rate, 4),
+                    "saved_candidates": s.saves[:10],
+                    "notes": s.notes or "",
+                    "facial_yes_count": s.facial_yes_count,
+                    "facial_no_count": s.facial_no_count,
+                    "candidates_count": s.candidates_count,
+                    "duplicates_count": s.duplicates_count,
+                    "family_key": s.family_key,
+                    "novelty_bucket": s.novelty_bucket,
+                    "domain_lane": s.domain_lane,
+                }
+            )
+
+        return {
+            "schema_version": 1,
+            "run_metadata": {
+                "role_title": self.brief_obj.role_title,
+                "brief_name": progress.brief_name,
+                "brief_version": self.brief_obj.raw.get("version", ""),
+                "linkedin_project": self.brief_obj.linkedin_project,
+                "linkedin_project_id": self.brief_obj.linkedin_project_id,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "overall_summary": (
+                    f"Run covered {done_count} executed strings over {total_pages} pages, "
+                    f"evaluated {candidates_evaluated} candidates, and saved {self.stats['saved']}."
+                ),
+            },
+            "metrics_summary": {
+                "strings_executed": done_count,
+                "strings_skipped": skipped_count,
+                "total_results": total_results,
+                "total_pages_reviewed": total_pages,
+                "candidates_evaluated": candidates_evaluated,
+                "facial_yes": self.stats["facial_yes"],
+                "facial_no": self.stats["facial_no"],
+                "saved": self.stats["saved"],
+                "rejected": self.stats["rejected"],
+                "overall_save_rate": round(overall_save_rate, 4),
+                "facial_yes_rate": round(facial_yes_rate, 4),
+            },
+            "string_performance": string_performance,
+            "saved_candidate_summaries": self._load_run_report_decisions(
+                {"SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE", "SIGNAL_SAVE"},
+                limit=24,
+            ),
+            "rejected_candidate_summaries": self._load_run_report_decisions({"REJECT"}, limit=24),
+            "bias_monitor_summary": self._bias_summary_for_report().strip(),
+            "search_memory_summary": build_search_memory_summary(self._search_memory)
+            if self._search_memory
+            else None,
+        }
+
+    def _run_report_analysis_system(self) -> str:
+        return """You are a senior sourcing strategist analyzing an end-of-run sourcing snapshot.
+
+Return valid JSON only with these exact top-level keys:
+- winning_lanes
+- underperforming_lanes
+- coverage_gaps
+- noise_patterns
+- saved_candidate_patterns
+- adaptation_assessment
+- recommendations
+- brief_iteration_hints
+
+Rules:
+- Do NOT re-state run_metadata, metrics_summary, or string_performance; those are deterministic and already captured.
+- Use only evidence available in the snapshot.
+- Cite concrete strings, candidates, and patterns when possible.
+- Keep lists concise and high-signal.
+- brief_iteration_hints may only suggest mutable brief fields:
+  instructions, search_priorities, additional_search_terms, intake_notes, depth_distinction,
+  non_fit_patterns, minimum_bar_description, facial_calibration, employer_signal_rules,
+  calibration_examples, notes, version.
+- Do NOT suggest changes to geography, minimum_years_experience, role identity, LinkedIn project mapping, capability areas, or market density.
+- If suggesting employer signal rules, keep save_on_employer_alone false.
+- If suggesting facial calibration changes, keep them modest and explicitly evidence-based.
+
+Expected inner shapes:
+- winning_lanes: [{"lane","string_ids","candidate_examples","evidence","why_it_worked","recommended_action"}]
+- underperforming_lanes: [{"lane","string_ids","issue","evidence","recommended_action"}]
+- coverage_gaps: [{"gap","why_it_matters","suggested_search_strategy"}]
+- noise_patterns: [{"pattern","evidence","mitigation"}]
+- saved_candidate_patterns: {
+    "standout_candidates": [{"name","why"}],
+    "common_employers": [{"employer","count","note"}],
+    "common_titles": [{"title_family","count","note"}],
+    "archetype_distribution": [{"archetype","count","note"}],
+    "seniority_notes": ["..."]
+  }
+- adaptation_assessment: {
+    "summary": "string",
+    "effective_refinements": ["..."],
+    "questionable_or_skipped": ["..."],
+    "operational_notes": ["..."]
+  }
+- recommendations: {
+    "try_next": ["..."],
+    "avoid_next": ["..."],
+    "prioritize_pipeline": ["..."]
+  }
+- brief_iteration_hints: {
+    "instructions": ["..."],
+    "search_priorities": ["..."],
+    "additional_search_terms": ["..."],
+    "intake_notes": "string",
+    "depth_distinction": {"builder_definition","user_definition","edge_case_guidance"},
+    "non_fit_patterns": [{"label","description","why_not","examples"}],
+    "minimum_bar_description": "string",
+    "facial_calibration": {
+      "expected_yes_rate_low": 0.0,
+      "expected_yes_rate_high": 0.0,
+      "fast_exit_patterns": ["..."],
+      "trajectory_yes_patterns": ["..."],
+      "trajectory_ambiguous_patterns": ["..."],
+      "trajectory_no_patterns": ["..."]
+    },
+    "employer_signal_rules": [{"tier","employer_patterns","evidence_required","save_on_employer_alone"}],
+    "calibration_examples": {
+      "strong_saves": [{"name","why"}],
+      "incorrect_saves": [{"name","why"}],
+      "borderline_verify": [{"name","why"}]
+    },
+    "notes": "string",
+    "locked_field_cautions": ["..."]
+  }"""
+
     def _generate_run_report(self, progress: Progress | None) -> None:
-        """Generate an Opus-written end-of-run debrief report."""
+        """Generate structured and markdown end-of-run debrief artifacts."""
         if not progress or not progress.strings:
             return
 
         from shared.llm_clients import opus_llm
 
-        # Build per-string performance data
-        string_lines = []
-        for s in progress.strings:
-            if s.status == "done":
-                save_rate = f"{len(s.saves) / max(s.pages_reviewed * 25, 1) * 100:.1f}%" if s.pages_reviewed else "n/a"
-                saves_text = ", ".join(s.saves[:5])
-                if len(s.saves) > 5:
-                    saves_text += f" (+{len(s.saves) - 5} more)"
-                string_lines.append(
-                    f"  #{s.id} [{s.status}] {s.name[:80]}\n"
-                    f"    Results: {s.result_count} | Pages: {s.pages_reviewed} | "
-                    f"Saves: {len(s.saves)} ({save_rate}) | Notes: {s.notes or 'none'}\n"
-                    f"    Saved: {saves_text or 'none'}"
-                )
-            elif s.status == "skipped":
-                string_lines.append(
-                    f"  #{s.id} [skipped] {s.name[:80]}\n    {s.notes or 'Skipped by adaptation'}"
-                )
-        strings_text = "\n".join(string_lines)
-
-        # Load saves from final judgments file for richer context
-        saves_detail = ""
-        if self.final_path.exists():
-            try:
-                saves = []
-                for line in self.final_path.read_text().strip().split("\n"):
-                    if not line.strip():
-                        continue
-                    d = json.loads(line)
-                    if d.get("decision") in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"):
-                        saves.append(d)
-                if saves:
-                    detail_lines = []
-                    for sv in saves:
-                        detail_lines.append(
-                            f"  - {sv.get('candidate_name', '?')} | "
-                            f"Path: {sv.get('path', '?')} | "
-                            f"Confidence: {sv.get('confidence', '?')}\n"
-                            f"    {sv.get('rationale', '')[:200]}"
-                        )
-                    saves_detail = "\n".join(detail_lines)
-            except Exception:
-                pass
-
-        done_count = sum(1 for s in progress.strings if s.status == "done")
-        skipped_count = sum(1 for s in progress.strings if s.status == "skipped")
-        total_saves = sum(len(s.saves) for s in progress.strings)
-        total_results = sum(s.result_count for s in progress.strings if s.result_count > 0)
-        total_pages = sum(s.pages_reviewed for s in progress.strings)
-
-        system = f"""You are a senior sourcing strategist writing an end-of-run debrief report.
-
-Role: {self.brief_obj.role_title}
-{self.brief_obj.role_description}
-
-Write a comprehensive debrief report in markdown covering:
-
-1. **Executive Summary** — Total saves, total candidates evaluated, overall save rate, run duration in strings/pages
-2. **Top Performing Strings** — Which strings produced the most saves and why? What made them effective?
-3. **Underperforming Strings** — Which strings were stopped early or produced zero saves? What went wrong?
-4. **Candidate Profile** — What patterns emerge among the saved candidates? Common employers, titles, backgrounds, archetype distribution
-5. **Noise Patterns Observed** — What were the dominant noise categories? (e.g., product managers, strategy/GTM, non-domain backgrounds)
-6. **Adaptation Decisions** — How did the agent adapt during the run? Were refinements effective? Were strings correctly skipped?
-7. **Recommendations for Next Run** — What Boolean strategies should be tried next? What should be avoided? Any gaps in coverage?
-
-Be specific — cite string IDs, candidate names, and concrete patterns. This report should be actionable for planning the next sourcing run."""
-
-        user_prompt = f"""## Run Statistics
-- Strings executed: {done_count} ({skipped_count} skipped)
-- Total results across all strings: {total_results}
-- Total pages reviewed: {total_pages}
-- Candidates evaluated: {self.stats['snippets_extracted']}
-- Facial YES: {self.stats['facial_yes']}
-- Facial NO: {self.stats['facial_no']}
-- SAVED: {self.stats['saved']}
-- REJECTED: {self.stats['rejected']}
-- Overall save rate: {self.stats['saved'] / max(self.stats['snippets_extracted'], 1) * 100:.1f}%
-{self._bias_summary_for_report()}
-## Per-String Performance
-{strings_text}
-
-## Saved Candidates Detail
-{saves_detail or "No detailed save data available."}
-
-Write the debrief report."""
+        report_input = self._build_run_report_snapshot(progress)
+        report_input_path = self.output_dir / "run-report-input.json"
+        report_json_path = self.output_dir / "run-report.json"
+        report_md_path = self.output_dir / "run-report.md"
 
         try:
+            write_json(report_input_path, report_input)
             print(f"\n{'=' * 60}")
             print("  Generating end-of-run debrief report (Opus)...")
             print(f"{'=' * 60}")
-            report = opus_llm(system, user_prompt, expect_json=False, max_tokens=8192)
-
-            # Save to file
-            report_path = self.output_dir / "run-report.md"
-            report_path.write_text(report)
-            print(f"\n{report}")
-            print(f"\n  Report saved to: {report_path}")
-            log_event(self.log_path, "run_report_generated", report_path=str(report_path))
+            analysis_raw = opus_llm(
+                self._run_report_analysis_system(),
+                json.dumps(report_input, indent=2),
+                expect_json=True,
+                max_tokens=12000,
+            )
+            analysis = RunDebriefAnalysis.from_dict(analysis_raw)
+            report = StructuredRunReport.from_parts(report_input, analysis)
+            write_json(report_json_path, report.to_dict())
+            markdown = render_run_report_markdown(report)
+            report_md_path.write_text(markdown)
+            print(f"\n{markdown}")
+            print(f"\n  Report input saved to: {report_input_path}")
+            print(f"  Report JSON saved to:  {report_json_path}")
+            print(f"  Report saved to:       {report_md_path}")
+            log_event(
+                self.log_path,
+                "run_report_generated",
+                report_input_path=str(report_input_path),
+                report_json_path=str(report_json_path),
+                report_path=str(report_md_path),
+            )
         except Exception as e:
             print(f"  [warn] Report generation failed: {e}")
+
+
+def _normalize_text_for_report(value: str) -> str:
+    return " ".join(str(value or "").split()).strip()
 
 
 # ---------------------------------------------------------------------------

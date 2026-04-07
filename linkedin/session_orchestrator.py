@@ -73,6 +73,13 @@ def _print_decoy(msg: str):
     print(f"[decoy] {msg}", flush=True)
 
 
+def _classify_session_exception(exc: BaseException) -> str:
+    """Normalize orchestrator-level failures for session accounting."""
+    if isinstance(exc, KeyboardInterrupt):
+        return "interrupted: KeyboardInterrupt"
+    return f"error: {type(exc).__name__}"
+
+
 def _resume_has_pending_work(output_dir: str | None) -> bool:
     """Return True when progress.json still has queued or in-progress work.
 
@@ -89,6 +96,8 @@ def _resume_has_pending_work(output_dir: str | None) -> bool:
         return True
 
     strings = progress.get("strings", [])
+    if progress.get("pending_block_string_ids"):
+        return True
     if not strings:
         return False
 
@@ -378,8 +387,10 @@ async def run_day_cycle(
                 restart_string_id=restart_string_id,
                 restart_string_ids=restart_string_ids,
             )
-        except (KeyboardInterrupt, Exception) as e:
-            result = {"shutdown_reason": f"interrupted: {type(e).__name__}", "stats": {}}
+        except KeyboardInterrupt as e:
+            result = {"shutdown_reason": _classify_session_exception(e), "stats": {}}
+        except Exception as e:
+            result = {"shutdown_reason": _classify_session_exception(e), "stats": {}}
         finally:
             summary = governor.end_session()
             cooldown.record_session_end(

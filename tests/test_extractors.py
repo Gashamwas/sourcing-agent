@@ -12,15 +12,17 @@ from shared.schemas import CandidateSnippet, CandidateProfileSummary
 from shared.extractors import extract_snippet_from_card_innertext
 from shared.judger import _build_facial_system, _build_full_system, facial_judge, full_judge
 from shared.brief_loader import load_brief, Brief
+from linkedin.judgment_templates import assemble_facial_system, assemble_full_evaluation_system
 
 
 # ---------------------------------------------------------------------------
 # Test fixtures
 # ---------------------------------------------------------------------------
 
-BRAZIL_BRIEF_PATH = str(Path(__file__).parent.parent / "config" / "brief-brazil-real.json")
-HEAD_AI_BRIEF_PATH = str(Path(__file__).parent.parent / "config" / "brief-head-ai-lab-real.json")
-HEAD_AI_V2_BRIEF_PATH = str(Path(__file__).parent.parent / "config" / "brief-head-ai-lab-nyc-v2.json")
+ROOT = Path(__file__).parent.parent
+BRAZIL_BRIEF_PATH = str(ROOT / "config" / "FDL-Brazil" / "brief-brazil-real.json")
+HEAD_AI_BRIEF_PATH = str(ROOT / "config" / "Head-of-Applied-AI-Lab" / "brief-head-ai-lab-real.json")
+HEAD_AI_V2_BRIEF_PATH = str(ROOT / "config" / "brief-head-ai-lab-nyc-v2.json")
 
 BRAZIL_BRIEF = load_brief(BRAZIL_BRIEF_PATH)
 HEAD_AI_BRIEF = load_brief(HEAD_AI_BRIEF_PATH)
@@ -139,11 +141,32 @@ def test_head_ai_v2_brief_loads():
     assert brief.linkedin_project_id == "1957683706"
     assert brief.additional_search_terms
     assert "analyst assistant" in brief.additional_search_terms
-    assert "trade surveillance workflow" in brief.additional_search_terms
+    assert "regulatory reporting" in brief.additional_search_terms
+    assert "payment orchestration" in brief.additional_search_terms
+    assert "ISDA" in brief.additional_search_terms
+    assert "Research copilot" in brief.search_priorities[0]
+    assert any("Payments" in priority for priority in brief.search_priorities)
     assert "first 8 strings" in brief.intake_notes.lower() or any(
         "first 8 strings" in instruction.lower() for instruction in brief.instructions
     )
+    assert any("first 10-12 strings" in instruction.lower() for instruction in brief.instructions)
     assert brief.market_density == "sparse"
+
+
+def test_head_ai_v2_full_prompt_includes_market_intel_calibration():
+    prompt = assemble_full_evaluation_system(HEAD_AI_V2_BRIEF._new_brief)
+    assert "Mithun Azhagappan" in prompt
+    assert "mini-CTO" in prompt
+    assert "Executive Director" in prompt
+    assert "Principal Architect" in prompt
+
+
+def test_head_ai_v2_facial_prompt_includes_updated_trajectory_patterns():
+    prompt = assemble_facial_system(HEAD_AI_V2_BRIEF._new_brief)
+    assert "Career progression from big-bank, market-infrastructure, or market-data builder roles" in prompt
+    assert "Startup CTO or co-founder at a small fintech, regtech, payments, market-data, or institutional-workflow company" in prompt
+    assert "Trajectory centers on surveillance, compliance-tech, or risk operations without explicit post-2022 GenAI builder evidence" in prompt
+    assert "field CTO, customer engineering, solutions, or vendor advisory leadership" in prompt
 
 
 def test_both_briefs_have_kit_url():
@@ -229,10 +252,67 @@ def test_single_card_extractor_builds_snippet():
     assert snippet.result_rank == 4
 
 
-def test_single_card_extractor_returns_none_for_invalid_payload():
+def test_single_card_extractor_uses_dom_hints_when_model_misses_name():
+    with patch("shared.extractors.cheap_llm", return_value={
+        "name": "",
+        "headline": "Principal AI Engineer at Example Bank",
+        "current_title": "",
+        "current_company": "",
+        "location": "New York, New York, United States",
+        "education_snippet": "",
+        "profile_url": "",
+        "experience_entries": ["Principal AI Engineer at Example Bank (2024-Present)"],
+    }):
+        snippet = extract_snippet_from_card_innertext(
+            "Select Ada Lovelace\nAda Lovelace\nPrincipal AI Engineer at Example Bank",
+            string_id=1,
+            string_name="test",
+            page=1,
+            result_rank=1,
+            dom_name="Ada Lovelace",
+            dom_url="/talent/profile/ada",
+        )
+
+    assert snippet is not None
+    assert snippet.name == "Ada Lovelace"
+    assert snippet.profile_url == "/talent/profile/ada"
+    assert snippet.current_title == "Principal AI Engineer"
+    assert snippet.current_company == "Example Bank"
+
+
+def test_single_card_extractor_falls_back_to_heuristics_for_invalid_payload():
     with patch("shared.extractors.cheap_llm", return_value="not-json"):
         snippet = extract_snippet_from_card_innertext(
-            "Select Test Person\nTest Person",
+            "\n".join([
+                "Select Test Person",
+                "Test Person",
+                "Principal AI Engineer",
+                "New York City Metropolitan Area · Financial Services",
+                "Experience",
+                "Profile experience",
+                "Principal AI Engineer at Example Bank · 2022 - Present",
+                "Education",
+                "Profile education",
+                "Example University, MS Computer Science",
+            ]),
+            string_id=1,
+            string_name="test",
+            page=1,
+            result_rank=1,
+        )
+
+    assert snippet is not None
+    assert snippet.name == "Test Person"
+    assert snippet.current_title == "Principal AI Engineer"
+    assert snippet.current_company == "Example Bank"
+    assert snippet.location == "New York City Metropolitan Area"
+    assert snippet.education_snippet == "Example University, MS Computer Science"
+
+
+def test_single_card_extractor_returns_none_for_unrecoverable_payload():
+    with patch("shared.extractors.cheap_llm", return_value="not-json"):
+        snippet = extract_snippet_from_card_innertext(
+            "Experience\nSave to pipeline",
             string_id=1,
             string_name="test",
             page=1,

@@ -9,14 +9,18 @@ import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from shared.schemas import (
     AdaptationResponse,
     CandidateSnippet,
     ExecutionPlan,
+    GlanceResult,
     OpusDecision,
     Progress,
     SearchString,
 )
+from shared.governor import SessionExpired
 from shared.storage import append_jsonl, read_jsonl
 
 
@@ -527,7 +531,42 @@ def test_extract_card_snippet_returns_none_when_card_text_missing():
         with patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
             snippet = asyncio.run(p._extract_card_snippet(search_string, page_num=1, card_index=0))
 
-        assert snippet is None
+    assert snippet is None
+
+
+def test_extract_card_snippet_uses_dom_metadata_when_card_text_missing():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.browser.focus_card_for_review = AsyncMock()
+        p.browser.get_card_snapshot = AsyncMock(return_value={
+            "innertext": "",
+            "name": "Ada Lovelace",
+            "url": "/talent/profile/ada",
+            "already_saved": False,
+        })
+
+        from shared.schemas import SearchString
+        search_string = SearchString(id=9, name="seq", boolean="(test)")
+
+        with patch(
+            "linkedin.orchestrator.extract_snippet_from_card_innertext",
+            return_value=_make_snippet(
+                name="Ada Lovelace",
+                profile_url="",
+                source_string_id=9,
+                source_string_name="seq",
+                page=1,
+                result_rank=1,
+            ),
+        ) as extract_mock, patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+            snippet = asyncio.run(p._extract_card_snippet(search_string, page_num=1, card_index=0))
+
+        assert snippet is not None
+        assert snippet.name == "Ada Lovelace"
+        assert snippet.profile_url == "/talent/profile/ada"
+        extract_mock.assert_called_once()
+        assert extract_mock.call_args.kwargs["dom_name"] == "Ada Lovelace"
+        assert extract_mock.call_args.kwargs["dom_url"] == "/talent/profile/ada"
 
 
 def test_extract_card_snippet_returns_none_on_slot_rehydration_error():
@@ -794,3 +833,450 @@ def test_run_full_rechecks_queue_after_block_adaptation():
             asyncio.run(p.run_full(resume=True))
 
         assert processed_ids == [1, 3]
+
+
+def test_run_full_resume_preserves_in_progress_string_on_session_expiry():
+    """SessionExpired should checkpoint and bubble out without downgrading the interrupted string."""
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+
+        progress = Progress(
+            brief_name="test",
+            strings=[
+                SearchString(
+                    id=5,
+                    name="interrupted",
+                    boolean="one",
+                    status="in_progress",
+                    block="Block A",
+                    pages_reviewed=1,
+                ),
+                SearchString(id=6, name="next", boolean="two", status="queued", block="Block B"),
+            ],
+            current_string_id=5,
+            current_page=1,
+        )
+        progress.save(str(p.progress_path))
+
+        p.browser.connect = AsyncMock()
+        p.browser.disconnect = AsyncMock()
+        p.browser.page = MagicMock(url="https://www.linkedin.com/talent/search")
+        p._print_session_summary = MagicMock()
+        p._print_summary = MagicMock()
+        p._generate_run_report = MagicMock()
+
+        processed_ids = []
+
+        async def fake_process(search_string, progress):
+            processed_ids.append(search_string.id)
+            raise SessionExpired("session_duration_cap")
+
+        p._process_string = fake_process
+
+        with pytest.raises(SessionExpired):
+            asyncio.run(p.run_full(resume=True))
+
+        saved = json.loads(Path(td, "progress.json").read_text())
+        assert processed_ids == [5]
+        assert saved["current_string_id"] == 5
+        assert saved["current_page"] == 1
+        assert saved["strings"][0]["status"] == "in_progress"
+        assert saved["strings"][1]["status"] == "queued"
+
+
+def test_run_full_retries_same_string_after_browser_crash_recovery():
+    """Browser target crashes should recover and retry the interrupted string in place."""
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+
+        progress = Progress(
+            brief_name="test",
+            strings=[SearchString(id=5, name="interrupted", boolean="one", status="queued", block="Block A")],
+        )
+        progress.save(str(p.progress_path))
+
+        p.browser.connect = AsyncMock()
+        p.browser.disconnect = AsyncMock()
+        p.browser.page = MagicMock(url="https://www.linkedin.com/talent/search")
+        p.browser.recover_from_target_crash = AsyncMock(return_value=True)
+        p._attempt_reconnect = AsyncMock(return_value=False)
+        p._print_session_summary = MagicMock()
+        p._print_summary = MagicMock()
+        p._generate_run_report = MagicMock()
+
+        calls = {"count": 0}
+
+        async def fake_process(search_string, progress):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                raise RuntimeError("Page.evaluate: Target crashed")
+            search_string.pages_reviewed = 2
+
+        p._process_string = fake_process
+
+        asyncio.run(p.run_full(resume=True))
+
+        saved = json.loads(Path(td, "progress.json").read_text())
+        assert calls["count"] == 2
+        p.browser.recover_from_target_crash.assert_awaited_once()
+        p._attempt_reconnect.assert_not_awaited()
+        assert saved["strings"][0]["status"] == "done"
+        assert saved["strings"][0]["pages_reviewed"] == 2
+
+
+def test_run_full_resume_executes_pending_block_adaptation_before_next_string():
+    """A completed block that never adapted must adapt before the next queued string runs."""
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+
+        progress = Progress(
+            brief_name="test",
+            strings=[
+                SearchString(id=1, name="done", boolean="one", status="done", block="Block A"),
+                SearchString(id=2, name="next", boolean="two", status="queued", block="Block B"),
+            ],
+            pending_block_name="Block A",
+            pending_block_string_ids=[1],
+        )
+        progress.save(str(p.progress_path))
+
+        p.browser.connect = AsyncMock()
+        p.browser.disconnect = AsyncMock()
+        p.browser.page = MagicMock(url="https://www.linkedin.com/talent/search")
+        p._print_session_summary = MagicMock()
+        p._print_summary = MagicMock()
+        p._generate_run_report = MagicMock()
+        p._execution_plan = ExecutionPlan(strategy_rationale="test")
+
+        call_order = []
+
+        async def fake_process(search_string, progress):
+            call_order.append(f"process:{search_string.id}")
+
+        def fake_adapt(*args, **kwargs):
+            call_order.append("adapt")
+            return AdaptationResponse()
+
+        p._process_string = fake_process
+
+        with patch("linkedin.strategy.adapt_after_block", side_effect=fake_adapt):
+            asyncio.run(p.run_full(resume=True))
+
+        saved = json.loads(Path(td, "progress.json").read_text())
+        assert call_order == ["adapt", "process:2"]
+        assert saved["pending_block_name"] == ""
+        assert saved["pending_block_string_ids"] == []
+
+
+def test_process_string_continues_pagination_instead_of_forced_narrow_below_min_pages():
+    """Premature stop/abandon should keep paging, not synthesize a forced narrow."""
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+
+        search_string = SearchString(id=5, name="test", boolean="foo", status="queued")
+        progress = Progress(brief_name="test", strings=[search_string], current_string_id=5, current_page=0)
+
+        no_results = MagicMock()
+        no_results.is_visible = AsyncMock(return_value=False)
+        locator = MagicMock()
+        locator.first = no_results
+
+        p.browser.page = MagicMock(url="https://www.linkedin.com/talent/search")
+        p.browser.page.locator.return_value = locator
+        p.browser.enter_search_string = AsyncMock()
+        p.browser.get_results_count_text = AsyncMock(return_value="144")
+        p.browser.get_results_count = AsyncMock(return_value=144)
+        p.browser.go_to_next_page = AsyncMock(return_value=True)
+
+        p._ensure_browser_healthy = AsyncMock()
+        p._review_page_sequentially = AsyncMock(return_value=None)
+        p._page_adapt = AsyncMock(side_effect=["stop", "stop"])
+        p._force_narrow_adapt = AsyncMock(return_value="narrow:bar")
+
+        with patch("linkedin.orchestrator.human_delay_correlated", return_value=0):
+            asyncio.run(p._process_string(search_string, progress))
+
+        assert p._page_adapt.await_count == 2
+        assert p._force_narrow_adapt.await_count == 0
+        p.browser.go_to_next_page.assert_awaited_once()
+        assert "Stopped after page 2." in (search_string.notes or "")
+
+
+def test_process_string_allows_forced_narrow_only_for_zero_signal_scout_page_one():
+    """Scout page 1 can force-narrow once when the pool is large and entirely noisy."""
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+
+        search_string = SearchString(id=9, name="scout", boolean="foo", status="queued")
+        progress = Progress(brief_name="test", strings=[search_string], current_string_id=9, current_page=0)
+
+        no_results = MagicMock()
+        no_results.is_visible = AsyncMock(return_value=False)
+        locator = MagicMock()
+        locator.first = no_results
+
+        p.browser.page = MagicMock(url="https://www.linkedin.com/talent/search")
+        p.browser.page.locator.return_value = locator
+        p.browser.enter_search_string = AsyncMock()
+        p.browser.get_results_count_text = AsyncMock(side_effect=["3.2K+", "120"])
+        p.browser.get_results_count = AsyncMock(side_effect=[3200, 120])
+        p.browser.go_to_next_page = AsyncMock(return_value=True)
+
+        p._ensure_browser_healthy = AsyncMock()
+        p._review_page_sequentially = AsyncMock(
+            side_effect=[
+                GlanceResult(action="reformulate", summary="all noise", confidence=0.91),
+                None,
+                None,
+            ]
+        )
+        p._page_adapt = AsyncMock(side_effect=["stop", "stop", "stop"])
+        p._force_narrow_adapt = AsyncMock(return_value="narrow:bar")
+
+        with patch("linkedin.orchestrator.human_delay_correlated", return_value=0):
+            asyncio.run(p._process_string(search_string, progress))
+
+        assert p._force_narrow_adapt.await_count == 1
+        assert search_string.boolean == "bar"
+        assert search_string.refinement_stack == ["foo"]
+        p.browser.go_to_next_page.assert_awaited_once()
+        assert "Narrowed on page 1 (depth 1)." in (search_string.notes or "")
+        assert "Stopped after page 2." in (search_string.notes or "")
+
+
+def _sample_report_analysis() -> dict:
+    return {
+        "winning_lanes": [
+            {
+                "lane": "Research Copilot",
+                "string_ids": [2],
+                "candidate_examples": ["Mithun Azhagappan"],
+                "evidence": "Highest save count from workflow-specific BFSI product language.",
+                "why_it_worked": "Product-output vocabulary gated for real builders.",
+                "recommended_action": "UNIQUE_REPORT_SENTINEL promote this lane earlier.",
+            }
+        ],
+        "underperforming_lanes": [
+            {
+                "lane": "Surveillance",
+                "string_ids": [8],
+                "issue": "Traditional compliance-tech noise.",
+                "evidence": "Zero saves across two pages.",
+                "recommended_action": "Only run with an explicit GenAI AND-gate.",
+            }
+        ],
+        "coverage_gaps": [
+            {
+                "gap": "Payments",
+                "why_it_matters": "The run never explicitly covered transaction banking.",
+                "suggested_search_strategy": "Add payment-orchestration and RTP strings.",
+            }
+        ],
+        "noise_patterns": [
+            {
+                "pattern": "Product-heavy AI leadership",
+                "evidence": "Several product/strategy AI officers were rejected post deep-dive.",
+                "mitigation": "Strengthen builder-authoring verbs and architecture language.",
+            }
+        ],
+        "saved_candidate_patterns": {
+            "standout_candidates": [{"name": "Mithun Azhagappan", "why": "Goldman AI platform architect."}],
+            "common_employers": [{"employer": "JPMorgan", "count": 3, "note": "Strong bank GenAI-convert segment."}],
+            "common_titles": [{"title_family": "Executive Director", "count": 1, "note": "Right seniority band."}],
+            "archetype_distribution": [{"archetype": "BFSI-native GenAI converts", "count": 4, "note": "Dominant save pattern."}],
+            "seniority_notes": ["Many VP-level bank builders were interesting but below the full lab-leadership bar."],
+        },
+        "adaptation_assessment": {
+            "summary": "Adaptation stayed focused on workflow-specific strings.",
+            "effective_refinements": ["Narrowing research-copilot language improved precision."],
+            "questionable_or_skipped": ["Payments stayed under-covered."],
+            "operational_notes": ["Prefer tight workflow language over broad archetype-first queries."],
+        },
+        "recommendations": {
+            "try_next": ["Payments and transaction-banking builders"],
+            "avoid_next": ["Ungated surveillance strings"],
+            "prioritize_pipeline": ["Mithun Azhagappan"],
+        },
+        "brief_iteration_hints": {
+            "instructions": ["Cover payments in the first search block."],
+            "search_priorities": ["Payments / transaction-banking builders"],
+            "additional_search_terms": ["payment orchestration", "transaction banking"],
+            "intake_notes": "The latest run validated research-copilot lanes and exposed a payments gap.",
+            "depth_distinction": {
+                "builder_definition": "Still an executive-builder search.",
+                "user_definition": "Product and strategy leaders remain out of scope.",
+                "edge_case_guidance": "VP bank builders need extra scope scrutiny.",
+            },
+            "non_fit_patterns": [
+                {
+                    "label": "Product-heavy AI officer",
+                    "description": "Executive product leadership without system-builder authorship.",
+                    "why_not": "Wrong depth for this role.",
+                    "examples": ["Chief Product & AI Officer"],
+                }
+            ],
+            "minimum_bar_description": "NYC, 15+ years, BFSI depth, and post-2022 GenAI remain hard requirements.",
+            "facial_calibration": {
+                "expected_yes_rate_low": 0.1,
+                "expected_yes_rate_high": 0.22,
+                "fast_exit_patterns": ["Pure product history"],
+                "trajectory_yes_patterns": ["Big-bank GenAI convert"],
+                "trajectory_ambiguous_patterns": ["VP at smaller firm"],
+                "trajectory_no_patterns": ["Vendor field CTO without build ownership"],
+            },
+            "employer_signal_rules": [
+                {
+                    "tier": "payments_builder",
+                    "employer_patterns": ["Visa", "Mastercard"],
+                    "evidence_required": "Still requires production builder evidence.",
+                    "save_on_employer_alone": False,
+                }
+            ],
+            "calibration_examples": {
+                "strong_saves": [{"name": "Mithun Azhagappan", "why": "Strong fit."}],
+                "incorrect_saves": [{"name": "Deepinder Gulati", "why": "Product-heavy."}],
+                "borderline_verify": [{"name": "Peter Chung", "why": "Check scope carefully."}],
+            },
+            "notes": "Promote payments in the next draft.",
+            "locked_field_cautions": ["Do not relax geography or years-of-experience gates."],
+        },
+    }
+
+
+def test_generate_run_report_writes_json_markdown_and_input_artifacts():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.brief_obj.role_title = "Head of Applied AI Lab"
+        p.brief_obj.linkedin_project = "Head of Applied AI Lab"
+        p.brief_obj.linkedin_project_id = "1957683706"
+        p.brief_obj.raw = {"version": "2.1"}
+        p.stats.update(
+            {
+                "snippets_extracted": 12,
+                "facial_yes": 4,
+                "facial_no": 8,
+                "saved": 1,
+                "rejected": 2,
+            }
+        )
+        p._search_memory = {
+            "project_id": "1957683706",
+            "overall": {
+                "strings_seen": 1,
+                "candidates_seen": 12,
+                "duplicates": 2,
+                "saves": 1,
+                "edge_case_saves": 1,
+                "canonical_saves": 0,
+            },
+            "families": {
+                "research_copilot_asset_mgmt": {
+                    "family_key": "research_copilot_asset_mgmt",
+                    "novelty_bucket": "edge_case",
+                    "domain_lane": "asset_management",
+                    "status": "active",
+                    "status_reason": "",
+                    "strings_seen": 1,
+                    "candidates_seen": 12,
+                    "duplicates": 2,
+                    "saves": 1,
+                    "dominant_anchors": ["research copilot"],
+                }
+            },
+        }
+        p._bias_summary_for_report = MagicMock(return_value="Bias summary sentinel")
+
+        append_jsonl(
+            p.final_path,
+            {
+                "candidate_name": "Mithun Azhagappan",
+                "decision": "SAVE",
+                "path": "DIRECT",
+                "confidence": 0.92,
+                "rationale": "Goldman AI platform architect.",
+            },
+        )
+        append_jsonl(
+            p.final_path,
+            {
+                "candidate_name": "Deepinder Gulati",
+                "decision": "REJECT",
+                "path": "REJECT",
+                "confidence": 0.12,
+                "rationale": "Product-heavy AI leadership without builder evidence.",
+            },
+        )
+
+        progress = Progress(
+            brief_name="head-ai-lab",
+            strings=[
+                SearchString(
+                    id=2,
+                    name="Research copilot lane",
+                    boolean="research",
+                    status="done",
+                    result_count=526,
+                    pages_reviewed=4,
+                    saves=["Mithun Azhagappan"],
+                    notes="Strong lane",
+                    facial_yes_count=3,
+                    facial_no_count=7,
+                    candidates_count=10,
+                    family_key="research_copilot_asset_mgmt",
+                    novelty_bucket="edge_case",
+                    domain_lane="asset_management",
+                ),
+                SearchString(
+                    id=8,
+                    name="Surveillance lane",
+                    boolean="surveillance",
+                    status="skipped",
+                    result_count=1100,
+                    pages_reviewed=2,
+                    notes="Stopped early after noise.",
+                    facial_yes_count=0,
+                    facial_no_count=6,
+                    candidates_count=6,
+                    family_key="surveillance_builder",
+                    novelty_bucket="edge_case",
+                    domain_lane="risk_compliance",
+                ),
+            ],
+        )
+
+        with patch("shared.llm_clients.opus_llm", return_value=_sample_report_analysis()):
+            p._generate_run_report(progress)
+
+        report_input = json.loads(Path(td, "run-report-input.json").read_text())
+        report_json = json.loads(Path(td, "run-report.json").read_text())
+        report_md = Path(td, "run-report.md").read_text()
+
+        assert report_input["saved_candidate_summaries"][0]["candidate_name"] == "Mithun Azhagappan"
+        assert report_input["rejected_candidate_summaries"][0]["candidate_name"] == "Deepinder Gulati"
+        assert report_input["search_memory_summary"]["overall"]["families_tracked"] == 1
+        assert report_json["winning_lanes"][0]["recommended_action"].startswith("UNIQUE_REPORT_SENTINEL")
+        assert report_json["metrics_summary"]["saved"] == 1
+        assert "UNIQUE_REPORT_SENTINEL" in report_md
+        assert "Payments" in report_md
+
+
+def test_generate_run_report_failure_is_warning_only(capsys):
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.brief_obj.role_title = "Head of Applied AI Lab"
+        p.brief_obj.linkedin_project = "Head of Applied AI Lab"
+        p.brief_obj.linkedin_project_id = "1957683706"
+        p.brief_obj.raw = {"version": "2.1"}
+
+        progress = Progress(
+            brief_name="head-ai-lab",
+            strings=[SearchString(id=2, name="Research lane", boolean="research", status="done", result_count=10)],
+        )
+
+        with patch("shared.llm_clients.opus_llm", side_effect=RuntimeError("boom")):
+            p._generate_run_report(progress)
+
+        captured = capsys.readouterr()
+        assert "Report generation failed: boom" in captured.out
+        assert not Path(td, "run-report.json").exists()
+        assert not Path(td, "run-report.md").exists()

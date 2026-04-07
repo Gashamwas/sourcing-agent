@@ -68,6 +68,191 @@ Rules:
 - Return valid JSON only. No markdown, no explanation."""
 
 
+_CARD_SECTION_HEADERS = {
+    "experience",
+    "profile experience",
+    "education",
+    "profile education",
+    "skills match",
+    "interest",
+}
+
+
+def _line_is_connection_or_ui(line: str, candidate_name: str = "") -> bool:
+    normalized = line.strip()
+    lowered = normalized.lower()
+    candidate_lower = (candidate_name or "").strip().lower()
+
+    if not normalized:
+        return True
+    if lowered in _CARD_SECTION_HEADERS:
+        return True
+    if lowered.startswith("select "):
+        return True
+    if lowered in {"1st", "2nd", "3rd", "out of network"}:
+        return True
+    if lowered.startswith("· "):
+        return True
+    if lowered.startswith("show all"):
+        return True
+    if lowered.startswith("enhanced by resume"):
+        return True
+    if lowered.startswith("save to pipeline"):
+        return True
+    if lowered.startswith("select pipeline stage"):
+        return True
+    if lowered.startswith("hide ") and lowered.endswith(" candidate(s)"):
+        return True
+    if lowered.startswith("message "):
+        return True
+    if lowered.startswith("more actions for "):
+        return True
+    if candidate_lower and lowered == candidate_lower:
+        return False
+    if lowered.endswith(" degree"):
+        return True
+    return False
+
+
+def _looks_like_location(line: str) -> bool:
+    if " at " in line:
+        return False
+    if " · " not in line:
+        return False
+    left, _sep, right = line.partition(" · ")
+    return bool(left.strip() and right.strip())
+
+
+def _parse_title_company(text: str) -> tuple[str, str]:
+    head = (text or "").split(" · ", 1)[0].strip()
+    if " at " not in head:
+        return "", ""
+    title, company = head.split(" at ", 1)
+    return title.strip(), company.strip()
+
+
+def _apply_card_dom_hints(
+    snippet: CandidateSnippet,
+    *,
+    dom_name: str = "",
+    dom_url: str = "",
+) -> CandidateSnippet:
+    if dom_name:
+        snippet.name = dom_name.strip()
+    if dom_url and not snippet.profile_url:
+        snippet.profile_url = dom_url.strip()
+
+    if not snippet.current_title and snippet.headline:
+        title, company = _parse_title_company(snippet.headline)
+        if title:
+            snippet.current_title = title
+        if company and not snippet.current_company:
+            snippet.current_company = company
+
+    if not snippet.current_title and snippet.experience_entries:
+        title, company = _parse_title_company(snippet.experience_entries[0])
+        if title:
+            snippet.current_title = title
+        if company and not snippet.current_company:
+            snippet.current_company = company
+
+    return snippet
+
+
+def _build_card_snippet_fallback(
+    innertext: str,
+    *,
+    string_id: int,
+    string_name: str,
+    page: int,
+    result_rank: int,
+    dom_name: str = "",
+    dom_url: str = "",
+) -> CandidateSnippet | None:
+    lines = [line.strip() for line in innertext.splitlines() if line.strip()]
+    if not lines and not dom_name:
+        return None
+
+    select_name = ""
+    for line in lines[:3]:
+        if line.lower().startswith("select "):
+            select_name = line[7:].strip()
+            break
+
+    name = dom_name.strip() or select_name
+    if not name:
+        for line in lines:
+            if not _line_is_connection_or_ui(line):
+                name = line
+                break
+    if not name:
+        return None
+
+    headline = ""
+    location = ""
+    experience_entries: list[str] = []
+    education_snippet = ""
+    in_experience = False
+    in_education = False
+
+    for line in lines:
+        lowered = line.lower()
+        if lowered == "experience":
+            in_experience = True
+            in_education = False
+            continue
+        if lowered == "education":
+            in_experience = False
+            in_education = True
+            continue
+
+        if in_experience:
+            if _line_is_connection_or_ui(line, candidate_name=name):
+                continue
+            if " at " in line:
+                experience_entries.append(line)
+            continue
+
+        if in_education:
+            if _line_is_connection_or_ui(line, candidate_name=name):
+                continue
+            if not education_snippet:
+                education_snippet = line
+            continue
+
+        if _line_is_connection_or_ui(line, candidate_name=name):
+            continue
+        if line == name:
+            continue
+        if not headline and not _looks_like_location(line):
+            headline = line
+            continue
+        if not location and _looks_like_location(line):
+            location = line.split(" · ", 1)[0].strip()
+
+    current_title, current_company = ("", "")
+    if experience_entries:
+        current_title, current_company = _parse_title_company(experience_entries[0])
+    elif headline:
+        current_title, current_company = _parse_title_company(headline)
+
+    snippet = CandidateSnippet(
+        name=name,
+        headline=headline,
+        current_title=current_title,
+        current_company=current_company,
+        location=location,
+        education_snippet=education_snippet,
+        profile_url=dom_url.strip(),
+        source_string_id=string_id,
+        source_string_name=string_name,
+        page=page,
+        result_rank=result_rank,
+        experience_entries=experience_entries,
+    )
+    return _apply_card_dom_hints(snippet, dom_name=dom_name, dom_url=dom_url) if snippet.name else None
+
+
 def _build_snippet(
     candidate: dict,
     *,
@@ -183,6 +368,9 @@ def extract_snippet_from_card_innertext(
     string_name: str,
     page: int,
     result_rank: int,
+    *,
+    dom_name: str = "",
+    dom_url: str = "",
 ) -> CandidateSnippet | None:
     """Extract one candidate snippet from a single LinkedIn Recruiter result card."""
     user_prompt = f"""Extract the candidate data from this single LinkedIn Recruiter card.
@@ -193,17 +381,27 @@ Card text:
 {innertext}"""
 
     result = cheap_llm(CARD_EXTRACTION_SYSTEM, user_prompt, expect_json=True)
-    if not isinstance(result, dict):
-        return None
+    if isinstance(result, dict):
+        snippet = _build_snippet(
+            result,
+            string_id=string_id,
+            string_name=string_name,
+            page=page,
+            result_rank=result_rank,
+        )
+        snippet = _apply_card_dom_hints(snippet, dom_name=dom_name, dom_url=dom_url)
+        if snippet.name:
+            return snippet
 
-    snippet = _build_snippet(
-        result,
+    return _build_card_snippet_fallback(
+        innertext,
         string_id=string_id,
         string_name=string_name,
         page=page,
         result_rank=result_rank,
+        dom_name=dom_name,
+        dom_url=dom_url,
     )
-    return snippet if snippet.name else None
 
 
 # ---------------------------------------------------------------------------
