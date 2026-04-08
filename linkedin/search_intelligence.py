@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 from shared.schemas import SearchString
@@ -138,6 +139,103 @@ class LinkedInPageInsights:
 
 
 @dataclass
+class LinkedInVariantSnapshot:
+    page_start: int
+    page_end: int
+    result_count: int
+    result_window: str
+    title_clusters: list[dict[str, Any]] = field(default_factory=list)
+    company_clusters: list[dict[str, Any]] = field(default_factory=list)
+    signal_anchors: list[str] = field(default_factory=list)
+    noise_anchors: list[str] = field(default_factory=list)
+    dominant_non_fit_patterns: list[str] = field(default_factory=list)
+    signal_weight: float = 0.0
+    noise_weight: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "page_start": self.page_start,
+            "page_end": self.page_end,
+            "result_count": self.result_count,
+            "result_window": self.result_window,
+            "title_clusters": list(self.title_clusters),
+            "company_clusters": list(self.company_clusters),
+            "signal_anchors": list(self.signal_anchors),
+            "noise_anchors": list(self.noise_anchors),
+            "dominant_non_fit_patterns": list(self.dominant_non_fit_patterns),
+            "signal_weight": self.signal_weight,
+            "noise_weight": self.noise_weight,
+        }
+
+    @classmethod
+    def from_page(
+        cls,
+        *,
+        page_num: int,
+        result_count: int,
+        page_insights: LinkedInPageInsights,
+        page_stats: dict[str, int],
+    ) -> "LinkedInVariantSnapshot":
+        signal_weight = float(
+            page_stats.get("saves", 0) * 3
+            + page_stats.get("facial_yes", 0)
+            + page_stats.get("rejects", 0)
+        )
+        noise_weight = float(page_stats.get("facial_no", 0))
+        return cls(
+            page_start=page_num,
+            page_end=page_num,
+            result_count=result_count,
+            result_window=page_insights.result_window,
+            title_clusters=list(page_insights.title_clusters),
+            company_clusters=list(page_insights.company_clusters),
+            signal_anchors=list(page_insights.signal_anchors),
+            noise_anchors=list(page_insights.noise_anchors),
+            dominant_non_fit_patterns=list(page_insights.dominant_non_fit_patterns),
+            signal_weight=signal_weight,
+            noise_weight=noise_weight,
+        )
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any] | None) -> "LinkedInVariantSnapshot | None":
+        if not payload:
+            return None
+        return cls(
+            page_start=int(payload.get("page_start", 0)),
+            page_end=int(payload.get("page_end", 0)),
+            result_count=int(payload.get("result_count", 0)),
+            result_window=str(payload.get("result_window", "")),
+            title_clusters=list(payload.get("title_clusters", [])),
+            company_clusters=list(payload.get("company_clusters", [])),
+            signal_anchors=list(payload.get("signal_anchors", [])),
+            noise_anchors=list(payload.get("noise_anchors", [])),
+            dominant_non_fit_patterns=list(payload.get("dominant_non_fit_patterns", [])),
+            signal_weight=float(payload.get("signal_weight", 0.0)),
+            noise_weight=float(payload.get("noise_weight", 0.0)),
+        )
+
+
+@dataclass
+class LinkedInDriftAssessment:
+    decision: str
+    rationale: str
+    eligible: bool
+    overfit_risk: str = ""
+    keyword_hypothesis: str = ""
+    future_filter_hypothesis: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "decision": self.decision,
+            "rationale": self.rationale,
+            "eligible": self.eligible,
+            "overfit_risk": self.overfit_risk,
+            "keyword_hypothesis": self.keyword_hypothesis,
+            "future_filter_hypothesis": self.future_filter_hypothesis,
+        }
+
+
+@dataclass
 class LinkedInSearchVariant:
     variant_id: str
     parent_variant_id: str | None
@@ -236,7 +334,20 @@ class LinkedInExperimentState:
     experiment_round: int = 0
     mutations_used: int = 0
     consecutive_mutations: int = 0
+    pages_since_last_mutation: int = 0
     executed_sibling_count: int = 0
+    family_pages_reviewed_total: int = 0
+    family_candidates_total: int = 0
+    family_duplicates_total: int = 0
+    family_signal_total: int = 0
+    family_saves_total: int = 0
+    early_signal_snapshot: LinkedInVariantSnapshot | None = None
+    recent_noise_snapshot: LinkedInVariantSnapshot | None = None
+    drift_attempt_count: int = 0
+    pending_drift_variant_id: str | None = None
+    pending_drift_parent_variant_id: str | None = None
+    pending_drift_started_at: str = ""
+    last_drift_refinement_summary: dict[str, Any] = field(default_factory=dict)
     variants: dict[str, LinkedInSearchVariant] = field(default_factory=dict)
     last_page_insights: LinkedInPageInsights | None = None
 
@@ -263,7 +374,20 @@ class LinkedInExperimentState:
             "experiment_round": self.experiment_round,
             "mutations_used": self.mutations_used,
             "consecutive_mutations": self.consecutive_mutations,
+            "pages_since_last_mutation": self.pages_since_last_mutation,
             "executed_sibling_count": self.executed_sibling_count,
+            "family_pages_reviewed_total": self.family_pages_reviewed_total,
+            "family_candidates_total": self.family_candidates_total,
+            "family_duplicates_total": self.family_duplicates_total,
+            "family_signal_total": self.family_signal_total,
+            "family_saves_total": self.family_saves_total,
+            "early_signal_snapshot": self.early_signal_snapshot.to_dict() if self.early_signal_snapshot else None,
+            "recent_noise_snapshot": self.recent_noise_snapshot.to_dict() if self.recent_noise_snapshot else None,
+            "drift_attempt_count": self.drift_attempt_count,
+            "pending_drift_variant_id": self.pending_drift_variant_id,
+            "pending_drift_parent_variant_id": self.pending_drift_parent_variant_id,
+            "pending_drift_started_at": self.pending_drift_started_at,
+            "last_drift_refinement_summary": dict(self.last_drift_refinement_summary),
             "variants": {key: variant.to_dict() for key, variant in self.variants.items()},
             "last_page_insights": self.last_page_insights.to_dict() if self.last_page_insights else None,
         }
@@ -286,7 +410,20 @@ class LinkedInExperimentState:
             experiment_round=int(payload.get("experiment_round", 0)),
             mutations_used=int(payload.get("mutations_used", 0)),
             consecutive_mutations=int(payload.get("consecutive_mutations", 0)),
+            pages_since_last_mutation=int(payload.get("pages_since_last_mutation", 0)),
             executed_sibling_count=int(payload.get("executed_sibling_count", 0)),
+            family_pages_reviewed_total=int(payload.get("family_pages_reviewed_total", 0)),
+            family_candidates_total=int(payload.get("family_candidates_total", 0)),
+            family_duplicates_total=int(payload.get("family_duplicates_total", 0)),
+            family_signal_total=int(payload.get("family_signal_total", 0)),
+            family_saves_total=int(payload.get("family_saves_total", 0)),
+            early_signal_snapshot=LinkedInVariantSnapshot.from_dict(payload.get("early_signal_snapshot")),
+            recent_noise_snapshot=LinkedInVariantSnapshot.from_dict(payload.get("recent_noise_snapshot")),
+            drift_attempt_count=int(payload.get("drift_attempt_count", 0)),
+            pending_drift_variant_id=payload.get("pending_drift_variant_id"),
+            pending_drift_parent_variant_id=payload.get("pending_drift_parent_variant_id"),
+            pending_drift_started_at=str(payload.get("pending_drift_started_at", "")),
+            last_drift_refinement_summary=dict(payload.get("last_drift_refinement_summary", {})),
             variants=variants,
             last_page_insights=LinkedInPageInsights.from_dict(payload.get("last_page_insights")),
         )
@@ -317,7 +454,7 @@ class LinkedInExperimentState:
         return [variant.boolean for variant in lineage[:-1]]
 
     def compat_phase(self) -> str:
-        return "paginate" if self.mode == "paginate" else "scout"
+        return "paginate" if self.mode in {"paginate", "drift"} else "scout"
 
     def apply_shadow(self, search_string: SearchString) -> None:
         search_string.boolean = self.current_boolean()
@@ -339,6 +476,9 @@ class LinkedInExperimentState:
 
     def note_page_review(self) -> None:
         self.consecutive_mutations = 0
+        self.pages_since_last_mutation += 1
+        if self.pending_drift_variant_id and self.pending_drift_variant_id == self.active_variant_id:
+            self.clear_pending_drift()
 
     def begin_experiment_round(self, variants: list[LinkedInSearchVariant]) -> None:
         self.experiment_round += 1
@@ -371,6 +511,7 @@ class LinkedInExperimentState:
         self.active_variant_id = variant_id
         self.mutations_used += 1
         self.consecutive_mutations += 1
+        self.pages_since_last_mutation = 0
         if variant_id in self.planned_variant_ids:
             self.executed_sibling_count += 1
         return variant
@@ -378,11 +519,20 @@ class LinkedInExperimentState:
     def commit_variant(self, variant_id: str | None = None) -> LinkedInSearchVariant:
         variant_id = variant_id or self.active_variant_id
         variant = self.variants[variant_id]
+        preserving_drift_summary = self.mode == "drift"
         variant.status = "committed"
         self.committed_variant_id = variant_id
         self.active_variant_id = variant_id
         self.mode = "paginate"
         self.planned_variant_ids = []
+        self.early_signal_snapshot = None
+        self.recent_noise_snapshot = None
+        self.drift_attempt_count = 0
+        self.pending_drift_variant_id = None
+        self.pending_drift_parent_variant_id = None
+        self.pending_drift_started_at = ""
+        if not preserving_drift_summary:
+            self.last_drift_refinement_summary = {}
         return variant
 
     def record_variant_metrics(
@@ -391,22 +541,97 @@ class LinkedInExperimentState:
         variant_id: str | None = None,
         page_num: int,
         result_count: int,
-        string_stats: dict[str, Any],
+        page_stats: dict[str, Any],
         page_insights: LinkedInPageInsights | None = None,
     ) -> None:
         variant = self.variants[variant_id or self.active_variant_id]
         variant.result_count = result_count
         variant.pages_reviewed = max(variant.pages_reviewed, page_num)
-        variant.candidates = int(string_stats.get("candidates", 0))
-        variant.duplicates = int(string_stats.get("duplicates", 0))
-        variant.saves = int(string_stats.get("saves", 0))
-        variant.rejects = int(string_stats.get("rejects", 0))
-        variant.facial_yes = int(string_stats.get("facial_yes", 0))
-        variant.facial_no = int(string_stats.get("facial_no", 0))
+        variant.candidates += int(page_stats.get("candidates", 0))
+        variant.duplicates += int(page_stats.get("duplicates", 0))
+        variant.saves += int(page_stats.get("saves", 0))
+        variant.rejects += int(page_stats.get("rejects", 0))
+        variant.facial_yes += int(page_stats.get("facial_yes", 0))
+        variant.facial_no += int(page_stats.get("facial_no", 0))
         variant.last_page_insights = page_insights
         self.last_page_insights = page_insights
         if variant.status == "planned":
             variant.status = "explored"
+
+    def record_family_page_metrics(
+        self,
+        *,
+        page_num: int,
+        result_count: int,
+        page_stats: dict[str, int],
+        page_insights: LinkedInPageInsights,
+    ) -> None:
+        self.family_pages_reviewed_total += 1
+        self.family_candidates_total += int(page_stats.get("candidates", 0))
+        self.family_duplicates_total += int(page_stats.get("duplicates", 0))
+        page_signal = int(page_stats.get("saves", 0)) + int(page_stats.get("facial_yes", 0)) + int(
+            page_stats.get("rejects", 0)
+        )
+        self.family_signal_total += page_signal
+        self.family_saves_total += int(page_stats.get("saves", 0))
+
+        is_committed_variant_page = (
+            self.committed_variant_id is not None and self.active_variant_id == self.committed_variant_id
+        )
+        if is_committed_variant_page and self.early_signal_snapshot is None:
+            if int(page_stats.get("saves", 0)) > 0 or len(page_insights.signal_anchors) >= 2:
+                self.early_signal_snapshot = LinkedInVariantSnapshot.from_page(
+                    page_num=page_num,
+                    result_count=result_count,
+                    page_insights=page_insights,
+                    page_stats=page_stats,
+                )
+        if is_committed_variant_page:
+            no_signal = page_signal == 0
+            noisy_page = bool(page_insights.noise_anchors) or page_insights.glance_action == "reformulate"
+            if no_signal and noisy_page:
+                self.recent_noise_snapshot = LinkedInVariantSnapshot.from_page(
+                    page_num=page_num,
+                    result_count=result_count,
+                    page_insights=page_insights,
+                    page_stats=page_stats,
+                )
+
+    def real_signal_seen(self) -> bool:
+        if self.family_saves_total > 0:
+            return True
+        return bool(self.early_signal_snapshot and len(self.early_signal_snapshot.signal_anchors) >= 2)
+
+    def mark_pending_drift(
+        self,
+        *,
+        variant_id: str,
+        parent_variant_id: str | None,
+        summary: dict[str, Any] | None = None,
+    ) -> None:
+        self.mode = "drift"
+        self.drift_attempt_count += 1
+        self.pending_drift_variant_id = variant_id
+        self.pending_drift_parent_variant_id = parent_variant_id
+        self.pending_drift_started_at = datetime.now(timezone.utc).isoformat()
+        if summary is not None:
+            self.last_drift_refinement_summary = dict(summary)
+
+    def clear_pending_drift(self, summary: dict[str, Any] | None = None) -> None:
+        self.pending_drift_variant_id = None
+        self.pending_drift_parent_variant_id = None
+        self.pending_drift_started_at = ""
+        if summary is not None:
+            self.last_drift_refinement_summary = dict(summary)
+
+    def rollback_pending_drift(self) -> None:
+        if self.drift_attempt_count > 0:
+            self.drift_attempt_count -= 1
+        self.pending_drift_variant_id = None
+        self.pending_drift_parent_variant_id = None
+        self.pending_drift_started_at = ""
+        if self.mode == "drift":
+            self.mode = "paginate" if self.committed_variant_id else "recon"
 
     def best_variant(self) -> LinkedInSearchVariant:
         candidates = [
@@ -417,13 +642,38 @@ class LinkedInExperimentState:
         return max(candidates, key=lambda variant: variant.score(), default=self.active_variant)
 
     def metrics_summary(self) -> dict[str, Any]:
+        active_variant = self.active_variant
         return {
             "mode": self.mode,
             "active_variant_id": self.active_variant_id,
             "committed_variant_id": self.committed_variant_id,
             "experiment_round": self.experiment_round,
             "mutations_used": self.mutations_used,
+            "drift_attempt_count": self.drift_attempt_count,
+            "pending_drift_variant_id": self.pending_drift_variant_id,
+            "pending_drift_parent_variant_id": self.pending_drift_parent_variant_id,
+            "pending_drift_started_at": self.pending_drift_started_at,
+            "family_pages_reviewed_total": self.family_pages_reviewed_total,
+            "family_candidates_total": self.family_candidates_total,
+            "family_duplicates_total": self.family_duplicates_total,
+            "family_signal_total": self.family_signal_total,
+            "family_saves_total": self.family_saves_total,
+            "active_variant_page": active_variant.pages_reviewed,
+            "active_variant_pages_reviewed": active_variant.pages_reviewed,
+            "active_variant_result_count": active_variant.result_count,
+            "active_variant_signal": active_variant.saves + active_variant.facial_yes + active_variant.rejects,
+            "active_variant_saves": active_variant.saves,
             "executed_sibling_count": self.executed_sibling_count,
+            "early_signal_snapshot": self.early_signal_snapshot.to_dict() if self.early_signal_snapshot else None,
+            "recent_noise_snapshot": self.recent_noise_snapshot.to_dict() if self.recent_noise_snapshot else None,
+            "family_outcome_summary": {
+                "root_string_id": self.root_string_id,
+                "committed_variant_id": self.committed_variant_id,
+                "family_pages_reviewed_total": self.family_pages_reviewed_total,
+                "family_signal_total": self.family_signal_total,
+                "family_saves_total": self.family_saves_total,
+            },
+            "drift_rescue_summary": dict(self.last_drift_refinement_summary),
             "variants": {
                 key: {
                     "variant_kind": variant.variant_kind,

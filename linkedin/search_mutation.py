@@ -39,6 +39,8 @@ class LinkedInSearchMutationExecutor:
         search_string: "SearchString",
         experiment_state: "LinkedInExperimentState",
         variant: "LinkedInSearchVariant",
+        mutation_kind: str = "experiment",
+        mutation_summary: dict[str, Any] | None = None,
     ) -> SearchMutationResult:
         pipeline = self.pipeline
         if not variant.structured_filters.is_empty():
@@ -52,16 +54,61 @@ class LinkedInSearchMutationExecutor:
             self._record_event(
                 search_string=search_string,
                 event_type="linkedin_search_mutation_blocked",
-                payload={"reason": "consecutive_rewrite_limit", "variant_id": variant.variant_id},
+                payload={
+                    "reason": "consecutive_rewrite_limit",
+                    "variant_id": variant.variant_id,
+                    "mutation_kind": mutation_kind,
+                },
             )
             return SearchMutationResult(applied=False, blocked_reason="consecutive_rewrite_limit")
         if pipeline._search_mutation_budget_used >= config.SEARCH_EXPERIMENT_MUTATION_BUDGET:
             self._record_event(
                 search_string=search_string,
                 event_type="linkedin_search_mutation_blocked",
-                payload={"reason": "session_humanization_budget", "variant_id": variant.variant_id},
+                payload={
+                    "reason": "session_humanization_budget",
+                    "variant_id": variant.variant_id,
+                    "mutation_kind": mutation_kind,
+                },
             )
             return SearchMutationResult(applied=False, blocked_reason="session_humanization_budget")
+        if mutation_kind == "drift":
+            if (
+                experiment_state.drift_attempt_count
+                >= config.SEARCH_EXPERIMENT_MAX_DRIFT_ATTEMPTS_PER_VARIANT
+            ):
+                self._record_event(
+                    search_string=search_string,
+                    event_type="linkedin_search_mutation_blocked",
+                    payload={
+                        "reason": "drift_attempt_limit",
+                        "variant_id": variant.variant_id,
+                        "mutation_kind": mutation_kind,
+                    },
+                )
+                return SearchMutationResult(applied=False, blocked_reason="drift_attempt_limit")
+            if experiment_state.drift_attempt_count >= config.SEARCH_EXPERIMENT_DRIFT_BUDGET:
+                self._record_event(
+                    search_string=search_string,
+                    event_type="linkedin_search_mutation_blocked",
+                    payload={
+                        "reason": "string_drift_budget",
+                        "variant_id": variant.variant_id,
+                        "mutation_kind": mutation_kind,
+                    },
+                )
+                return SearchMutationResult(applied=False, blocked_reason="string_drift_budget")
+            if experiment_state.pages_since_last_mutation < 1:
+                self._record_event(
+                    search_string=search_string,
+                    event_type="linkedin_search_mutation_blocked",
+                    payload={
+                        "reason": "drift_cooldown",
+                        "variant_id": variant.variant_id,
+                        "mutation_kind": mutation_kind,
+                    },
+                )
+                return SearchMutationResult(applied=False, blocked_reason="drift_cooldown")
 
         self._record_event(
             search_string=search_string,
@@ -72,6 +119,7 @@ class LinkedInSearchMutationExecutor:
                 "hypothesis": variant.hypothesis,
                 "target_result_min": variant.target_result_min,
                 "target_result_max": variant.target_result_max,
+                "mutation_kind": mutation_kind,
             },
         )
         log_event(
@@ -81,19 +129,31 @@ class LinkedInSearchMutationExecutor:
             variant_id=variant.variant_id,
             variant_kind=variant.variant_kind,
             hypothesis=variant.hypothesis,
+            mutation_kind=mutation_kind,
         )
 
-        await pipeline.browser.go_back_to_results()
-        await asyncio.sleep(human_delay_correlated(0.8, channel="search_mutation"))
-        await pipeline.browser.enter_search_string(variant.boolean)
-        await asyncio.sleep(human_delay_correlated(random.uniform(0.9, 1.6), channel="search_mutation"))
-        result_count_text = await pipeline.browser.get_results_count_text()
-        result_count = await pipeline.browser.get_results_count()
-        top_card_snapshot = None
         try:
-            top_card_snapshot = await pipeline.browser.get_card_snapshot(0)
-        except Exception:
+            if mutation_kind == "drift":
+                experiment_state.mark_pending_drift(
+                    variant_id=variant.variant_id,
+                    parent_variant_id=experiment_state.committed_variant_id or experiment_state.active_variant_id,
+                    summary=mutation_summary,
+                )
+            await pipeline.browser.go_back_to_results()
+            await asyncio.sleep(human_delay_correlated(0.8, channel="search_mutation"))
+            await pipeline.browser.enter_search_string(variant.boolean)
+            await asyncio.sleep(human_delay_correlated(random.uniform(0.9, 1.6), channel="search_mutation"))
+            result_count_text = await pipeline.browser.get_results_count_text()
+            result_count = await pipeline.browser.get_results_count()
             top_card_snapshot = None
+            try:
+                top_card_snapshot = await pipeline.browser.get_card_snapshot(0)
+            except Exception:
+                top_card_snapshot = None
+        except Exception:
+            if mutation_kind == "drift":
+                experiment_state.rollback_pending_drift()
+            raise
 
         pipeline._search_mutation_budget_used += 1
         experiment_state.activate_variant(variant.variant_id)
@@ -104,6 +164,7 @@ class LinkedInSearchMutationExecutor:
             "result_count": result_count,
             "result_count_text": result_count_text,
             "top_card_snapshot": top_card_snapshot or {},
+            "mutation_kind": mutation_kind,
         }
         self._record_event(
             search_string=search_string,
@@ -117,6 +178,7 @@ class LinkedInSearchMutationExecutor:
             variant_id=variant.variant_id,
             result_count=result_count,
             result_count_text=result_count_text,
+            mutation_kind=mutation_kind,
         )
         return SearchMutationResult(
             applied=True,

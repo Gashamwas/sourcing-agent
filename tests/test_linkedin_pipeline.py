@@ -22,7 +22,7 @@ from shared.schemas import (
 )
 from shared.governor import SessionExpired
 from shared.storage import append_jsonl, read_jsonl
-from linkedin.search_intelligence import LinkedInSearchVariant
+from linkedin.search_intelligence import LinkedInPageInsights, LinkedInSearchVariant
 from linkedin.search_mutation import SearchMutationResult
 
 
@@ -1078,6 +1078,138 @@ def test_process_string_runs_variant_experiment_before_commit():
         p.browser.go_to_next_page.assert_awaited_once()
         assert "Committed precision variant on page 1." in (search_string.notes or "")
         assert "Stopped after page 2." in (search_string.notes or "")
+
+
+def test_assess_pagination_drift_prefers_recall_when_overfit_risk_is_high():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        search_string = SearchString(id=9, name="scout", boolean="foo", status="queued")
+        state = p._experiment_state_for(search_string)
+        state.commit_variant("root")
+        # Snapshot uses one strong anchor, which should make rescue more recall-friendly.
+        from linkedin.search_intelligence import LinkedInVariantSnapshot
+
+        state.early_signal_snapshot = LinkedInVariantSnapshot.from_page(
+            page_num=1,
+            result_count=3200,
+            page_insights=LinkedInPageInsights(
+                page=1,
+                result_count=3200,
+                result_window="150-800",
+                title_clusters=[{"label": "machine learning engineer", "count": 3}],
+                signal_anchors=["ML engineer at OpenAI"],
+            ),
+            page_stats={"saves": 1, "facial_yes": 0, "rejects": 0},
+        )
+        state.recent_noise_snapshot = LinkedInVariantSnapshot.from_page(
+            page_num=3,
+            result_count=3200,
+            page_insights=LinkedInPageInsights(
+                page=3,
+                result_count=3200,
+                result_window="150-800",
+                title_clusters=[{"label": "product manager", "count": 4}],
+                noise_anchors=["Product manager at BankCorp"],
+                dominant_non_fit_patterns=["product-heavy profiles dominate"],
+                glance_action="reformulate",
+            ),
+            page_stats={"facial_no": 3},
+        )
+        state.family_saves_total = 1
+        state.active_variant.pages_reviewed = 3
+        state.pages_since_last_mutation = 1
+
+        assessment = p._assess_pagination_drift(
+            experiment_state=state,
+            page_num=3,
+            result_count=3200,
+            page_stats={"facial_no": 3},
+            page_insights=LinkedInPageInsights(
+                page=3,
+                result_count=3200,
+                result_window="150-800",
+                noise_anchors=["Product manager at BankCorp"],
+                dominant_non_fit_patterns=["product-heavy profiles dominate"],
+                glance_action="reformulate",
+            ),
+            remaining_queued_strings=4,
+        )
+
+        assert assessment.decision == "spawn_recall_sibling"
+        assert assessment.future_filter_hypothesis.startswith("title filter")
+
+
+def test_process_string_runs_bounded_drift_rescue():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+
+        search_string = SearchString(id=12, name="scout", boolean="foo", status="queued")
+        progress = Progress(
+            brief_name="test",
+            strings=[search_string, SearchString(id=13, name="other", boolean="bar", status="queued")],
+            current_string_id=12,
+            current_page=0,
+        )
+
+        no_results = MagicMock()
+        no_results.is_visible = AsyncMock(return_value=False)
+        locator = MagicMock()
+        locator.first = no_results
+
+        p.browser.page = MagicMock(url="https://www.linkedin.com/talent/search")
+        p.browser.page.locator.return_value = locator
+        p.browser.enter_search_string = AsyncMock()
+        p.browser.get_results_count_text = AsyncMock(side_effect=["3.2K+", "600"])
+        p.browser.get_results_count = AsyncMock(side_effect=[3200, 600])
+        p.browser.go_to_next_page = AsyncMock(return_value=True)
+
+        p._ensure_browser_healthy = AsyncMock()
+        p._review_page_sequentially = AsyncMock(side_effect=[None, None, None, None])
+        p._assess_string_state = AsyncMock(
+            side_effect=[
+                {"decision": "commit", "rationale": "page 1 strong", "page": 1},
+                {"decision": "refine_committed", "rationale": "drifting", "page": 2},
+                {"decision": "commit", "rationale": "rescued", "page": 1},
+                {"decision": "stop", "rationale": "done", "page": 2},
+            ]
+        )
+        p._plan_variant_experiments = AsyncMock()
+        p._plan_drift_refinement = AsyncMock(
+            return_value=(
+                LinkedInSearchVariant(
+                    variant_id="drift-12-1",
+                    parent_variant_id="root",
+                    root_string_id=12,
+                    boolean="foo NOT product",
+                    variant_kind="precision",
+                ),
+                {"decision": "refine_committed", "keyword_hypothesis": "exclude product-heavy leakage"},
+            )
+        )
+
+        async def _apply_variant(*, search_string, experiment_state, variant, mutation_kind="experiment", mutation_summary=None):
+            experiment_state.mark_pending_drift(
+                variant_id=variant.variant_id,
+                parent_variant_id=experiment_state.committed_variant_id or experiment_state.active_variant_id,
+                summary=mutation_summary,
+            )
+            experiment_state.activate_variant(variant.variant_id)
+            return SearchMutationResult(
+                applied=True,
+                result_count=600,
+                result_count_text="600",
+            )
+
+        p._search_mutation_executor.apply_variant = AsyncMock(side_effect=_apply_variant)
+
+        with patch("linkedin.orchestrator.human_delay_correlated", return_value=0):
+            asyncio.run(p._process_string(search_string, progress))
+
+        assert p._plan_drift_refinement.await_count == 1
+        assert p._search_mutation_executor.apply_variant.await_args.kwargs["mutation_kind"] == "drift"
+        assert search_string.boolean == "foo NOT product"
+        assert search_string.pages_reviewed == 2
+        assert "Drift rescue precision applied on page 2." in (search_string.notes or "")
 
 
 def _sample_report_analysis() -> dict:

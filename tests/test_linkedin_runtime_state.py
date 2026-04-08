@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from linkedin.search_intelligence import LinkedInSearchVariant, bootstrap_experiment_state
+from linkedin.search_intelligence import LinkedInPageInsights, LinkedInSearchVariant, bootstrap_experiment_state
 from shared.runtime_state import LinkedInRuntimeStateBridge, RuntimeStateStore
 from shared.schemas import CandidateSnippet, OpusDecision, Progress, SearchString
 from shared.storage import append_jsonl, read_jsonl
@@ -247,6 +247,66 @@ def test_sync_progress_roundtrips_experiment_state(tmp_path):
     assert loaded_states[1].committed_variant_id == "precision-1"
 
 
+def test_sync_progress_roundtrips_pending_drift_and_family_metrics(tmp_path):
+    store = RuntimeStateStore(tmp_path / "runtime_state.sqlite3")
+    bridge = LinkedInRuntimeStateBridge(
+        store=store,
+        output_dir=tmp_path,
+        brief_id="test-project",
+        brief_name="test",
+    )
+    run_id = store.start_run(
+        source="linkedin",
+        brief_id="test-project",
+        output_dir=str(tmp_path),
+        mode="fresh",
+        resume_state={"brief_name": "test"},
+    )
+
+    search_string = SearchString(id=1, name="builders", boolean="foo")
+    state = bootstrap_experiment_state(search_string)
+    state.commit_variant("root")
+    page = LinkedInPageInsights(
+        page=1,
+        result_count=1800,
+        result_window="150-800",
+        signal_anchors=["ML engineer at OpenAI", "Research engineer at Anthropic"],
+        title_clusters=[{"label": "machine learning engineer", "count": 4}],
+    )
+    state.record_variant_metrics(page_num=1, result_count=1800, page_stats={"candidates": 4, "facial_yes": 2, "saves": 1}, page_insights=page)
+    state.record_family_page_metrics(page_num=1, result_count=1800, page_stats={"candidates": 4, "facial_yes": 2, "saves": 1}, page_insights=page)
+    drift_variant = LinkedInSearchVariant(
+        variant_id="drift-1",
+        parent_variant_id="root",
+        root_string_id=1,
+        boolean="foo AND bar",
+        variant_kind="precision",
+    )
+    state.variants["drift-1"] = drift_variant
+    state.mark_pending_drift(
+        variant_id="drift-1",
+        parent_variant_id="root",
+        summary={"decision": "refine_committed", "keyword_hypothesis": "tighten around ML engineer"},
+    )
+    state.activate_variant("drift-1")
+    state.apply_shadow(search_string)
+
+    progress = Progress(brief_name="test", strings=[search_string], current_string_id=1, current_page=1)
+    bridge.sync_progress(run_id, progress, experiment_states={1: state})
+
+    loaded_progress = bridge.load_progress(run_id)
+    loaded_states = bridge.load_experiment_states(run_id, progress=loaded_progress)
+    row = store.get_work_unit_by_source_id(run_id, kind="linkedin_string", source_unit_id="1")
+    metrics = json.loads(row["metrics_json"])
+
+    assert loaded_states[1].pending_drift_variant_id == "drift-1"
+    assert loaded_states[1].pending_drift_parent_variant_id == "root"
+    assert loaded_states[1].drift_attempt_count == 1
+    assert metrics["experiment_summary"]["family_pages_reviewed_total"] == 1
+    assert metrics["experiment_summary"]["active_variant_pages_reviewed"] == 0
+    assert metrics["experiment_summary"]["drift_rescue_summary"]["decision"] == "refine_committed"
+
+
 def test_profile_extraction_failure_becomes_failed_retryable(tmp_path):
     p = _make_pipeline(str(tmp_path))
     search_string = SearchString(id=1, name="builders", boolean="ml")
@@ -457,3 +517,48 @@ def test_restart_string_resets_variant_execution_state(tmp_path):
     assert reloaded_progress.strings[0].refinement_stack == []
     assert reloaded_states[1].active_variant_id == "root"
     assert reloaded_states[1].committed_variant_id is None
+
+
+def test_restart_string_clears_pending_drift_state(tmp_path):
+    store = RuntimeStateStore(tmp_path / "runtime_state.sqlite3")
+    bridge = LinkedInRuntimeStateBridge(
+        store=store,
+        output_dir=tmp_path,
+        brief_id="test-project",
+        brief_name="test",
+    )
+    run_id = store.start_run(
+        source="linkedin",
+        brief_id="test-project",
+        output_dir=str(tmp_path),
+        mode="fresh",
+        resume_state={"brief_name": "test"},
+    )
+    search_string = SearchString(id=1, name="builders", boolean="foo", status="in_progress")
+    state = bootstrap_experiment_state(search_string)
+    state.commit_variant("root")
+    state.variants["drift-1"] = LinkedInSearchVariant(
+        variant_id="drift-1",
+        parent_variant_id="root",
+        root_string_id=1,
+        boolean="foo AND bar",
+        variant_kind="precision",
+    )
+    state.mark_pending_drift(
+        variant_id="drift-1",
+        parent_variant_id="root",
+        summary={"decision": "refine_committed"},
+    )
+    state.activate_variant("drift-1")
+    state.apply_shadow(search_string)
+    progress = Progress(brief_name="test", strings=[search_string], current_string_id=1, current_page=1)
+    bridge.sync_progress(run_id, progress, experiment_states={1: state})
+
+    bridge.restart_string(run_id=run_id, progress=progress, string_id=1)
+    reloaded_progress = bridge.load_progress(run_id)
+    reloaded_states = bridge.load_experiment_states(run_id, progress=reloaded_progress)
+
+    assert reloaded_progress.strings[0].boolean == "foo"
+    assert reloaded_states[1].pending_drift_variant_id is None
+    assert reloaded_states[1].pending_drift_parent_variant_id is None
+    assert reloaded_states[1].drift_attempt_count == 0

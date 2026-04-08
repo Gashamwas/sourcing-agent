@@ -27,9 +27,11 @@ from shared.schemas import (
 from linkedin.acquisition import LinkedInAcquisitionService
 from linkedin.browser import LinkedInBrowser
 from linkedin.search_intelligence import (
+    LinkedInDriftAssessment,
     LinkedInExperimentState,
     LinkedInPageInsights,
     LinkedInSearchVariant,
+    LinkedInVariantSnapshot,
     bootstrap_experiment_state,
     result_window_for_count,
 )
@@ -1281,6 +1283,7 @@ class Pipeline:
                 page=page_num,
                 result_count=result_count,
             )
+            stats_before_page = dict(string_stats)
 
             glance_result = await self._review_page_sequentially(
                 search_string=search_string,
@@ -1293,6 +1296,7 @@ class Pipeline:
             )
 
             string_stats["pages"] = page_num
+            page_stats = self._page_stat_delta(stats_before_page, string_stats)
             self._current_variant_candidates = list(all_candidates)
             page_insights = self._build_page_insights(
                 page_num=page_num,
@@ -1304,7 +1308,13 @@ class Pipeline:
             experiment_state.record_variant_metrics(
                 page_num=page_num,
                 result_count=result_count,
-                string_stats=string_stats,
+                page_stats=page_stats,
+                page_insights=page_insights,
+            )
+            experiment_state.record_family_page_metrics(
+                page_num=page_num,
+                result_count=result_count,
+                page_stats=page_stats,
                 page_insights=page_insights,
             )
             experiment_state.note_page_review()
@@ -1318,9 +1328,48 @@ class Pipeline:
                 page_num=page_num,
                 result_count=result_count,
                 string_stats=string_stats,
+                page_stats=page_stats,
                 page_insights=page_insights,
+                remaining_queued_strings=self._remaining_queued_strings(progress, current_string_id=search_string.id),
             )
             decision = assessment["decision"]
+
+            if decision in {"refine_committed", "spawn_recall_sibling"}:
+                drift_variant, drift_summary = await self._plan_drift_refinement(
+                    search_string=search_string,
+                    experiment_state=experiment_state,
+                    current_boolean=current_boolean,
+                    result_count=result_count,
+                    result_count_text=result_count_text,
+                    page_insights=page_insights,
+                    page_stats=page_stats,
+                )
+                if drift_variant is not None:
+                    experiment_state.variants[drift_variant.variant_id] = drift_variant
+                    mutation = await self._search_mutation_executor.apply_variant(
+                        search_string=search_string,
+                        experiment_state=experiment_state,
+                        variant=drift_variant,
+                        mutation_kind="drift",
+                        mutation_summary=drift_summary,
+                    )
+                    if mutation.applied:
+                        current_boolean = experiment_state.current_boolean()
+                        result_count = mutation.result_count
+                        result_count_text = mutation.result_count_text
+                        search_string.result_count = result_count
+                        experiment_state.apply_shadow(search_string)
+                        search_string.notes = (
+                            (search_string.notes or "")
+                            + f" Drift rescue {drift_variant.variant_kind} applied on page {page_num}."
+                        )
+                        search_string.pages_reviewed = 0
+                        page_num = 1
+                        all_candidates.clear()
+                        string_stats = self._fresh_string_stats()
+                        self._checkpoint_progress(progress, search_string=search_string, page_num=1)
+                        continue
+                decision = "continue"
 
             if decision == "experiment":
                 if experiment_state.mode != "experiment" or experiment_state.next_planned_variant() is None:
@@ -1364,6 +1413,7 @@ class Pipeline:
                                 (search_string.notes or "")
                                 + f" Variant {next_variant.variant_kind} applied on page {page_num}."
                             )
+                            search_string.pages_reviewed = 0
                             page_num = 1
                             all_candidates.clear()
                             string_stats = self._fresh_string_stats()
@@ -1377,6 +1427,13 @@ class Pipeline:
 
             if decision == "commit":
                 committed = experiment_state.commit_variant()
+                if assessment.get("bootstrap_early_snapshot"):
+                    experiment_state.early_signal_snapshot = LinkedInVariantSnapshot.from_page(
+                        page_num=page_num,
+                        result_count=result_count,
+                        page_insights=page_insights,
+                        page_stats=page_stats,
+                    )
                 current_boolean = committed.boolean
                 search_string.result_count = committed.result_count or result_count
                 experiment_state.apply_shadow(search_string)
@@ -2006,6 +2063,19 @@ class Pipeline:
             "rejects": 0,
         }
 
+    @staticmethod
+    def _page_stat_delta(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
+        keys = ("candidates", "duplicates", "facial_yes", "facial_no", "saves", "rejects")
+        return {key: max(0, int(after.get(key, 0)) - int(before.get(key, 0))) for key in keys}
+
+    @staticmethod
+    def _remaining_queued_strings(progress: Progress, *, current_string_id: int) -> int:
+        return sum(
+            1
+            for string in progress.strings
+            if string.id != current_string_id and string.status in {"queued", "in_progress"}
+        )
+
     def _initial_search_mode(self, result_count: int) -> str:
         return "recon" if result_count >= 500 else "paginate"
 
@@ -2078,13 +2148,12 @@ class Pipeline:
         page_num: int,
         result_count: int,
         string_stats: dict[str, int],
+        page_stats: dict[str, int],
         page_insights: LinkedInPageInsights,
+        remaining_queued_strings: int,
     ) -> dict[str, str]:
-        page_candidates = self._page_candidates(getattr(self, "_current_variant_candidates", []), page_num)
-        page_signal = sum(
-            1
-            for candidate in page_candidates
-            if candidate.get("outcome") in {"save", "facial_yes", "reject"}
+        page_signal = int(page_stats.get("saves", 0)) + int(page_stats.get("facial_yes", 0)) + int(
+            page_stats.get("rejects", 0)
         )
         active_variant = experiment_state.active_variant
         min_pages = self._get_min_pages(result_count)
@@ -2120,15 +2189,43 @@ class Pipeline:
             else:
                 decision = "stop"
                 rationale = "experiment siblings did not surface enough signal to justify further pagination"
+        elif experiment_state.mode == "drift":
+            if active_variant.saves > 0 or active_variant.facial_yes > 0 or active_variant.within_target_window():
+                decision = "commit"
+                rationale = "drift rescue recovered a higher-signal slice and should become the new committed path"
+                experiment_state.last_drift_refinement_summary = {
+                    **experiment_state.last_drift_refinement_summary,
+                    "outcome": "rescued",
+                    "reviewed_page": page_num,
+                }
+            else:
+                decision = "stop"
+                rationale = "drift rescue did not recover signal and the family should stop cleanly instead of churning rewrites"
+                experiment_state.last_drift_refinement_summary = {
+                    **experiment_state.last_drift_refinement_summary,
+                    "outcome": "not_rescued",
+                    "reviewed_page": page_num,
+                }
         else:
-            if (
-                result_count >= 500
-                and page_num <= 2
-                and page_signal == 0
-                and page_insights.glance_action == "reformulate"
-            ):
-                decision = "experiment"
-                rationale = "pagination is degrading early and the page-level evidence says the committed variant is drifting noisy"
+            drift_assessment = self._assess_pagination_drift(
+                experiment_state=experiment_state,
+                page_num=page_num,
+                result_count=result_count,
+                page_stats=page_stats,
+                page_insights=page_insights,
+                remaining_queued_strings=remaining_queued_strings,
+            )
+            if drift_assessment.decision in {"refine_committed", "spawn_recall_sibling"}:
+                decision = drift_assessment.decision
+                rationale = drift_assessment.rationale
+                experiment_state.last_drift_refinement_summary = {
+                    **experiment_state.last_drift_refinement_summary,
+                    **drift_assessment.to_dict(),
+                    "parent_variant_id": experiment_state.committed_variant_id,
+                    "page": page_num,
+                    "result_count": result_count,
+                    "outcome": "pending",
+                }
             elif page_num >= min_pages and page_signal == 0:
                 decision = "stop"
                 rationale = "minimum review depth has been met and the latest page produced no usable signal"
@@ -2143,7 +2240,12 @@ class Pipeline:
             "result_count": result_count,
             "mode": experiment_state.mode,
             "active_variant_id": experiment_state.active_variant_id,
+            "remaining_queued_strings": remaining_queued_strings,
         }
+        if decision == "commit" and page_signal > 0:
+            payload["bootstrap_early_snapshot"] = True
+        if decision in {"refine_committed", "spawn_recall_sibling"}:
+            payload["drift_rescue_summary"] = dict(experiment_state.last_drift_refinement_summary)
         log_event(self.log_path, "linkedin_search_assess", string_id=search_string.id, **payload)
         self._record_runtime_event(
             search_string=search_string,
@@ -2151,6 +2253,92 @@ class Pipeline:
             payload=payload,
         )
         return payload
+
+    def _assess_pagination_drift(
+        self,
+        *,
+        experiment_state: LinkedInExperimentState,
+        page_num: int,
+        result_count: int,
+        page_stats: dict[str, int],
+        page_insights: LinkedInPageInsights,
+        remaining_queued_strings: int,
+    ) -> LinkedInDriftAssessment:
+        if experiment_state.committed_variant_id is None:
+            return LinkedInDriftAssessment(decision="continue", rationale="", eligible=False)
+        if experiment_state.active_variant_id != experiment_state.committed_variant_id:
+            return LinkedInDriftAssessment(decision="continue", rationale="", eligible=False)
+        if experiment_state.drift_attempt_count >= config.SEARCH_EXPERIMENT_DRIFT_BUDGET:
+            return LinkedInDriftAssessment(
+                decision="continue",
+                rationale="drift budget already used for this committed variant",
+                eligible=False,
+            )
+        if experiment_state.pages_since_last_mutation < 1:
+            return LinkedInDriftAssessment(
+                decision="continue",
+                rationale="need at least one fully reviewed page between search mutations",
+                eligible=False,
+            )
+        active_variant = experiment_state.active_variant
+        if active_variant.pages_reviewed < 2 or page_num < 2 or result_count < 500:
+            return LinkedInDriftAssessment(decision="continue", rationale="", eligible=False)
+        if not experiment_state.real_signal_seen():
+            return LinkedInDriftAssessment(
+                decision="continue",
+                rationale="committed variant has not shown enough real signal to justify rescue",
+                eligible=False,
+            )
+
+        page_signal = int(page_stats.get("saves", 0)) + int(page_stats.get("facial_yes", 0)) + int(
+            page_stats.get("rejects", 0)
+        )
+        noisy_page = page_signal == 0 and (
+            page_insights.glance_action == "reformulate"
+            or len(page_insights.noise_anchors) >= max(2, len(page_insights.signal_anchors) + 1)
+            or bool(page_insights.dominant_non_fit_patterns)
+        )
+        if not noisy_page:
+            return LinkedInDriftAssessment(decision="continue", rationale="", eligible=False)
+
+        opportunity_cost_ok = experiment_state.family_saves_total > 0 or remaining_queued_strings <= 3
+        if not opportunity_cost_ok:
+            return LinkedInDriftAssessment(
+                decision="continue",
+                rationale="other untouched families still have higher expected value than rescuing this one",
+                eligible=False,
+            )
+
+        early = experiment_state.early_signal_snapshot
+        recent = experiment_state.recent_noise_snapshot
+        early_titles = [cluster.get("label", "") for cluster in (early.title_clusters if early else []) if cluster.get("label")]
+        recent_titles = [cluster.get("label", "") for cluster in (recent.title_clusters if recent else []) if cluster.get("label")]
+        overfit_risk = "high" if early and len(early.signal_anchors) <= 1 and remaining_queued_strings > 1 else "medium"
+        keyword_hypothesis = ""
+        if early_titles:
+            keyword_hypothesis = f"tighten around early signal titles like {early_titles[0]}"
+        elif recent_titles:
+            keyword_hypothesis = f"exclude late-page leakage titles like {recent_titles[0]}"
+        future_filter_hypothesis = ""
+        if recent_titles:
+            future_filter_hypothesis = f"title filter could exclude {recent_titles[0]}"
+        elif recent and recent.company_clusters:
+            future_filter_hypothesis = f"company filter could demote {recent.company_clusters[0].get('label', '')}"
+
+        if overfit_risk == "high":
+            decision = "spawn_recall_sibling"
+            rationale = "later pages are drifting, but the early signal sample is narrow enough that rescue should stay recall-friendly"
+        else:
+            decision = "refine_committed"
+            rationale = "later pages are leaking noise and the committed variant has enough prior value to justify one bounded keyword rescue"
+        return LinkedInDriftAssessment(
+            decision=decision,
+            rationale=rationale,
+            eligible=True,
+            overfit_risk=overfit_risk,
+            keyword_hypothesis=keyword_hypothesis,
+            future_filter_hypothesis=future_filter_hypothesis,
+        )
 
     async def _plan_variant_experiments(
         self,
@@ -2282,6 +2470,138 @@ Current stats:
             },
         )
         return variants
+
+    async def _plan_drift_refinement(
+        self,
+        *,
+        search_string: SearchString,
+        experiment_state: LinkedInExperimentState,
+        current_boolean: str,
+        result_count: int,
+        result_count_text: str,
+        page_insights: LinkedInPageInsights,
+        page_stats: dict[str, int],
+    ) -> tuple[LinkedInSearchVariant | None, dict[str, Any]]:
+        from shared.llm_clients import opus_llm_cached
+
+        summary = dict(experiment_state.last_drift_refinement_summary)
+        decision = summary.get("decision", "refine_committed")
+        target_window = result_window_for_count(result_count) or (75, 400)
+        early_snapshot = experiment_state.early_signal_snapshot
+        recent_snapshot = experiment_state.recent_noise_snapshot
+        variant_kind = "recall" if decision == "spawn_recall_sibling" else "precision"
+
+        system = f"""You are a senior LinkedIn Recruiter operator rescuing a keyword-only search that started strong and then degraded mid-pagination.
+
+Role: {self.brief_obj.role_title}
+{self.brief_obj.role_description}
+
+Task:
+- Compare early productive pages against recent noisy pages.
+- Return exactly one conservative keyword-only Boolean rescue variant.
+- If overfit risk is high, keep it recall-friendly. Otherwise tighten around the early-good anchors and exclude later leakage.
+- Do not use structured filters. If a title/company/skill filter would help, record it only as future_filter_hypothesis.
+- Do not return the unchanged Boolean.
+
+Return JSON:
+{{
+  "boolean": "LinkedIn Boolean",
+  "variant_kind": "precision|recall",
+  "hypothesis": "short explanation",
+  "keyword_hypothesis": "what the rescue is trying to preserve/exclude",
+  "future_filter_hypothesis": "optional future title/company/skill filter idea",
+  "target_result_min": {target_window[0]},
+  "target_result_max": {target_window[1]}
+}}"""
+        user_prompt = f"""Current Boolean:
+{current_boolean}
+
+Current result count:
+{result_count_text}
+
+Drift decision:
+{json.dumps(summary, indent=2)}
+
+Early signal snapshot:
+{json.dumps(early_snapshot.to_dict() if early_snapshot else {}, indent=2)}
+
+Recent noise snapshot:
+{json.dumps(recent_snapshot.to_dict() if recent_snapshot else {}, indent=2)}
+
+Current page insights:
+{json.dumps(page_insights.to_dict(), indent=2)}
+
+Current page stats:
+{json.dumps(page_stats, indent=2)}
+"""
+        payload: dict[str, Any] = {}
+        try:
+            payload = opus_llm_cached(system, user_prompt, expect_json=True)
+        except Exception as exc:
+            log_event(
+                self.log_path,
+                "linkedin_search_plan_failed",
+                string_id=search_string.id,
+                planner="drift",
+                error=str(exc),
+            )
+
+        boolean = str(payload.get("boolean", "")).strip()
+        if not boolean or boolean == current_boolean:
+            boolean = self._fallback_drift_boolean(
+                current_boolean=current_boolean,
+                decision=decision,
+                early_snapshot=early_snapshot,
+                recent_snapshot=recent_snapshot,
+            )
+
+        keyword_hypothesis = str(payload.get("keyword_hypothesis") or summary.get("keyword_hypothesis") or "")
+        future_filter_hypothesis = str(
+            payload.get("future_filter_hypothesis") or summary.get("future_filter_hypothesis") or ""
+        )
+        drift_summary = {
+            **summary,
+            "keyword_hypothesis": keyword_hypothesis,
+            "future_filter_hypothesis": future_filter_hypothesis,
+        }
+        if not boolean or boolean == current_boolean:
+            return None, drift_summary
+
+        variant = LinkedInSearchVariant(
+            variant_id=f"drift-{experiment_state.root_string_id}-{experiment_state.drift_attempt_count + 1}",
+            parent_variant_id=experiment_state.committed_variant_id or experiment_state.active_variant_id,
+            root_string_id=search_string.id,
+            boolean=boolean,
+            variant_kind=str(payload.get("variant_kind") or variant_kind),
+            hypothesis=str(payload.get("hypothesis") or drift_summary.get("keyword_hypothesis") or "mid-pagination rescue"),
+            target_result_min=int(payload.get("target_result_min") or target_window[0]),
+            target_result_max=int(payload.get("target_result_max") or target_window[1]),
+        )
+        return variant, drift_summary
+
+    def _fallback_drift_boolean(
+        self,
+        *,
+        current_boolean: str,
+        decision: str,
+        early_snapshot: LinkedInVariantSnapshot | None,
+        recent_snapshot: LinkedInVariantSnapshot | None,
+    ) -> str:
+        if decision == "spawn_recall_sibling":
+            if recent_snapshot and recent_snapshot.title_clusters:
+                label = str(recent_snapshot.title_clusters[0].get("label", "")).strip()
+                if label:
+                    return f"({current_boolean}) NOT (\"{label}\")"
+            return ""
+        if early_snapshot and early_snapshot.title_clusters:
+            label = str(early_snapshot.title_clusters[0].get("label", "")).strip()
+            if label and label.lower() not in current_boolean.lower():
+                return f"({current_boolean}) AND (\"{label}\")"
+        if recent_snapshot and recent_snapshot.title_clusters:
+            label = str(recent_snapshot.title_clusters[0].get("label", "")).strip()
+            if label:
+                return f"({current_boolean}) NOT (\"{label}\")"
+        return ""
 
     def _should_force_narrow_in_scout(
         self,

@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from linkedin.search_intelligence import (
+    LinkedInPageInsights,
     LinkedInSearchVariant,
     LinkedInStructuredFilters,
     bootstrap_experiment_state,
@@ -121,3 +122,73 @@ def test_search_mutation_executor_applies_keyword_variant(tmp_path):
     assert state.active_variant_id == "precision-1"
     assert pipeline._search_mutation_budget_used == 1
     pipeline.browser.enter_search_string.assert_awaited_once_with("foo AND bar")
+
+
+def test_experiment_state_tracks_family_totals_and_drift_snapshots():
+    search_string = SearchString(id=11, name="builders", boolean="foo")
+    state = bootstrap_experiment_state(search_string)
+    state.commit_variant("root")
+
+    page1 = LinkedInPageInsights(
+        page=1,
+        result_count=1800,
+        result_window="150-800",
+        title_clusters=[{"label": "machine learning engineer", "count": 4}],
+        company_clusters=[{"label": "OpenAI", "count": 2}],
+        signal_anchors=["ML engineer at OpenAI", "Research engineer at Anthropic"],
+    )
+    state.record_variant_metrics(page_num=1, result_count=1800, page_stats={"candidates": 4, "facial_yes": 2, "saves": 1}, page_insights=page1)
+    state.record_family_page_metrics(page_num=1, result_count=1800, page_stats={"candidates": 4, "facial_yes": 2, "saves": 1}, page_insights=page1)
+
+    page3 = LinkedInPageInsights(
+        page=3,
+        result_count=1800,
+        result_window="150-800",
+        title_clusters=[{"label": "product manager", "count": 5}],
+        company_clusters=[{"label": "BigCo", "count": 3}],
+        noise_anchors=["Product manager at BigCo", "Program manager at BankCorp"],
+        dominant_non_fit_patterns=["product-heavy profiles dominate recent pages"],
+        glance_action="reformulate",
+    )
+    state.record_variant_metrics(page_num=3, result_count=1800, page_stats={"candidates": 5, "facial_no": 4}, page_insights=page3)
+    state.record_family_page_metrics(page_num=3, result_count=1800, page_stats={"candidates": 5, "facial_no": 4}, page_insights=page3)
+
+    summary = state.metrics_summary()
+
+    assert summary["family_pages_reviewed_total"] == 2
+    assert summary["family_candidates_total"] == 9
+    assert summary["family_signal_total"] == 3
+    assert summary["family_saves_total"] == 1
+    assert summary["active_variant_pages_reviewed"] == 3
+    assert state.early_signal_snapshot is not None
+    assert state.recent_noise_snapshot is not None
+    assert state.early_signal_snapshot.signal_anchors[0] == "ML engineer at OpenAI"
+    assert state.recent_noise_snapshot.noise_anchors[0] == "Product manager at BigCo"
+
+
+def test_search_mutation_executor_blocks_second_drift_attempt(tmp_path):
+    pipeline = _make_pipeline(str(tmp_path))
+    search_string = SearchString(id=3, name="builders", boolean="foo")
+    state = bootstrap_experiment_state(search_string)
+    state.commit_variant("root")
+    state.drift_attempt_count = 1
+
+    variant = LinkedInSearchVariant(
+        variant_id="drift-1",
+        parent_variant_id="root",
+        root_string_id=3,
+        boolean="foo NOT bar",
+        variant_kind="recall",
+    )
+
+    result = asyncio.run(
+        LinkedInSearchMutationExecutor(pipeline).apply_variant(
+            search_string=search_string,
+            experiment_state=state,
+            variant=variant,
+            mutation_kind="drift",
+        )
+    )
+
+    assert result.applied is False
+    assert result.blocked_reason == "drift_attempt_limit"
