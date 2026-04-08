@@ -43,7 +43,11 @@ class LinkedInWorkUnitService:
             return pipeline._search_memory
         run_id = self._ensure_runtime_run(progress=pipeline._progress)
         if pipeline._progress:
-            pipeline._runtime_bridge.sync_progress(run_id, pipeline._progress)
+            pipeline._runtime_bridge.sync_progress(
+                run_id,
+                pipeline._progress,
+                experiment_states=pipeline._experiment_states,
+            )
         return pipeline._runtime_bridge.load_search_memory()
 
     def checkpoint_progress(
@@ -66,7 +70,11 @@ class LinkedInWorkUnitService:
         progress.candidates_saved = pipeline.stats.get("saved", progress.candidates_saved)
         progress.candidates_rejected = pipeline.stats.get("rejected", progress.candidates_rejected)
         run_id = self._ensure_runtime_run(progress=progress)
-        pipeline._runtime_bridge.sync_progress(run_id, progress)
+        pipeline._runtime_bridge.sync_progress(
+            run_id,
+            progress,
+            experiment_states=pipeline._experiment_states,
+        )
         pipeline._search_memory = pipeline._runtime_bridge.load_search_memory()
         return WorkUnitCheckpoint(
             status="synced",
@@ -104,11 +112,17 @@ class LinkedInWorkUnitService:
     def load_or_create_progress(self):
         pipeline = self.pipeline
         pipeline._ensure_runtime_state()
+        existing_states = dict(pipeline._experiment_states)
         if pipeline._runtime_bridge and (
             pipeline._runtime_bridge.has_runtime_state()
             or pipeline._runtime_bridge.has_legacy_state()
         ):
             pipeline._runtime_run_id, progress = pipeline._runtime_bridge.start_or_resume_run(resume=True)
+            loaded_states = pipeline._runtime_bridge.load_experiment_states(
+                pipeline._runtime_run_id,
+                progress=progress,
+            )
+            pipeline._experiment_states = {**loaded_states, **existing_states}
             return progress
 
         strings = []
@@ -128,7 +142,13 @@ class LinkedInWorkUnitService:
         pipeline._runtime_run_id, progress = pipeline._runtime_bridge.start_or_resume_run(
             resume=False,
             initial_progress=progress,
+            experiment_states=pipeline._experiment_states,
         )
+        loaded_states = pipeline._runtime_bridge.load_experiment_states(
+            pipeline._runtime_run_id,
+            progress=progress,
+        )
+        pipeline._experiment_states = {**loaded_states, **existing_states}
         return progress
 
     def restart_string(self, progress: "Progress", string_id: int) -> None:
@@ -136,11 +156,19 @@ class LinkedInWorkUnitService:
         if not pipeline._runtime_bridge:
             raise RuntimeError("LinkedIn runtime bridge is required for restart semantics")
         run_id = self._ensure_runtime_run(progress=progress, prefer_resume=True)
-        pipeline._runtime_bridge.sync_progress(run_id, progress)
+        pipeline._runtime_bridge.sync_progress(
+            run_id,
+            progress,
+            experiment_states=pipeline._experiment_states,
+        )
         pipeline._runtime_bridge.restart_string(
             run_id=run_id,
             progress=progress,
             string_id=string_id,
+        )
+        pipeline._experiment_states = pipeline._runtime_bridge.load_experiment_states(
+            run_id,
+            progress=progress,
         )
         pipeline._seen_urls = set()
         pipeline._in_flight_urls = set()
@@ -171,11 +199,17 @@ class LinkedInWorkUnitService:
             return int(pipeline._runtime_run_id)
         if not pipeline._runtime_bridge:
             raise RuntimeError("runtime_state is required for LinkedIn work-unit operations")
+        existing_states = dict(pipeline._experiment_states)
         if prefer_resume and (
             pipeline._runtime_bridge.has_runtime_state()
             or pipeline._runtime_bridge.has_legacy_state()
         ):
             pipeline._runtime_run_id, loaded_progress = pipeline._runtime_bridge.start_or_resume_run(resume=True)
+            loaded_states = pipeline._runtime_bridge.load_experiment_states(
+                pipeline._runtime_run_id,
+                progress=loaded_progress,
+            )
+            pipeline._experiment_states = {**loaded_states, **existing_states}
             if pipeline._progress is None:
                 pipeline._progress = loaded_progress
             return int(pipeline._runtime_run_id)
@@ -184,7 +218,13 @@ class LinkedInWorkUnitService:
         pipeline._runtime_run_id, loaded_progress = pipeline._runtime_bridge.start_or_resume_run(
             resume=False,
             initial_progress=progress,
+            experiment_states=pipeline._experiment_states,
         )
+        loaded_states = pipeline._runtime_bridge.load_experiment_states(
+            pipeline._runtime_run_id,
+            progress=loaded_progress,
+        )
+        pipeline._experiment_states = {**loaded_states, **existing_states}
         if pipeline._progress is None:
             pipeline._progress = loaded_progress
         return int(pipeline._runtime_run_id)

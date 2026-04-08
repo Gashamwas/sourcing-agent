@@ -76,6 +76,12 @@ GLANCE_MIN_SNIPPETS = 8              # Skip glance if fewer than 8 snippets
 EARLY_EXIT_MIN_CANDIDATES = 5        # Evaluate at least N before checking
 EARLY_EXIT_FACIAL_NO_RATE = 0.95     # >=95% facial_no triggers exit (raised for strict triage)
 
+# --- LinkedIn search experimentation ---
+SEARCH_EXPERIMENT_MAX_PLANNED_VARIANTS: int = int(_optional("SEARCH_EXPERIMENT_MAX_PLANNED_VARIANTS", "3"))
+SEARCH_EXPERIMENT_MAX_EXECUTED_SIBLINGS: int = int(_optional("SEARCH_EXPERIMENT_MAX_EXECUTED_SIBLINGS", "2"))
+SEARCH_EXPERIMENT_MAX_CONSECUTIVE_REWRITES: int = int(_optional("SEARCH_EXPERIMENT_MAX_CONSECUTIVE_REWRITES", "2"))
+SEARCH_EXPERIMENT_MUTATION_BUDGET: int = int(_optional("SEARCH_EXPERIMENT_MUTATION_BUDGET", "8"))
+
 # --- Architecture-specific overrides ---
 # Per-architecture behavioral parameters. Looked up at runtime via
 # ExecutionPlan.architecture; falls through to global defaults when empty.

@@ -22,6 +22,8 @@ from shared.schemas import (
 )
 from shared.governor import SessionExpired
 from shared.storage import append_jsonl, read_jsonl
+from linkedin.search_intelligence import LinkedInSearchVariant
+from linkedin.search_mutation import SearchMutationResult
 
 
 def _make_snippet(**kwargs) -> CandidateSnippet:
@@ -969,7 +971,7 @@ def test_run_full_resume_executes_pending_block_adaptation_before_next_string():
 
 
 def test_process_string_continues_pagination_instead_of_forced_narrow_below_min_pages():
-    """Premature stop/abandon should keep paging, not synthesize a forced narrow."""
+    """Low-signal pagination keeps paging until the minimum depth, then stops cleanly."""
     with tempfile.TemporaryDirectory() as td:
         p = _make_pipeline(td)
 
@@ -990,20 +992,25 @@ def test_process_string_continues_pagination_instead_of_forced_narrow_below_min_
 
         p._ensure_browser_healthy = AsyncMock()
         p._review_page_sequentially = AsyncMock(return_value=None)
-        p._page_adapt = AsyncMock(side_effect=["stop", "stop"])
-        p._force_narrow_adapt = AsyncMock(return_value="narrow:bar")
+        p._assess_string_state = AsyncMock(
+            side_effect=[
+                {"decision": "continue", "rationale": "keep paging", "page": 1},
+                {"decision": "stop", "rationale": "signal exhausted", "page": 2},
+            ]
+        )
+        p._plan_variant_experiments = AsyncMock()
 
         with patch("linkedin.orchestrator.human_delay_correlated", return_value=0):
             asyncio.run(p._process_string(search_string, progress))
 
-        assert p._page_adapt.await_count == 2
-        assert p._force_narrow_adapt.await_count == 0
+        assert p._assess_string_state.await_count == 2
+        assert p._plan_variant_experiments.await_count == 0
         p.browser.go_to_next_page.assert_awaited_once()
         assert "Stopped after page 2." in (search_string.notes or "")
 
 
-def test_process_string_allows_forced_narrow_only_for_zero_signal_scout_page_one():
-    """Scout page 1 can force-narrow once when the pool is large and entirely noisy."""
+def test_process_string_runs_variant_experiment_before_commit():
+    """Large noisy pools can run a sibling experiment and then commit it to pagination."""
     with tempfile.TemporaryDirectory() as td:
         p = _make_pipeline(td)
 
@@ -1030,17 +1037,46 @@ def test_process_string_allows_forced_narrow_only_for_zero_signal_scout_page_one
                 None,
             ]
         )
-        p._page_adapt = AsyncMock(side_effect=["stop", "stop", "stop"])
-        p._force_narrow_adapt = AsyncMock(return_value="narrow:bar")
+        p._assess_string_state = AsyncMock(
+            side_effect=[
+                {"decision": "experiment", "rationale": "too broad", "page": 1},
+                {"decision": "commit", "rationale": "variant is strong", "page": 1},
+                {"decision": "stop", "rationale": "done", "page": 2},
+            ]
+        )
+        p._plan_variant_experiments = AsyncMock(
+            return_value=[
+                LinkedInSearchVariant(
+                    variant_id="precision-1",
+                    parent_variant_id="root",
+                    root_string_id=9,
+                    boolean="bar",
+                    variant_kind="precision",
+                    hypothesis="tighter signal slice",
+                    target_result_min=75,
+                    target_result_max=400,
+                )
+            ]
+        )
+        async def _apply_variant(*, search_string, experiment_state, variant):
+            experiment_state.activate_variant(variant.variant_id)
+            return SearchMutationResult(
+                applied=True,
+                result_count=120,
+                result_count_text="120",
+            )
+
+        p._search_mutation_executor.apply_variant = AsyncMock(side_effect=_apply_variant)
 
         with patch("linkedin.orchestrator.human_delay_correlated", return_value=0):
             asyncio.run(p._process_string(search_string, progress))
 
-        assert p._force_narrow_adapt.await_count == 1
+        assert p._plan_variant_experiments.await_count == 1
+        p._search_mutation_executor.apply_variant.assert_awaited_once()
         assert search_string.boolean == "bar"
         assert search_string.refinement_stack == ["foo"]
         p.browser.go_to_next_page.assert_awaited_once()
-        assert "Narrowed on page 1 (depth 1)." in (search_string.notes or "")
+        assert "Committed precision variant on page 1." in (search_string.notes or "")
         assert "Stopped after page 2." in (search_string.notes or "")
 
 

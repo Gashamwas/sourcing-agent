@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from linkedin.search_intelligence import (
+    LinkedInExperimentState,
+    bootstrap_experiment_state,
+    reset_experiment_state,
+)
 from shared.runtime_state.admin import rebuild_compat_projections
 from shared.runtime_state.projections import (
     project_linkedin_candidate_history,
@@ -82,6 +87,7 @@ class LinkedInRuntimeStateBridge:
         *,
         resume: bool,
         initial_progress: Progress | None = None,
+        experiment_states: dict[int, LinkedInExperimentState] | None = None,
     ) -> tuple[int, Progress]:
         self.store.reconcile_open_attempts(source="linkedin", brief_id=self.brief_id)
         self.store.reconcile_pending_side_effects(source="linkedin", brief_id=self.brief_id)
@@ -118,14 +124,20 @@ class LinkedInRuntimeStateBridge:
             return run_id, project_linkedin_progress(self.store, run_id)
 
         if initial_progress is not None:
-            self.sync_progress(run_id, initial_progress)
+            self.sync_progress(run_id, initial_progress, experiment_states=experiment_states)
             return run_id, project_linkedin_progress(self.store, run_id)
 
         progress = Progress(brief_name=self.brief_name)
-        self.sync_progress(run_id, progress)
+        self.sync_progress(run_id, progress, experiment_states=experiment_states)
         return run_id, progress
 
-    def sync_progress(self, run_id: int, progress: Progress) -> None:
+    def sync_progress(
+        self,
+        run_id: int,
+        progress: Progress,
+        *,
+        experiment_states: dict[int, LinkedInExperimentState] | None = None,
+    ) -> None:
         resume_state = LinkedInResumeState(
             brief_name=progress.brief_name,
             current_string_id=progress.current_string_id,
@@ -142,7 +154,17 @@ class LinkedInRuntimeStateBridge:
         keep_ids: set[str] = set()
         for index, search_string in enumerate(progress.strings):
             keep_ids.add(str(search_string.id))
+            experiment_state = (experiment_states or {}).get(search_string.id)
+            if experiment_state is None:
+                experiment_state = bootstrap_experiment_state(search_string)
+            experiment_state.apply_shadow(search_string)
             metrics = self._work_unit_metrics(search_string)
+            metrics.update(
+                {
+                    "experiment_summary": experiment_state.metrics_summary(),
+                    "variant_metrics": experiment_state.metrics_summary().get("variants", {}),
+                }
+            )
             counters = {
                 "result_count": search_string.result_count,
                 "candidates_discovered": search_string.candidates_count,
@@ -160,12 +182,16 @@ class LinkedInRuntimeStateBridge:
                 display_name=search_string.name,
                 ordering_index=index,
                 status=search_string.status,
-                payload=search_string.to_dict(),
+                payload={
+                    **search_string.to_dict(),
+                    "search_intent": experiment_state.intent.to_dict(),
+                },
                 checkpoint={
                     "pages_reviewed": search_string.pages_reviewed,
                     "duplicates_count": search_string.duplicates_count,
                     "phase": search_string.phase,
                     "refinement_stack": list(search_string.refinement_stack),
+                    "experiment_state": experiment_state.to_dict(),
                 },
                 metrics=metrics,
                 family_key=search_string.family_key,
@@ -179,6 +205,27 @@ class LinkedInRuntimeStateBridge:
 
     def load_progress(self, run_id: int) -> Progress:
         return project_linkedin_progress(self.store, run_id)
+
+    def load_experiment_states(
+        self,
+        run_id: int,
+        *,
+        progress: Progress | None = None,
+    ) -> dict[int, LinkedInExperimentState]:
+        states: dict[int, LinkedInExperimentState] = {}
+        progress_lookup = {item.id: item for item in (progress.strings if progress else [])}
+        for row in self.store.list_work_units(run_id, kind=LINKEDIN_STRING_KIND):
+            payload = _json_loads(row["payload_json"])
+            checkpoint = _json_loads(row["checkpoint_json"])
+            search_string = progress_lookup.get(int(payload.get("id") or row["source_unit_id"]))
+            if search_string is None:
+                search_string = SearchString.from_dict(payload)
+            state = LinkedInExperimentState.from_dict(checkpoint.get("experiment_state"))
+            if state is None:
+                state = bootstrap_experiment_state(search_string)
+            state.apply_shadow(search_string)
+            states[search_string.id] = state
+        return states
 
     def load_search_memory(self) -> dict:
         return project_linkedin_search_memory(self.store, brief_id=self.brief_id)
@@ -713,6 +760,7 @@ class LinkedInRuntimeStateBridge:
         target = next((search_string for search_string in progress.strings if search_string.id == string_id), None)
         if not target:
             return
+        reset_state: LinkedInExperimentState | None = None
         work_unit = self.store.get_work_unit_by_source_id(
             run_id,
             kind=LINKEDIN_STRING_KIND,
@@ -724,6 +772,7 @@ class LinkedInRuntimeStateBridge:
         if work_unit:
             ordering_index = int(work_unit["ordering_index"])
             payload = _json_loads(work_unit["payload_json"])
+            checkpoint = _json_loads(work_unit["checkpoint_json"])
             work_unit_id = int(work_unit["id"])
             with self.store.connect() as conn:
                 candidate_rows = conn.execute(
@@ -763,14 +812,20 @@ class LinkedInRuntimeStateBridge:
                         candidate_ids.add(int(row["candidate_id"]))
                 for attempt_id in attempt_ids:
                     conn.execute("DELETE FROM candidate_attempts WHERE id = ?", (attempt_id,))
+            experiment_state = LinkedInExperimentState.from_dict(checkpoint.get("experiment_state"))
+            experiment_state = reset_experiment_state(target, experiment_state)
+            reset_state = experiment_state
+            experiment_state.apply_shadow(target)
             payload.update(
                 {
+                    **target.to_dict(),
                     "status": "queued",
                     "pages_reviewed": 1,
                     "phase": "scout",
                     "saves": [],
                     "notes": "",
                     "refinement_stack": [],
+                    "search_intent": experiment_state.intent.to_dict(),
                 }
             )
             for identity_key in candidate_keys_to_clear:
@@ -794,8 +849,18 @@ class LinkedInRuntimeStateBridge:
                 ordering_index=ordering_index,
                 status="queued",
                 payload=payload,
-                checkpoint={"pages_reviewed": 1, "duplicates_count": 0},
-                metrics=self._work_unit_metrics(target, pages_reviewed=1, duplicates_count=0, block_generated=0, exhausted=0),
+                checkpoint={
+                    "pages_reviewed": 1,
+                    "duplicates_count": 0,
+                    "phase": "scout",
+                    "refinement_stack": [],
+                    "experiment_state": experiment_state.to_dict(),
+                },
+                metrics={
+                    **self._work_unit_metrics(target, pages_reviewed=1, duplicates_count=0, block_generated=0, exhausted=0),
+                    "experiment_summary": experiment_state.metrics_summary(),
+                    "variant_metrics": experiment_state.metrics_summary().get("variants", {}),
+                },
                 family_key=target.family_key,
                 novelty_bucket=target.novelty_bucket,
                 domain_lane=target.domain_lane,
@@ -822,6 +887,9 @@ class LinkedInRuntimeStateBridge:
         target.saves = []
         target.notes = ""
         target.refinement_stack = []
+        target.result_count = 0
+        if reset_state is not None:
+            reset_state.apply_shadow(target)
         if string_id in progress.pending_block_string_ids or progress.pending_block_name == target.block:
             progress.pending_block_name = ""
             progress.pending_block_string_ids = []

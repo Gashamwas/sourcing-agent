@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from linkedin.search_intelligence import LinkedInSearchVariant, bootstrap_experiment_state
 from shared.runtime_state import LinkedInRuntimeStateBridge, RuntimeStateStore
 from shared.schemas import CandidateSnippet, OpusDecision, Progress, SearchString
 from shared.storage import append_jsonl, read_jsonl
@@ -199,6 +200,53 @@ def test_resume_comes_from_db_when_compat_files_are_stale(tmp_path):
     assert processed_ids == [2, 1]
 
 
+def test_sync_progress_roundtrips_experiment_state(tmp_path):
+    store = RuntimeStateStore(tmp_path / "runtime_state.sqlite3")
+    bridge = LinkedInRuntimeStateBridge(
+        store=store,
+        output_dir=tmp_path,
+        brief_id="test-project",
+        brief_name="test",
+    )
+    run_id = store.start_run(
+        source="linkedin",
+        brief_id="test-project",
+        output_dir=str(tmp_path),
+        mode="fresh",
+        resume_state={"brief_name": "test"},
+    )
+
+    search_string = SearchString(id=1, name="builders", boolean="foo")
+    state = bootstrap_experiment_state(search_string)
+    state.begin_experiment_round(
+        [
+            LinkedInSearchVariant(
+                variant_id="precision-1",
+                parent_variant_id="root",
+                root_string_id=1,
+                boolean="foo AND bar",
+                variant_kind="precision",
+                target_result_min=75,
+                target_result_max=400,
+            )
+        ]
+    )
+    state.activate_variant("precision-1")
+    state.commit_variant("precision-1")
+    state.apply_shadow(search_string)
+
+    progress = Progress(brief_name="test", strings=[search_string], current_string_id=1, current_page=2)
+    bridge.sync_progress(run_id, progress, experiment_states={1: state})
+
+    loaded_progress = bridge.load_progress(run_id)
+    loaded_states = bridge.load_experiment_states(run_id, progress=loaded_progress)
+
+    assert loaded_progress.strings[0].boolean == "foo AND bar"
+    assert loaded_progress.strings[0].refinement_stack == ["foo"]
+    assert loaded_states[1].active_variant_id == "precision-1"
+    assert loaded_states[1].committed_variant_id == "precision-1"
+
+
 def test_profile_extraction_failure_becomes_failed_retryable(tmp_path):
     p = _make_pipeline(str(tmp_path))
     search_string = SearchString(id=1, name="builders", boolean="ml")
@@ -364,3 +412,48 @@ def test_restart_string_clears_only_targeted_runtime_state(tmp_path):
     ) is True
     history = read_jsonl(tmp_path / "candidate_history-test-project.jsonl")
     assert [row["profile_url"] for row in history] == ["/talent/profile/grace"]
+
+
+def test_restart_string_resets_variant_execution_state(tmp_path):
+    store = RuntimeStateStore(tmp_path / "runtime_state.sqlite3")
+    bridge = LinkedInRuntimeStateBridge(
+        store=store,
+        output_dir=tmp_path,
+        brief_id="test-project",
+        brief_name="test",
+    )
+    run_id = store.start_run(
+        source="linkedin",
+        brief_id="test-project",
+        output_dir=str(tmp_path),
+        mode="fresh",
+        resume_state={"brief_name": "test"},
+    )
+
+    search_string = SearchString(id=1, name="builders", boolean="foo", status="done")
+    state = bootstrap_experiment_state(search_string)
+    state.begin_experiment_round(
+        [
+            LinkedInSearchVariant(
+                variant_id="precision-1",
+                parent_variant_id="root",
+                root_string_id=1,
+                boolean="foo AND bar",
+                variant_kind="precision",
+            )
+        ]
+    )
+    state.activate_variant("precision-1")
+    state.commit_variant("precision-1")
+    state.apply_shadow(search_string)
+    progress = Progress(brief_name="test", strings=[search_string], current_string_id=1, current_page=2)
+    bridge.sync_progress(run_id, progress, experiment_states={1: state})
+
+    bridge.restart_string(run_id=run_id, progress=progress, string_id=1)
+    reloaded_progress = bridge.load_progress(run_id)
+    reloaded_states = bridge.load_experiment_states(run_id, progress=reloaded_progress)
+
+    assert reloaded_progress.strings[0].boolean == "foo"
+    assert reloaded_progress.strings[0].refinement_stack == []
+    assert reloaded_states[1].active_variant_id == "root"
+    assert reloaded_states[1].committed_variant_id is None

@@ -26,6 +26,14 @@ from shared.schemas import (
 )
 from linkedin.acquisition import LinkedInAcquisitionService
 from linkedin.browser import LinkedInBrowser
+from linkedin.search_intelligence import (
+    LinkedInExperimentState,
+    LinkedInPageInsights,
+    LinkedInSearchVariant,
+    bootstrap_experiment_state,
+    result_window_for_count,
+)
+from linkedin.search_mutation import LinkedInSearchMutationExecutor
 from linkedin.side_effects import LinkedInSideEffectsService
 from linkedin.work_units import LinkedInWorkUnitService
 from shared.extractors import (
@@ -35,6 +43,7 @@ from shared.extractors import (
 from shared.failures import judgment_failure_decision
 from shared.judger import facial_judge, full_judge, init_judger, is_failure_decision
 from shared.runtime_state import LinkedInRuntimeStateBridge, RuntimeStateLock, RuntimeStateStore
+from shared.runtime_state.store import LINKEDIN_STRING_KIND
 from shared.safety import LinkedInRecoveryService, RunSafetyCoordinator, RunStopReason
 from shared.storage import append_jsonl, read_jsonl, read_jsonl_set, log_event, write_json, read_json
 from shared.brief_loader import load_brief, Brief
@@ -211,8 +220,13 @@ class Pipeline:
         )
         self._work_unit_service = LinkedInWorkUnitService(self)
         self._acquisition_service = LinkedInAcquisitionService(self)
+        self._search_mutation_executor = LinkedInSearchMutationExecutor(self)
         self._side_effects_service = LinkedInSideEffectsService(self)
         self._governor = None
+        self._experiment_states: dict[int, LinkedInExperimentState] = {}
+        self._latest_page_preview_snippets: list[CandidateSnippet] = []
+        self._current_variant_candidates: list[dict] = []
+        self._search_mutation_budget_used: int = 0
 
         # Kit strings (populated by run_full)
         self._kit_strings: list[KitString] = []
@@ -368,8 +382,41 @@ class Pipeline:
             self._work_unit_service = LinkedInWorkUnitService(self)
         if not hasattr(self, "_acquisition_service") or self._acquisition_service is None:
             self._acquisition_service = LinkedInAcquisitionService(self)
+        if not hasattr(self, "_search_mutation_executor") or self._search_mutation_executor is None:
+            self._search_mutation_executor = LinkedInSearchMutationExecutor(self)
         if not hasattr(self, "_side_effects_service") or self._side_effects_service is None:
             self._side_effects_service = LinkedInSideEffectsService(self)
+
+    def _experiment_state_for(self, search_string: SearchString) -> LinkedInExperimentState:
+        state = self._experiment_states.get(search_string.id)
+        if state is None:
+            state = bootstrap_experiment_state(search_string)
+            self._experiment_states[search_string.id] = state
+        state.apply_shadow(search_string)
+        return state
+
+    def _record_runtime_event(
+        self,
+        *,
+        search_string: SearchString | None,
+        event_type: str,
+        payload: dict,
+    ) -> None:
+        if not self._runtime_run_id:
+            return
+        work_unit_id = None
+        if search_string is not None:
+            work_unit_id = self._runtime_state.get_work_unit_id(
+                self._runtime_run_id,
+                kind=LINKEDIN_STRING_KIND,
+                source_unit_id=str(search_string.id),
+            )
+        self._runtime_state.record_event(
+            run_id=self._runtime_run_id,
+            work_unit_id=work_unit_id,
+            event_type=event_type,
+            payload=payload,
+        )
 
     def _record_runtime_snippet(self, search_string: SearchString, snippet: CandidateSnippet) -> None:
         if self._runtime_bridge and self._runtime_run_id:
@@ -1112,15 +1159,12 @@ class Pipeline:
         # Reset triage tightening state per string
         self._triage_tightened = False
         self._tightening_prefix = ""
-
-        # Initialize refinement tracking
-        if not search_string.original_boolean:
-            search_string.original_boolean = search_string.boolean
+        experiment_state = self._experiment_state_for(search_string)
 
         # Emergency recovery check before starting
         await self._ensure_browser_healthy()
 
-        current_boolean = search_string.boolean
+        current_boolean = experiment_state.current_boolean()
         resuming = search_string.pages_reviewed > 0
 
         if resuming:
@@ -1181,21 +1225,20 @@ class Pipeline:
             self._checkpoint_progress(progress, search_string=search_string)
             return
 
-        # Determine starting phase
-        # If resuming with an existing refinement stack, go straight to paginate
-        if search_string.refinement_stack:
-            search_string.phase = "paginate"
-        elif result_count >= 3000:
-            search_string.phase = "scout"
-            print(f"  [phase] SCOUT — {result_count} results, exploring page 1 first")
+        if not resuming or not experiment_state.mode:
+            experiment_state.mode = self._initial_search_mode(result_count)
+        experiment_state.active_variant.result_count = result_count
+        experiment_state.apply_shadow(search_string)
+        if experiment_state.mode == "recon":
+            print(f"  [phase] RECON — {result_count} results, evaluating page 1 before committing")
+        elif experiment_state.mode == "experiment":
+            print(f"  [phase] EXPERIMENT — resuming variant exploration for {result_count} results")
         else:
-            search_string.phase = "paginate"
-            print(f"  [phase] PAGINATE — {result_count} results, proceeding directly")
+            print(f"  [phase] PAGINATE — proceeding with committed variant")
 
         # Accumulating context for page-level adaptation
         all_candidates: list[dict] = []
-        string_stats = {"pages": 0, "candidates": 0, "duplicates": 0,
-                        "facial_yes": 0, "facial_no": 0, "saves": 0, "rejects": 0}
+        string_stats = self._fresh_string_stats()
 
         page_num = 1
         max_pages = config.MAX_PAGES_PER_STRING or 999
@@ -1250,127 +1293,100 @@ class Pipeline:
             )
 
             string_stats["pages"] = page_num
+            self._current_variant_candidates = list(all_candidates)
+            page_insights = self._build_page_insights(
+                page_num=page_num,
+                result_count=result_count,
+                preview_snippets=list(self._latest_page_preview_snippets),
+                all_candidates=all_candidates,
+                glance_result=glance_result,
+            )
+            experiment_state.record_variant_metrics(
+                page_num=page_num,
+                result_count=result_count,
+                string_stats=string_stats,
+                page_insights=page_insights,
+            )
+            experiment_state.note_page_review()
+            experiment_state.apply_shadow(search_string)
             self._checkpoint_progress(progress, search_string=search_string, page_num=page_num)
             page_report.print_report(self.stats)
 
-            # --- Two-phase adaptation ---
-            adapt_action = await self._page_adapt(
-                search_string, current_boolean, result_count_text,
-                all_candidates, string_stats,
-                glance_summary=(glance_result.summary
-                                if glance_result and glance_result.action == "reformulate"
-                                else None),
-                architecture=(self._execution_plan.architecture
-                              if self._execution_plan else ""),
+            assessment = await self._assess_string_state(
+                search_string=search_string,
+                experiment_state=experiment_state,
+                page_num=page_num,
+                result_count=result_count,
+                string_stats=string_stats,
+                page_insights=page_insights,
             )
+            decision = assessment["decision"]
 
-            # Enforce minimum pagination depth.
-            # Forced narrow is allowed only once in scout when page 1 is clearly all-noise.
-            if adapt_action in ("abandon", "stop"):
-                min_pages = self._get_min_pages(result_count)
-                if page_num < min_pages:
-                    if self._should_force_narrow_in_scout(
+            if decision == "experiment":
+                if experiment_state.mode != "experiment" or experiment_state.next_planned_variant() is None:
+                    planned_variants = await self._plan_variant_experiments(
                         search_string=search_string,
-                        page_num=page_num,
+                        experiment_state=experiment_state,
+                        current_boolean=current_boolean,
                         result_count=result_count,
+                        result_count_text=result_count_text,
+                        page_insights=page_insights,
+                        all_candidates=all_candidates,
                         string_stats=string_stats,
-                        glance_result=glance_result,
-                    ):
-                        print(
-                            f"  [pagination] Opus wants to {adapt_action}, but page {page_num} "
-                            f"< min {min_pages} for {result_count} results. Attempting scout narrow..."
-                        )
-                        narrow_result = await self._force_narrow_adapt(
-                            search_string, current_boolean, result_count_text,
-                            all_candidates, string_stats,
-                        )
-                        if narrow_result:
-                            adapt_action = narrow_result
-                        else:
-                            print(
-                                f"  [pagination] Scout narrow unavailable. "
-                                f"Continuing despite {adapt_action}."
-                            )
-                            adapt_action = "continue"
+                    )
+                    if planned_variants:
+                        experiment_state.begin_experiment_round(planned_variants)
+                        print(f"  [adapt] Planning {len(planned_variants)} sibling experiment(s)")
                     else:
-                        print(
-                            f"  [pagination] Opus wants to {adapt_action}, but page {page_num} "
-                            f"< min {min_pages} for {result_count} results. Continuing."
+                        decision = "continue" if experiment_state.mode == "paginate" else "commit"
+
+                if decision == "experiment":
+                    next_variant = experiment_state.next_planned_variant()
+                    if next_variant is None:
+                        best_variant = experiment_state.best_variant()
+                        if best_variant.variant_id == experiment_state.active_variant_id and best_variant.variant_id != "root":
+                            decision = "commit"
+                        else:
+                            decision = "stop"
+                    else:
+                        mutation = await self._search_mutation_executor.apply_variant(
+                            search_string=search_string,
+                            experiment_state=experiment_state,
+                            variant=next_variant,
                         )
-                        adapt_action = "continue"
+                        if mutation.applied:
+                            current_boolean = experiment_state.current_boolean()
+                            result_count = mutation.result_count
+                            result_count_text = mutation.result_count_text
+                            search_string.result_count = result_count
+                            experiment_state.apply_shadow(search_string)
+                            search_string.notes = (
+                                (search_string.notes or "")
+                                + f" Variant {next_variant.variant_kind} applied on page {page_num}."
+                            )
+                            page_num = 1
+                            all_candidates.clear()
+                            string_stats = self._fresh_string_stats()
+                            self._checkpoint_progress(progress, search_string=search_string, page_num=1)
+                            continue
+                        best_variant = experiment_state.best_variant()
+                        if best_variant.variant_id == experiment_state.active_variant_id and best_variant.variant_id != "root":
+                            decision = "commit"
+                        else:
+                            decision = "stop"
 
-            if adapt_action == "abandon":
-                print(f"  [adapt] Opus says ABANDON this string entirely.")
-                search_string.notes = (search_string.notes or "") + f" Abandoned after page {page_num}."
-                break
+            if decision == "commit":
+                committed = experiment_state.commit_variant()
+                current_boolean = committed.boolean
+                search_string.result_count = committed.result_count or result_count
+                experiment_state.apply_shadow(search_string)
+                print(f"  [adapt] COMMIT → {committed.variant_kind} variant")
+                search_string.notes = (search_string.notes or "") + f" Committed {committed.variant_kind} variant on page {page_num}."
 
-            elif adapt_action == "stop":
-                print(f"  [adapt] Opus says STOP — signal exhausted.")
+            if decision == "stop":
+                print("  [adapt] STOP — signal exhausted for this root family.")
                 search_string.notes = (search_string.notes or "") + f" Stopped after page {page_num}."
                 break
-
-            elif isinstance(adapt_action, str) and adapt_action.startswith("narrow:"):
-                new_boolean = adapt_action[len("narrow:"):]
-                # Push current boolean onto refinement stack
-                search_string.refinement_stack.append(current_boolean)
-                current_boolean = new_boolean
-                search_string.boolean = new_boolean
-                search_string.phase = "paginate"
-                depth = len(search_string.refinement_stack)
-                print(f"  [adapt] NARROW (depth {depth}): {new_boolean[:80]}...")
-                search_string.notes = (search_string.notes or "") + f" Narrowed on page {page_num} (depth {depth})."
-                try:
-                    await self.browser.enter_search_string(new_boolean)
-                    result_count_text = await self.browser.get_results_count_text()
-                    result_count = await self.browser.get_results_count()
-                    search_string.result_count = result_count
-                    print(f"  Results after narrow: {result_count_text or 'unknown'} (parsed: {result_count})")
-                except Exception as e:
-                    print(f"  [ERROR] Narrow failed: {e} — reverting to previous boolean")
-                    log_event(self.log_path, "narrow_failed", string=search_string.name, error=str(e))
-                    search_string.refinement_stack.pop()  # Undo the push
-                    current_boolean = search_string.refinement_stack[-1] if search_string.refinement_stack else search_string.boolean
-                    search_string.boolean = current_boolean
-                    break
-                # Reset page counter and accumulated data for the narrowed search
-                page_num = 1
-                all_candidates.clear()
-                string_stats = {"pages": 0, "candidates": 0, "duplicates": 0,
-                                "facial_yes": 0, "facial_no": 0, "saves": 0, "rejects": 0}
-                continue
-
-            elif adapt_action == "broaden":
-                if not search_string.refinement_stack:
-                    print(f"  [adapt] BROADEN requested but stack is empty — continuing instead.")
-                else:
-                    previous_boolean = search_string.refinement_stack.pop()
-                    current_boolean = previous_boolean
-                    search_string.boolean = previous_boolean
-                    depth = len(search_string.refinement_stack)
-                    print(f"  [adapt] BROADEN (depth now {depth}): reverting to {previous_boolean[:80]}...")
-                    search_string.notes = (search_string.notes or "") + f" Broadened on page {page_num} (depth {depth})."
-                    try:
-                        await self.browser.enter_search_string(previous_boolean)
-                        result_count_text = await self.browser.get_results_count_text()
-                        result_count = await self.browser.get_results_count()
-                        search_string.result_count = result_count
-                        print(f"  Results after broaden: {result_count_text or 'unknown'} (parsed: {result_count})")
-                    except Exception as e:
-                        print(f"  [ERROR] Broaden failed: {e} — abandoning string")
-                        log_event(self.log_path, "broaden_failed", string=search_string.name, error=str(e))
-                        search_string.notes = (search_string.notes or "") + f" Broaden failed on page {page_num}."
-                        break
-                    # Reset page counter — broadened search starts fresh
-                    page_num = 1
-                    all_candidates.clear()
-                    string_stats = {"pages": 0, "candidates": 0, "duplicates": 0,
-                                    "facial_yes": 0, "facial_no": 0, "saves": 0, "rejects": 0}
-                    continue
-
-            elif adapt_action == "paginate":
-                # Scout phase complete — transition to paginate
-                search_string.phase = "paginate"
-                print(f"  [adapt] Scout complete → PAGINATE")
 
             # "continue" or "paginate" — proceed to next page
             if page_num < max_pages:
@@ -1446,6 +1462,7 @@ class Pipeline:
 
         glance_result = None
         preview_snippets: list[CandidateSnippet] = []
+        self._latest_page_preview_snippets = []
         consecutive_api_errors = 0
         page_evaluated = 0
         page_facial_no = 0
@@ -1456,6 +1473,7 @@ class Pipeline:
                 continue
 
             preview_snippets.append(snippet)
+            self._latest_page_preview_snippets = list(preview_snippets)
             print(
                 f"    [card {card_index + 1}/{slot_count}] {snippet.name} — "
                 f"{snippet.current_title or snippet.headline or 'preview only'}"
@@ -1652,6 +1670,7 @@ class Pipeline:
         # ── Phase 1: Extract all card snippets ──────────────────────────
         glance_result = None
         preview_snippets: list[CandidateSnippet] = []
+        self._latest_page_preview_snippets = []
         eligible_snippets: list[CandidateSnippet] = []
 
         for card_index in range(slot_count):
@@ -1660,6 +1679,7 @@ class Pipeline:
                 continue
 
             preview_snippets.append(snippet)
+            self._latest_page_preview_snippets = list(preview_snippets)
             print(
                 f"    [card {card_index + 1}/{slot_count}] {snippet.name} — "
                 f"{snippet.current_title or snippet.headline or 'preview only'}"
@@ -1973,6 +1993,295 @@ class Pipeline:
             if result_count >= threshold:
                 return min_pages
         return 1
+
+    @staticmethod
+    def _fresh_string_stats() -> dict[str, int]:
+        return {
+            "pages": 0,
+            "candidates": 0,
+            "duplicates": 0,
+            "facial_yes": 0,
+            "facial_no": 0,
+            "saves": 0,
+            "rejects": 0,
+        }
+
+    def _initial_search_mode(self, result_count: int) -> str:
+        return "recon" if result_count >= 500 else "paginate"
+
+    @staticmethod
+    def _page_candidates(all_candidates: list[dict], page_num: int) -> list[dict]:
+        return [candidate for candidate in all_candidates if candidate.get("page") == page_num]
+
+    def _build_page_insights(
+        self,
+        *,
+        page_num: int,
+        result_count: int,
+        preview_snippets: list[CandidateSnippet],
+        all_candidates: list[dict],
+        glance_result: GlanceResult | None,
+    ) -> LinkedInPageInsights:
+        title_counts: dict[str, int] = {}
+        company_counts: dict[str, int] = {}
+        for snippet in preview_snippets:
+            title = _normalize_title_family(snippet.current_title or snippet.headline or "")
+            if title:
+                title_counts[title] = title_counts.get(title, 0) + 1
+            company = (snippet.current_company or "").strip()
+            if company:
+                company_counts[company] = company_counts.get(company, 0) + 1
+
+        page_candidates = self._page_candidates(all_candidates, page_num)
+        signal_anchors = [
+            f"{candidate.get('title') or 'Unknown'} at {candidate.get('company') or 'Unknown'}"
+            for candidate in page_candidates
+            if candidate.get("outcome") in {"save", "facial_yes"}
+        ][:5]
+        noise_anchors = [
+            f"{candidate.get('title') or 'Unknown'} at {candidate.get('company') or 'Unknown'}"
+            for candidate in page_candidates
+            if candidate.get("outcome") == "facial_no"
+        ][:5]
+        dominant_non_fit_patterns: list[str] = []
+        if glance_result and glance_result.action == "reformulate":
+            dominant_non_fit_patterns.append(glance_result.summary)
+        if noise_anchors and not dominant_non_fit_patterns:
+            dominant_non_fit_patterns.append("preview signal dominated by facial-no candidates")
+
+        window = result_window_for_count(result_count)
+        result_window = f"{window[0]}-{window[1]}" if window else "direct_paginate"
+        return LinkedInPageInsights(
+            page=page_num,
+            result_count=result_count,
+            result_window=result_window,
+            title_clusters=[
+                {"label": label, "count": count}
+                for label, count in sorted(title_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+            ],
+            company_clusters=[
+                {"label": label, "count": count}
+                for label, count in sorted(company_counts.items(), key=lambda item: (-item[1], item[0]))[:5]
+            ],
+            signal_anchors=signal_anchors,
+            noise_anchors=noise_anchors,
+            dominant_non_fit_patterns=dominant_non_fit_patterns,
+            glance_action=glance_result.action if glance_result else "",
+            glance_summary=glance_result.summary if glance_result else "",
+        )
+
+    async def _assess_string_state(
+        self,
+        *,
+        search_string: SearchString,
+        experiment_state: LinkedInExperimentState,
+        page_num: int,
+        result_count: int,
+        string_stats: dict[str, int],
+        page_insights: LinkedInPageInsights,
+    ) -> dict[str, str]:
+        page_candidates = self._page_candidates(getattr(self, "_current_variant_candidates", []), page_num)
+        page_signal = sum(
+            1
+            for candidate in page_candidates
+            if candidate.get("outcome") in {"save", "facial_yes", "reject"}
+        )
+        active_variant = experiment_state.active_variant
+        min_pages = self._get_min_pages(result_count)
+
+        if experiment_state.mode == "recon":
+            if result_count < 500 or page_signal > 0:
+                decision = "commit"
+                rationale = "page 1 already shows signal or the pool is small enough to paginate directly"
+            elif page_insights.glance_action == "reformulate" or result_count >= 1500:
+                decision = "experiment"
+                rationale = "large/noisy pool should be explored through sibling keyword variants before deeper pagination"
+            else:
+                decision = "commit"
+                rationale = "result window is manageable enough to paginate without variant branching"
+        elif experiment_state.mode == "experiment":
+            best_variant = experiment_state.best_variant()
+            if active_variant.saves > 0 or active_variant.facial_yes > 0 or active_variant.within_target_window():
+                decision = "commit"
+                rationale = "active experiment variant is surfacing signal or landed in the desired result window"
+            elif (
+                experiment_state.executed_sibling_count < config.SEARCH_EXPERIMENT_MAX_EXECUTED_SIBLINGS
+                and experiment_state.next_planned_variant() is not None
+            ):
+                decision = "experiment"
+                rationale = "current variant overfit or stayed noisy, but another planned sibling is still worth testing"
+            elif best_variant.variant_id != "root" and (
+                best_variant.saves > 0
+                or best_variant.facial_yes > 0
+                or best_variant.within_target_window()
+            ):
+                decision = "commit"
+                rationale = "best explored sibling looks better than the root family and should be promoted"
+            else:
+                decision = "stop"
+                rationale = "experiment siblings did not surface enough signal to justify further pagination"
+        else:
+            if (
+                result_count >= 500
+                and page_num <= 2
+                and page_signal == 0
+                and page_insights.glance_action == "reformulate"
+            ):
+                decision = "experiment"
+                rationale = "pagination is degrading early and the page-level evidence says the committed variant is drifting noisy"
+            elif page_num >= min_pages and page_signal == 0:
+                decision = "stop"
+                rationale = "minimum review depth has been met and the latest page produced no usable signal"
+            else:
+                decision = "continue"
+                rationale = "keep paginating the committed variant"
+
+        payload = {
+            "decision": decision,
+            "rationale": rationale,
+            "page": page_num,
+            "result_count": result_count,
+            "mode": experiment_state.mode,
+            "active_variant_id": experiment_state.active_variant_id,
+        }
+        log_event(self.log_path, "linkedin_search_assess", string_id=search_string.id, **payload)
+        self._record_runtime_event(
+            search_string=search_string,
+            event_type="linkedin_search_assess",
+            payload=payload,
+        )
+        return payload
+
+    async def _plan_variant_experiments(
+        self,
+        *,
+        search_string: SearchString,
+        experiment_state: LinkedInExperimentState,
+        current_boolean: str,
+        result_count: int,
+        result_count_text: str,
+        page_insights: LinkedInPageInsights,
+        all_candidates: list[dict],
+        string_stats: dict[str, int],
+    ) -> list[LinkedInSearchVariant]:
+        from shared.llm_clients import opus_llm_cached
+
+        target_window = result_window_for_count(result_count)
+        candidates_text = "\n".join(
+            f"- {candidate['name']} | {candidate['title']} at {candidate['company']} | {candidate['outcome']}"
+            for candidate in all_candidates[-10:]
+        )
+        system = f"""You are a senior LinkedIn Recruiter operator modernizing a live keyword-only search.
+
+Role: {self.brief_obj.role_title}
+{self.brief_obj.role_description}
+
+Goal: propose up to {config.SEARCH_EXPERIMENT_MAX_PLANNED_VARIANTS} conservative keyword-only sibling variants for ONE root search family.
+
+Rules:
+- Return ONLY keyword Boolean variants. Do not propose sidebar or advanced filters.
+- Keep the search human-like: no frantic rewrites, no throwaway variants, no cosmetic rewrites.
+- Prefer a mix of:
+  * precision: hyper-specific/high-signal
+  * recall: broader but still targeted
+  * noise_exclusion: removes the dominant noise pattern
+- Do not return the unchanged current Boolean.
+- Each variant must state a short hypothesis and a target result window.
+
+Return JSON:
+{{
+  "variants": [
+    {{
+      "variant_id": "optional",
+      "variant_kind": "precision|recall|noise_exclusion|recovery",
+      "hypothesis": "short explanation",
+      "boolean": "LinkedIn Boolean",
+      "target_result_min": {target_window[0] if target_window else 75},
+      "target_result_max": {target_window[1] if target_window else 400}
+    }}
+  ]
+}}"""
+        target_window_text = f"{target_window[0]}-{target_window[1]}" if target_window else "75-400"
+        user_prompt = f"""Current Boolean:
+{current_boolean}
+
+Current result count:
+{result_count_text}
+
+Target result window:
+{target_window_text}
+
+Page insights:
+{json.dumps(page_insights.to_dict(), indent=2)}
+
+Recent candidate outcomes:
+{candidates_text or "- none"}
+
+Current stats:
+{json.dumps(string_stats, indent=2)}
+"""
+        variants: list[LinkedInSearchVariant] = []
+        try:
+            result = opus_llm_cached(system, user_prompt, expect_json=True)
+            for index, raw_variant in enumerate(result.get("variants", []), start=1):
+                boolean = (raw_variant.get("boolean") or "").strip()
+                if not boolean or boolean == current_boolean:
+                    continue
+                variant = LinkedInSearchVariant(
+                    variant_id=str(raw_variant.get("variant_id") or f"round-{experiment_state.experiment_round + 1}-{index}"),
+                    parent_variant_id=experiment_state.active_variant_id,
+                    root_string_id=search_string.id,
+                    boolean=boolean,
+                    variant_kind=str(raw_variant.get("variant_kind") or "precision"),
+                    hypothesis=str(raw_variant.get("hypothesis") or ""),
+                    target_result_min=int(raw_variant.get("target_result_min") or (target_window[0] if target_window else 75)),
+                    target_result_max=int(raw_variant.get("target_result_max") or (target_window[1] if target_window else 400)),
+                )
+                variants.append(variant)
+                if len(variants) >= config.SEARCH_EXPERIMENT_MAX_PLANNED_VARIANTS:
+                    break
+        except Exception as exc:
+            log_event(
+                self.log_path,
+                "linkedin_search_plan_failed",
+                string_id=search_string.id,
+                error=str(exc),
+            )
+
+        if not variants and result_count >= 500:
+            fallback = await self._force_narrow_adapt(
+                search_string,
+                current_boolean,
+                result_count_text,
+                all_candidates,
+                string_stats,
+            )
+            if fallback and fallback.startswith("narrow:"):
+                boolean = fallback.split("narrow:", 1)[1]
+                target_min, target_max = target_window or (75, 400)
+                variants.append(
+                    LinkedInSearchVariant(
+                        variant_id=f"round-{experiment_state.experiment_round + 1}-fallback",
+                        parent_variant_id=experiment_state.active_variant_id,
+                        root_string_id=search_string.id,
+                        boolean=boolean,
+                        variant_kind="precision",
+                        hypothesis="fallback forced narrow from scout/planner failure",
+                        target_result_min=target_min,
+                        target_result_max=target_max,
+                    )
+                )
+
+        self._record_runtime_event(
+            search_string=search_string,
+            event_type="linkedin_search_plan_variants",
+            payload={
+                "active_variant_id": experiment_state.active_variant_id,
+                "planned_count": len(variants),
+                "variants": [variant.to_dict() for variant in variants],
+            },
+        )
+        return variants
 
     def _should_force_narrow_in_scout(
         self,
