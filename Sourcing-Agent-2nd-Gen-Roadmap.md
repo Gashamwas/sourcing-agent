@@ -17,6 +17,34 @@ This roadmap is ordered by dependency and operational risk, not by calendar esti
 
 ---
 
+## Roadmap Status
+
+As of the refactor-closure phase, this roadmap is complete.
+
+The implemented sequence ended up looking like this:
+
+- Phase 0: contract freeze and characterization coverage
+- Phase 1: shared failure and retry semantics
+- Phase 2A/2B: canonical runtime-state store plus compatibility projections
+- Phase 2C: GitHub runtime-state proving slice
+- Phase 2D: LinkedIn runtime-state readiness boundary
+- Phase 3/4: shared candidate execution engine across GitHub and LinkedIn
+- Phase 5: boundary-first adapter decomposition
+- Phase 6: production safety hardening
+- Closure pass: runtime-state-first enforcement, shared bridge/artifact contracts, operator runbook, and roadmap freeze
+
+That means the architecture described below is no longer aspirational. It is the
+current operating model for normal GitHub and LinkedIn runs.
+
+What remains after this document is not more refactor debt. It is product work:
+
+- stronger LinkedIn search intelligence and in-string experimentation
+- historical engagement/prior-touch awareness
+- richer LinkedIn filter surfaces
+- more explicit pedigree and trajectory-quality modifiers
+
+---
+
 ## What “Second-Generation” Means Here
 
 A second-generation version of this agent should have:
@@ -45,7 +73,7 @@ These are real advantages and should remain intact through the refactor.
 
 ---
 
-## Phase 0: Freeze Contracts and Capture Current Behavior
+## Phase 0: Freeze Contracts and Capture Current Behavior (Completed)
 
 ### Objective
 Stabilize what the system is allowed to mean before changing how it runs.
@@ -76,7 +104,7 @@ The current codebase has strong ideas but a lot of implicit coupling. Refactorin
 
 ---
 
-## Phase 1: Stabilize Failure Semantics and Retry Classification
+## Phase 1: Stabilize Failure Semantics and Retry Classification (Completed)
 
 ### Objective
 Make all failure cases explicit, non-destructive, and consistently classified as retryable or terminal.
@@ -106,7 +134,7 @@ Lifecycle design depends on this. If retry behavior is still split across client
 
 ---
 
-## Phase 2: Introduce a Canonical Candidate Lifecycle and One Durable Source of Truth
+## Phase 2: Introduce a Canonical Candidate Lifecycle and One Durable Source of Truth (Completed)
 
 ### Objective
 Make candidate execution state explicit and durable in the same workstream.
@@ -138,7 +166,7 @@ Lifecycle without a real state store still leaves too much state inferred from a
 
 ---
 
-## Phase 3: Build the Shared Execution Engine and Port GitHub First
+## Phase 3: Build the Shared Execution Engine and Port GitHub First (Completed)
 
 ### Objective
 Prove the new execution model on the lower-risk source first.
@@ -167,7 +195,7 @@ GitHub already fits normalized evidence more naturally and does not depend on br
 
 ---
 
-## Phase 4: Port LinkedIn onto the Shared Engine
+## Phase 4: Port LinkedIn onto the Shared Engine (Completed)
 
 ### Objective
 Move LinkedIn onto the same execution principles without destabilizing the sourcing behavior that already works.
@@ -188,7 +216,7 @@ LinkedIn is the more operationally fragile adapter. It should inherit a proven s
 
 ---
 
-## Phase 5: Separate Core Concerns into Cleaner Layers
+## Phase 5: Separate Core Concerns into Cleaner Layers (Completed)
 
 ### Objective
 Untangle orchestration logic into clearer layers once both sources are running through the shared engine.
@@ -240,7 +268,7 @@ Split responsibilities into modules like:
 
 ---
 
-## Phase 6: Harden Production Safety Boundaries
+## Phase 6: Harden Production Safety Boundaries (Completed)
 
 ### Objective
 Make the system safe under real operating conditions once the execution path is consolidated.
@@ -284,7 +312,7 @@ Test the system where it is most likely to break as each migration lands, not as
 
 ---
 
-## Phase 7: Unify Shared Execution Patterns Across LinkedIn and GitHub
+## Phase 7: Unify Shared Execution Patterns Across LinkedIn and GitHub (Completed)
 
 ### Objective
 Reduce branch-specific architecture drift after both sources are running on the same execution substrate.
@@ -345,6 +373,86 @@ The agent should feel second-generation when:
 - LinkedIn and GitHub share the same execution principles
 - tests cover real operational risks
 - adding a new source feels like plugging into a framework, not copying an orchestrator
+
+This definition is now satisfied by the runtime-state, shared execution,
+adapter-boundary, and safety layers in the current repo.
+
+## Refactor Closure
+
+The closure pass froze the final operational rules that make this roadmap
+complete rather than merely advanced:
+
+- normal GitHub and LinkedIn runs are `runtime_state.sqlite3`-first
+- `progress.json`, stage JSONLs, candidate history, and search memory are
+  projection-owned compatibility artifacts
+- runtime bridges expose an explicit shared contract instead of ad hoc
+  source-specific bootstrap behavior
+- `tools/runtime_state_admin.py` is the official operator surface for rebuild,
+  restart, replay, orphan inspection, and stop-reason inspection
+- legacy compatibility remains only for one-time LinkedIn import and offline
+  artifact-only utilities such as rejudge/report workflows
+
+Once this phase landed, the roadmap stopped being an active migration sequence.
+It became the historical record of how the second-generation architecture was
+built.
+
+---
+
+## Post-Roadmap Product Queue
+
+### A. Search Intelligence Phase
+
+The first major post-refactor product phase should improve LinkedIn search
+intelligence rather than change the runtime substrate.
+
+Target outcomes:
+
+- replace timid one-step narrowing with explicit multi-variant experimentation
+- support aggressive narrowing, sibling precision/recall variants, and
+  deliberate commit/revert behavior inside one root string family
+- use page-1 and early-page observations as structured adaptation evidence
+- persist variant lineage and experiment outcomes in runtime-state
+
+### B. Historical Engagement / Prior-Touch Awareness
+
+Future capability expansion.
+
+Add a candidate engagement layer that can distinguish:
+
+- net new
+- previously viewed
+- previously messaged
+- previously pipelined
+- repeatedly resurfaced
+
+Initial value should be prioritization and reporting, not hard exclusion.
+
+### C. LinkedIn Filter Surface Expansion
+
+Future capability expansion.
+
+Expand beyond Boolean keywords to first-class structured filters such as:
+
+- titles
+- companies
+- skills
+- assessments
+- seniority / years / other sidebar filters
+
+The advanced search modal should be modeled as a separate supported filter
+surface with explicit runtime serialization and resume semantics.
+
+### D. Pedigree / Trajectory-Quality Expansion
+
+Future capability expansion.
+
+Make pedigree and trajectory modifiers more explicit without turning them into
+primary gates over actual builder evidence:
+
+- company pedigree tiering
+- educational pedigree tiering
+- tenure / contract-pattern analysis
+- “quality of builder environment” modifiers
 
 ---
 

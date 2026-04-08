@@ -8,6 +8,20 @@ candidate-stage semantics across GitHub and LinkedIn.
 This layer exists to eliminate duplicated lifecycle logic in the adapters while
 preserving source-specific planning and acquisition behavior.
 
+## Closure Status
+
+The refactor is no longer in an in-between state.
+
+Normal GitHub and LinkedIn runs now assume:
+
+- `runtime_state.sqlite3` is the authoritative source of operational truth
+- compatibility artifacts are projections, not control-state inputs
+- the shared execution layer owns candidate-stage semantics
+- source adapters own only source-specific planning, acquisition, work-units,
+  and side effects
+- safety coordination governs stop reasons, idempotent candidate side effects,
+  safe egress, and bounded browser recovery
+
 ## What The Shared Engine Owns
 
 The shared engine lives in `shared/execution/` and owns:
@@ -82,6 +96,9 @@ Each source now has a runtime-state bridge:
 - `shared/runtime_state/github.py`
 - `shared/runtime_state/linkedin.py`
 
+Both bridges now satisfy the shared protocol in
+`shared/runtime_state/interfaces.py`.
+
 Those bridges own source-specific runtime concerns such as:
 
 - run bootstrap and resume
@@ -91,6 +108,19 @@ Those bridges own source-specific runtime concerns such as:
 
 They should not own candidate-stage lifecycle semantics beyond delegating into
 the shared execution runtime.
+
+## Operator Surface
+
+The official operator/admin surface is:
+
+- `tools/runtime_state_admin.py`
+
+That surface owns rebuild, restart/requeue, side-effect inspection/replay,
+stop-reason inspection, and orphan inspection. Older raw-file reset helpers
+should only delegate to it or fail fast when `runtime_state.sqlite3` is
+present.
+
+See `docs/runtime-state-operator-runbook.md` for the operational runbook.
 
 ## Artifact Ownership
 
@@ -107,6 +137,9 @@ authoritative write targets:
 
 They remain on disk because existing tooling still consumes them, but runtime
 truth lives in `runtime_state.sqlite3`.
+
+The authoritative registry for this classification now lives in
+`shared/runtime_state/artifacts.py`.
 
 Direct side-effect artifacts still remain direct writes in this phase, such as:
 
@@ -150,6 +183,18 @@ These invariants should remain true:
 - recoverable runtime failures land in `failed_retryable`.
 - side-effect failures never rewrite the underlying business decision.
 - stale or manually edited compatibility artifacts must not alter control flow.
+
+## Definition Of Done
+
+This architecture should be treated as complete when the following are true:
+
+- normal runs do not fall back to file-truth when runtime-state is expected
+- bridges and admin surfaces are explicit contracts, not convenience helpers
+- artifact ownership is codified in code and tests, not just in prose
+- compatibility artifacts remain available for tooling without becoming a
+  parallel operational mode
+- future work can focus on search intelligence or capability expansion instead
+  of re-litigating runtime-state authority
 
 ## Guidance For Future Work
 

@@ -39,7 +39,7 @@ def _resolve_run_id(store: RuntimeStateStore, *, source: str, brief_id: str, run
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Repair and inspect runtime_state-backed sourcing runs")
+    parser = argparse.ArgumentParser(description="Official operator surface for runtime_state-backed sourcing runs")
     parser.add_argument("--output-dir", required=True, help="Output directory containing runtime_state.sqlite3")
     parser.add_argument("--source", required=True, choices=["github", "linkedin"], help="Run source namespace")
     parser.add_argument("--brief-id", required=True, help="Brief ID scoped inside runtime_state")

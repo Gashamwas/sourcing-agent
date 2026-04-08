@@ -8,7 +8,9 @@ from .admin import (
     rebuild_compat_projections,
     requeue_work_unit,
 )
+from .artifacts import ARTIFACT_CONTRACTS, ArtifactContract, ArtifactOwnership, classify_artifact
 from .github import GitHubRuntimeStateBridge
+from .interfaces import RuntimeStateBridge
 from .lock import RuntimeStateLock
 from .projections import (
     project_github_facial_judgments,
@@ -41,6 +43,11 @@ __all__ = [
     "GitHubRuntimeStateBridge",
     "LinkedInResumeState",
     "LinkedInRuntimeStateBridge",
+    "RuntimeStateBridge",
+    "ArtifactContract",
+    "ArtifactOwnership",
+    "ARTIFACT_CONTRACTS",
+    "classify_artifact",
     "project_github_snippets",
     "project_github_facial_judgments",
     "project_github_profile_summaries",

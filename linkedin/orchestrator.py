@@ -501,15 +501,13 @@ class Pipeline:
         await self.browser.connect()
         log_event(self.log_path, "pipeline_start", mode="full")
 
-        # Load dedup cache from cross-session history only
+        progress = self._load_or_create_progress()
+        self._progress = progress
         self._seen_urls = set()
         self._in_flight_urls = set()
         self._prior_outcomes = {}
         self._load_candidate_history()
         self._load_search_memory()
-
-        progress = self._load_or_create_progress()
-        self._progress = progress
 
         # Ctrl+C handler — only install if not running under session_orchestrator
         def _sigint_handler(sig, frame):
@@ -702,12 +700,12 @@ class Pipeline:
         except Exception:
             pass
 
-        # Load dedup cache from cross-session history only
         self._seen_urls = set()
         self._in_flight_urls = set()
         self._prior_outcomes = {}
-        self._load_candidate_history()
-        self._load_search_memory()
+        if not resume and self._runtime_bridge.has_runtime_state():
+            self._load_candidate_history()
+            self._load_search_memory()
 
         # Ctrl+C handler — only install if not running under session_orchestrator
         def _sigint_handler(sig, frame):
@@ -721,8 +719,11 @@ class Pipeline:
 
         try:
             if resume and (
-                (self._runtime_bridge and self._runtime_bridge.has_runtime_state())
-                or self.progress_path.exists()
+                self._runtime_bridge
+                and (
+                    self._runtime_bridge.has_runtime_state()
+                    or self._runtime_bridge.has_legacy_state()
+                )
             ):
                 # --- Resume: skip kit extraction, strategy, queue building ---
                 print("\n--- Resuming from runtime_state ---")

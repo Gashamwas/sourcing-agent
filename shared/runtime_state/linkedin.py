@@ -74,6 +74,9 @@ class LinkedInRuntimeStateBridge:
         latest_run = self.store.get_latest_run(source="linkedin", brief_id=self.brief_id)
         return bool(latest_run or self.store.has_candidates(source="linkedin", brief_id=self.brief_id))
 
+    def has_legacy_state(self) -> bool:
+        return bool(self._read_legacy_progress() or self.history_path.exists() or self.search_memory_path.exists())
+
     def start_or_resume_run(
         self,
         *,
@@ -469,6 +472,21 @@ class LinkedInRuntimeStateBridge:
             output_dir=self.output_dir,
         )
 
+    def record_event(
+        self,
+        *,
+        event_type: str,
+        payload: dict[str, Any] | None = None,
+        run_id: int | None = None,
+        work_unit_id: int | None = None,
+    ) -> None:
+        self.store.record_event(
+            run_id=run_id,
+            work_unit_id=work_unit_id,
+            event_type=event_type,
+            payload=payload,
+        )
+
     def import_legacy_state(self, run_id: int) -> None:
         with self.store.connect() as conn:
             imported = conn.execute(
@@ -618,7 +636,56 @@ class LinkedInRuntimeStateBridge:
                         profile_url=url,
                         payload={"legacy_import": True},
                     )
-                state = "full_terminal" if outcome in SAVE_DECISIONS or outcome == "REJECT" else "facial_terminal"
+                candidate = self.store.get_candidate(
+                    source="linkedin",
+                    brief_id=self.brief_id,
+                    identity_key=url,
+                )
+                current_state = candidate["current_lifecycle_state"] if candidate else "discovered"
+                if current_state == "discovered":
+                    self.store.set_candidate_state(
+                        run_id=run_id,
+                        source="linkedin",
+                        brief_id=self.brief_id,
+                        identity_key=url,
+                        new_state="snippet_extracted",
+                    )
+                    current_state = "snippet_extracted"
+                if current_state == "snippet_extracted":
+                    self.store.set_candidate_state(
+                        run_id=run_id,
+                        source="linkedin",
+                        brief_id=self.brief_id,
+                        identity_key=url,
+                        new_state="facial_started",
+                    )
+                    current_state = "facial_started"
+                if outcome in SAVE_DECISIONS or outcome == "REJECT":
+                    if current_state == "facial_started":
+                        self.store.set_candidate_state(
+                            run_id=run_id,
+                            source="linkedin",
+                            brief_id=self.brief_id,
+                            identity_key=url,
+                            new_state="facial_terminal",
+                            terminal_decision="FACIAL_YES",
+                            terminal_payload={
+                                "legacy_import": True,
+                                "source_string_id": record.get("source_string_id"),
+                            },
+                        )
+                        current_state = "facial_terminal"
+                    if current_state == "facial_terminal":
+                        self.store.set_candidate_state(
+                            run_id=run_id,
+                            source="linkedin",
+                            brief_id=self.brief_id,
+                            identity_key=url,
+                            new_state="full_started",
+                        )
+                    state = "full_terminal"
+                else:
+                    state = "facial_terminal"
                 self.store.set_candidate_state(
                     run_id=run_id,
                     source="linkedin",
@@ -659,6 +726,20 @@ class LinkedInRuntimeStateBridge:
             payload = _json_loads(work_unit["payload_json"])
             work_unit_id = int(work_unit["id"])
             with self.store.connect() as conn:
+                candidate_rows = conn.execute(
+                    """
+                    SELECT id, identity_key, terminal_payload_json, last_work_unit_id
+                    FROM candidates
+                    WHERE source = 'linkedin' AND brief_id = ?
+                    """,
+                    (self.brief_id,),
+                ).fetchall()
+                for row in candidate_rows:
+                    terminal_payload = _json_loads(row["terminal_payload_json"])
+                    source_string_id = terminal_payload.get("source_string_id")
+                    if source_string_id == string_id or row["last_work_unit_id"] == work_unit_id:
+                        candidate_ids.add(int(row["id"]))
+                        candidate_keys_to_clear.add(str(row["identity_key"]))
                 rows = conn.execute(
                     """
                     SELECT ca.id, ca.payload_json, ca.source_cursor_json, c.id AS candidate_id, c.identity_key
@@ -751,15 +832,15 @@ class LinkedInRuntimeStateBridge:
         self.sync_progress(run_id, progress)
 
     def _legacy_state_exists(self) -> bool:
-        return any(
-            path.exists()
-            for path in (self.progress_path, self.history_path, self.search_memory_path)
-        )
+        return self.has_legacy_state()
 
     def _read_legacy_progress(self) -> Progress | None:
         if not self.progress_path.exists():
             return None
-        return Progress.from_file(str(self.progress_path))
+        progress = Progress.from_file(str(self.progress_path))
+        if progress.brief_name != self.brief_name:
+            return None
+        return progress
 
     def _search_string_for_id(self, progress: Progress | None, string_id: int) -> SearchString:
         if progress:
