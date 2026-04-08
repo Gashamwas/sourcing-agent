@@ -1,0 +1,520 @@
+{
+  "role_title": "Frontier Data Lead, Code + RL Environments",
+  "role_level": "IC6-IC7",
+  "role_summary": "Hands-on frontier technical lead who translates AI lab needs into datasets, RL environments, evals, and proof-of-value loops for coding agents and long-horizon tool-use workflows. Runs the project end to end: scoping with frontier researchers, designing tasks and verifiers, building validation and automation systems, and hiring or leading the engineers, researchers, QAs, and domain experts required to deliver at quality and scale. The hard bar is not generic applied AI or people management; it is post-training and evaluation depth plus enough systems and operational leadership to run a startup-like frontier data project.",
+  "geography": "San Francisco Bay Area, California, United States",
+  "linkedin_project": "FDL Bay Area (Code + RL)",
+  "linkedin_project_id": "",
+  "instructions": [
+    "Treat this as a merged brief, not two independent reqs. Strong candidates may anchor in either coding-agent or RL-environment work, but they must still look capable of leading the full project lifecycle across environments, evals, quality systems, and delivery execution.",
+    "Do not over-index on exact titles like Frontier Data Lead. Adjacent titles such as Research Engineer, Applied Scientist, Staff ML Engineer, Principal Engineer, Technical Lead, Engineering Manager who still codes, and Founding Engineer can all be right if the underlying work is right.",
+    "The evaluation bar is post-training, environment, or benchmark depth plus systems and team/process leadership. Generic AI app builders, pure copilots, or customer-facing AI delivery profiles without model-improvement or environment-design work should not be rescued by pedigree alone.",
+    "Code-lane candidates should show more than using coding models. Look for coding-agent benchmarks, repo sandboxing, patch or test verification, SWE eval harnesses, unit-test generation, task generation, or proof-of-value model improvement on software-engineering tasks.",
+    "RL-lane candidates should show more than classical RL familiarity. Look for environment design, reward or verifier design, task realism, trajectory scoring, fine-tuning or post-training loops, or long-horizon eval systems for LLM agents.",
+    "Agent infrastructure builders can fit when they built browser-use, computer-use, MCP, tool-calling, or enterprise app simulation environments with clear evaluation and quality methodology.",
+    "Strong customer or lab communication is a confidence booster only after the build evidence is real. Sales enablement, solutioning, or stakeholder polish without technical authorship is not enough.",
+    "Because this search is Bay Area-specific, local candidates and people already tied to the San Francisco or Peninsula market should be prioritized over remote candidates with no local signal.",
+    "For GitHub, prioritize repos showing environments, verifiers, simulators, repo sandboxes, agent-task generation, evaluation harnesses, reward logic, validation tooling, and internal platform code. De-emphasize toy demos, prompt collections, and thin wrappers over hosted APIs."
+  ],
+  "search_priorities": [
+    "Staff or principal research engineers, applied scientists, and ML engineers who built coding-agent benchmarks, SWE eval harnesses, repo sandboxes, or software-engineering post-training systems",
+    "RL and post-training builders who designed environments, verifiers, reward systems, trajectory scoring, or long-horizon evaluation tasks for LLM agents",
+    "Agent-infrastructure builders who created browser-use, computer-use, MCP, function-calling, or enterprise workflow environments with strong validation and observability",
+    "Hands-on technical leads or engineering managers who still coded while owning team build-out, QA process design, and direct collaboration with frontier lab researchers or high-end AI customers",
+    "Strong Bay Area academic or industry researchers with relevant RL, program synthesis, agent evaluation, or tool-use systems depth who also show practical engineering and delivery instincts",
+    "Canonical app-layer GenAI builders only when there is explicit evidence they moved below the application layer into evaluation, data quality, environment design, or model-improvement work"
+  ],
+  "additional_search_terms": [
+    "post-training",
+    "RLHF",
+    "DPO",
+    "GRPO",
+    "reward model",
+    "verifier",
+    "trajectory scoring",
+    "environment design",
+    "agent environment",
+    "task generation",
+    "synthetic data",
+    "coding agent",
+    "SWE-bench",
+    "LiveCodeBench",
+    "HumanEval",
+    "repo sandbox",
+    "code execution sandbox",
+    "unit test generation",
+    "patch verification",
+    "program synthesis",
+    "browser-use",
+    "computer-use",
+    "tool calling",
+    "function calling",
+    "MCP",
+    "Model Context Protocol",
+    "agent evaluation",
+    "benchmarking",
+    "quality rubric",
+    "validation pipeline",
+    "fine-tuning",
+    "evaluation report",
+    "research engineer",
+    "applied scientist",
+    "staff engineer"
+  ],
+  "intake_notes": "This brief merges two Bay Area Turing roles posted on March 9, 2026: Frontier Data Lead, Code - US and Frontier Data Lead, RL Gyms - US. The shared job is a hands-on frontier technical lead who owns datasets, environments, evals, quality systems, and team/process execution for AI lab customers. The merged interpretation should not require perfectly symmetrical depth in both lanes. Instead, the save bar is: strong anchor in either coding-agent or RL-environment/post-training work, plus enough adjacent fluency to credibly run the full project lifecycle, plus hands-on leadership and systems judgment. Engineering management experience matters, but this is not a manager-only search.",
+  "capability_areas": [
+    {
+      "name": "1. RL Environment Design, Verifiers & Post-Training Systems (HARD GATE)",
+      "description": "Designs or builds the environments, tasks, reward or verifier logic, and post-training loops used to evaluate or improve frontier models. This is the closest work to the RL Gyms half of the role and one of the clearest direct-fit anchors.",
+      "builder_signals": [
+        "Designed RL or agent environments, simulators, tasks, or stateful workflows for model evaluation or improvement",
+        "Built reward models, verifier systems, trajectory scoring, or automated success criteria for long-horizon agent behavior",
+        "Ran or supported RLHF, DPO, GRPO, PPO, or other post-training and fine-tuning loops tied to measurable model improvement",
+        "Created seed data, schemas, APIs, or interaction surfaces that made the environment realistic and useful for post-training",
+        "Can describe how environment or reward design changed model behavior, benchmark outcomes, or proof-of-value results"
+      ],
+      "user_signals": [
+        "Mentioned RL only as a skill keyword or course topic with no evidence of environment or post-training work",
+        "Consumed already-tuned models without participating in reward design, task design, or evaluation methodology",
+        "Did classical RL experiments in isolation with no visible connection to LLM agents, evaluation systems, or real workflow environments",
+        "Managed preference-labeling or annotation operations without designing the methodology"
+      ],
+      "key_terms": [
+        "RLHF",
+        "DPO",
+        "GRPO",
+        "PPO",
+        "post-training",
+        "reward model",
+        "verifier",
+        "trajectory",
+        "rollout",
+        "environment design"
+      ],
+      "github_code_signals": [
+        "trl",
+        "verl",
+        "openrlhf",
+        "grpo",
+        "ppo",
+        "reward",
+        "verifier",
+        "trajectory",
+        "vllm"
+      ]
+    },
+    {
+      "name": "2. Coding Agents, SWE Benchmarks & Repository Evaluation",
+      "description": "Builds datasets, benchmarks, eval harnesses, or environments for models that write, debug, test, or reason over code. This is the Code half of the role and the other primary direct-fit anchor.",
+      "builder_signals": [
+        "Built or improved coding agents that operate on real repositories or software-development tasks",
+        "Created code benchmarks, task suites, or automated verification systems for bug fixing, patch generation, test generation, or repo navigation",
+        "Built repo sandboxing, code execution, unit-test generation, or patch-evaluation infrastructure",
+        "Generated synthetic code tasks or designed data pipelines that improved coding-model performance",
+        "Analyzed model strengths and failure modes on software-engineering tasks and used that analysis to improve the system or benchmark"
+      ],
+      "user_signals": [
+        "Used Copilot, Cursor, Claude Code, or other coding tools without building benchmarks, evals, or improvement loops around them",
+        "Built standard CI or devtools infrastructure with no model-evaluation or code-generation component",
+        "Created generic codegen demos or wrappers without task realism, verification, or dataset methodology"
+      ],
+      "key_terms": [
+        "coding agent",
+        "SWE-bench",
+        "LiveCodeBench",
+        "HumanEval",
+        "MBPP",
+        "repo sandbox",
+        "patch verification",
+        "unit test generation",
+        "program synthesis"
+      ],
+      "github_code_signals": [
+        "swebench",
+        "humaneval",
+        "mbpp",
+        "pytest",
+        "tree-sitter",
+        "sandbox",
+        "openhands",
+        "aider",
+        "ast"
+      ]
+    },
+    {
+      "name": "3. Tool-Use Agent Environments: Browser-Use, MCP & Workflow Simulation",
+      "description": "Builds the interfaces and environments that let agents operate across browsers, tools, APIs, and realistic enterprise workflows. This captures the overlap between coding agents and RL gyms around long-horizon, multi-step agent behavior.",
+      "builder_signals": [
+        "Designed browser-use or computer-use tasks, simulators, or environments for agent evaluation",
+        "Built MCP, function-calling, tool-use, or API surfaces that agents used to complete realistic tasks",
+        "Modeled databases, schemas, and interfaces for simulated business or consumer applications",
+        "Built state management, trajectory capture, observability, or validation for multi-step agent workflows",
+        "Integrated agents with enterprise or consumer tools in ways that preserved realism, difficulty, and measurable outcomes"
+      ],
+      "user_signals": [
+        "Built simple chatbots or RAG apps without multi-step tool use or environment complexity",
+        "Used pre-built agent frameworks without owning the environment, interface, or evaluation design",
+        "Did browser automation or QA scripting unrelated to LLM agents or evaluation systems"
+      ],
+      "key_terms": [
+        "browser-use",
+        "computer-use",
+        "tool calling",
+        "function calling",
+        "MCP",
+        "Model Context Protocol",
+        "workflow simulation",
+        "multi-step task",
+        "trajectory"
+      ],
+      "github_code_signals": [
+        "playwright",
+        "selenium",
+        "browser-use",
+        "mcp",
+        "fastapi",
+        "openapi",
+        "langgraph"
+      ]
+    },
+    {
+      "name": "4. Data Quality, Task Generation & Evaluation Operations",
+      "description": "Designs the quality systems that make environments and datasets usable at frontier standards: realism, difficulty, correctness, diversity, validation, and human review. This is the day-to-day operating core of the role.",
+      "builder_signals": [
+        "Defined quality rubrics, review criteria, or annotation methodology for datasets, tasks, or environment outputs",
+        "Built automated validation scripts, evaluation pipelines, or regression checks for data and task quality",
+        "Created synthetic data or task generation systems that increased coverage, realism, or difficulty",
+        "Designed human-in-the-loop review processes with measurable quality standards",
+        "Improved environment or dataset quality through explicit work on correctness, diversity, realism, or failure-mode coverage"
+      ],
+      "user_signals": [
+        "Managed data operations or QA throughput without designing the technical quality system",
+        "Did general ETL, analytics, or reporting work with no connection to model evaluation or training quality",
+        "Performed annotation or review work using someone else's rubric without creating the methodology"
+      ],
+      "key_terms": [
+        "data quality",
+        "quality rubric",
+        "validation script",
+        "synthetic data",
+        "task generation",
+        "human in the loop",
+        "review process",
+        "difficulty",
+        "diversity",
+        "correctness"
+      ],
+      "github_code_signals": [
+        "pytest",
+        "pandera",
+        "great_expectations",
+        "deepeval",
+        "ragas",
+        "validation",
+        "synthetic"
+      ]
+    },
+    {
+      "name": "5. Systems Architecture, Sandboxing & Internal Tooling",
+      "description": "Builds the surrounding systems that make these projects operational at scale: internal tools, APIs, dashboards, sandboxes, databases, queues, and automation. The role needs more than ML intuition; it needs strong technical systems judgment.",
+      "builder_signals": [
+        "Built internal tools for data generation, verification, sandboxing, scraping, or evaluation operations",
+        "Designed APIs, databases, worker systems, or task queues that supported environment or post-training pipelines",
+        "Made architecture tradeoffs around throughput, isolation, correctness, observability, latency, or cost",
+        "Built dashboards or reporting APIs for customers or internal teams to inspect model or environment performance",
+        "Shows fluency in Python and enough systems or full-stack engineering to ship production-grade tooling"
+      ],
+      "user_signals": [
+        "Worked on pure infrastructure or platform systems with no visible link to agents, post-training, environments, or evaluation",
+        "Built frontend shells or dashboards without owning the data pipeline or backend system",
+        "Did data engineering for analytics without any model-improvement or evaluation awareness"
+      ],
+      "key_terms": [
+        "sandboxing",
+        "API design",
+        "database schema",
+        "dashboard",
+        "worker queue",
+        "throughput",
+        "observability",
+        "automation"
+      ],
+      "github_code_signals": [
+        "docker",
+        "kubernetes",
+        "fastapi",
+        "postgres",
+        "redis",
+        "celery",
+        "temporal",
+        "opentelemetry"
+      ]
+    },
+    {
+      "name": "6. Hands-On Technical Leadership, Team Building & Lab-Facing Delivery",
+      "description": "Leads the project like a startup while still contributing technically: hiring the right team, setting QA processes, translating client needs into specs, and driving high-stakes execution across multiple stakeholders.",
+      "builder_signals": [
+        "Led engineers, researchers, QAs, or domain experts while still writing code or directly shaping technical decisions",
+        "Translated frontier lab or demanding customer asks into environment specs, milestones, and technical execution plans",
+        "Interviewed, hired, onboarded, trained, or mentored technical contributors for specialized data or environment projects",
+        "Owned delivery risk across quality, throughput, scope, and stakeholder communication for complex technical programs",
+        "Produced eval reports, technical writeups, or benchmark narratives that informed roadmap or customer conversations"
+      ],
+      "user_signals": [
+        "Pure people manager or org leader who no longer appears to build or make close technical decisions",
+        "Pre-sales, solutions, or product leader whose work centers on communication rather than technical authorship",
+        "Research manager or program manager coordinating technical work without personal implementation depth"
+      ],
+      "key_terms": [
+        "technical lead",
+        "hiring",
+        "QA process",
+        "customer collaboration",
+        "researcher collaboration",
+        "delivery owner",
+        "evaluation report"
+      ],
+      "github_code_signals": []
+    }
+  ],
+  "depth_distinction": {
+    "builder_definition": "A builder for this role personally designs and shapes the technical system: the environment, task logic, verifier or reward logic, evaluation methodology, data-quality process, or surrounding tooling. They do not merely consume coding models or talk about agents at a high level. They can explain how a frontier lab ask turns into a concrete environment or benchmark spec, what makes the tasks realistic and difficult, how quality is enforced, and what systems are required to deliver and iterate at scale. They may manage people, but they still operate close enough to the code and design to make the key calls themselves.",
+    "user_definition": "A user or adjacent profile works with AI products, copilots, or teams using these systems without directly designing the environment, evaluation, or improvement loop. This includes generic app-layer AI builders, solutioning or pre-sales roles, infrastructure teams that serve models without touching training or evaluation methodology, annotation operators following pre-written rubrics, and managers who coordinate the work but no longer shape the technical system in detail.",
+    "edge_case_guidance": "CODING-AGENT SPECIALISTS: Strong fit even without explicit RL titles if they built real SWE benchmarks, repo sandboxes, automated verification, task generation, or post-training loops tied to coding-model improvement. RL / POST-TRAINING SPECIALISTS: Strong fit even without coding-agent titles if they designed environments, verifiers, reward systems, schemas, APIs, and proof-of-value loops for LLM agents in realistic workflows. AGENT INFRASTRUCTURE BUILDERS: Browser-use, MCP, or workflow-environment builders can fit when they also show quality systems and model-evaluation rigor. MANAGEMENT: Formal management experience helps because the role requires hiring and QA process design, but pure managers without recent technical depth should not pass. BAY AREA ACADEMICS: Postdocs or researchers can fit if their work clearly crosses into implementable environments, benchmarks, or tooling rather than staying purely theoretical."
+  },
+  "inferential_save_rules": {
+    "description": "This market includes frontier-lab and Bay Area startup profiles with sparse public detail. When a profile has a strong prior of fit but insufficient bullet-level evidence, prefer INFERENTIAL_SAVE over silent rejection so the recruiter can review it.",
+    "conditions": [
+      "Current technical role at a frontier AI lab or elite coding-agent company with title or team context suggesting post-training, evals, code generation, agents, or research engineering, even if bullets are sparse",
+      "PhD or strong research profile in RL, program synthesis, agents, or LLM evaluation with a current hands-on engineering or research-engineering role and limited LinkedIn detail",
+      "Staff or principal engineer at a strong AI company whose visible profile shows agent, benchmark, or environment adjacency but not enough detail to prove direct ownership"
+    ],
+    "save_tag": "INFERENTIAL_SAVE",
+    "confidence_range": [
+      0.4,
+      0.6
+    ],
+    "note": "Use this pathway for strong priors that still need recruiter confirmation, not for weak maybes."
+  },
+  "non_fit_patterns": [
+    {
+      "label": "Generic GenAI application builders",
+      "description": "Engineers or FDE-style profiles who shipped copilots, chat workflows, or agent apps for end users but did not work on post-training, environment design, benchmark design, verifier logic, or evaluation methodology.",
+      "why_not": "They are building on top of models rather than improving models through data, environments, or evaluation systems. The role sits below the application layer.",
+      "examples": [
+        "Enterprise copilot builder using APIs and RAG only",
+        "Forward deployed engineer shipping AI workflows with no benchmark or model-improvement work"
+      ]
+    },
+    {
+      "label": "Pure devtools or SWE infrastructure",
+      "description": "Strong software engineers building developer tools, CI, code review systems, or repository infrastructure with no visible AI, evaluation, or post-training component.",
+      "why_not": "The code domain is relevant, but the model-improvement and environment-design layer is missing.",
+      "examples": [
+        "Staff devtools engineer building CI platforms",
+        "Infrastructure engineer for repo management with no AI evaluation work"
+      ]
+    },
+    {
+      "label": "MLOps, model serving, or platform-only ML infrastructure",
+      "description": "Engineers who deploy, monitor, or scale models in production but do not design training data, benchmarks, environments, or evaluation systems.",
+      "why_not": "They operate around the model rather than shaping the post-training and quality loop that this role owns.",
+      "examples": [
+        "MLOps engineer managing model inference platforms",
+        "ML platform engineer building feature stores or serving infrastructure"
+      ]
+    },
+    {
+      "label": "Annotation or data-ops execution without methodology design",
+      "description": "People who label data, review outputs, or manage annotation operations without creating the quality rubric, validation tooling, or evaluation system.",
+      "why_not": "This role designs the process and the technical quality bar; it is not an annotation-operations role.",
+      "examples": [
+        "AI trainer following RLHF rubrics",
+        "Data-ops lead focused on throughput and reviewer staffing"
+      ]
+    },
+    {
+      "label": "Classical RL or robotics research without LLM-agent bridge",
+      "description": "Researchers who worked on control, robotics, or simulation environments but show no evidence of LLM agents, tool use, code tasks, post-training data, or scalable evaluation systems.",
+      "why_not": "Some of the skills are adjacent, but the direct connection to frontier model improvement for coding and tool-use agents is missing.",
+      "examples": [
+        "Robotics RL researcher with no LLM or evaluation-system work",
+        "Control-theory simulation expert with no agent or post-training bridge"
+      ]
+    },
+    {
+      "label": "Manager, PM, or solutions leader without recent technical authorship",
+      "description": "Leads organizations or customer conversations around AI work but no longer appears to design environments, write code, or own evaluation methodology personally.",
+      "why_not": "The role requires hands-on technical leadership, not managerial oversight alone.",
+      "examples": [
+        "Engineering director who manages research teams but has no recent technical contribution evidence",
+        "Solutions or product leader for AI platforms without direct build ownership"
+      ]
+    }
+  ],
+  "non_fit_override_rule": "A non-fit pattern is overridden when the profile shows concrete builder-level evidence in a capability area. For example, a devtools engineer who built coding-agent benchmarks or a robotics researcher who later designed LLM tool-use environments should be evaluated on the actual evidence, not the default lookalike label.",
+  "employer_signal_rules": [
+    {
+      "tier": "frontier_lab",
+      "employer_patterns": [
+        "OpenAI",
+        "Anthropic",
+        "Google DeepMind",
+        "Microsoft AI",
+        "Meta FAIR",
+        "xAI",
+        "Amazon AGI",
+        "Apple",
+        "Mistral"
+      ],
+      "evidence_required": "Any technical role touching post-training, evals, agents, data, research engineering, or model-improvement systems is a strong signal. Pure infra-only or manager-only profiles still need adjacent evidence.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "coding_agent_company",
+      "employer_patterns": [
+        "Anysphere",
+        "Cursor",
+        "Codeium",
+        "Windsurf",
+        "Cognition",
+        "Poolside",
+        "Magic",
+        "Augment",
+        "Sourcegraph",
+        "GitHub"
+      ],
+      "evidence_required": "Strong signal when the candidate worked on agents, benchmarks, evals, repo workflows, code intelligence, or model-improvement loops. Generic product, GTM, or unrelated platform roles are not enough.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "strong_ai",
+      "employer_patterns": [
+        "Scale AI",
+        "Hugging Face",
+        "AI2",
+        "Databricks",
+        "Perplexity",
+        "Glean",
+        "Harvey",
+        "Sierra",
+        "Snorkel",
+        "Labelbox"
+      ],
+      "evidence_required": "Need at least one visible sign of environment, benchmark, evaluation, data-quality, or post-training depth. Company signal alone is helpful but not decisive because these employers also have adjacent roles.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "research_lab",
+      "employer_patterns": [
+        "Stanford",
+        "Berkeley",
+        "UC Berkeley",
+        "BAIR",
+        "Stanford HAI",
+        "Berkeley AI Research",
+        "SLAC"
+      ],
+      "evidence_required": "Need publications, open-source work, or project detail showing RL, agents, program synthesis, LLM evaluation, or systems work that plausibly transfers into implementable environments and benchmarks.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "neutral",
+      "employer_patterns": [],
+      "evidence_required": "Evaluate based on actual capability-area evidence, depth, and Bay Area fit rather than employer name.",
+      "save_on_employer_alone": false
+    }
+  ],
+  "minimum_years_experience": 7,
+  "minimum_bar_description": "7+ years of total hands-on engineering, ML, or research-engineering experience, with clear evidence that the candidate still operates close to the technical system. Save anyone who shows direct depth in either coding-agent or RL-environment and post-training work, plus enough systems and delivery leadership to run a frontier data project end to end. They do not need identical tenure in both lanes, but they should have a clear anchor in one and credible adjacent evidence in the other. Strong frontier-lab, Bay Area startup, or research signals should raise tolerance for sparse bullets when the underlying trajectory suggests real post-training or evaluation depth.",
+  "facial_calibration": {
+    "expected_yes_rate_low": 0.18,
+    "expected_yes_rate_high": 0.4,
+    "fast_exit_patterns": [
+      "ENTIRE career is sales, business development, customer success, or recruiting",
+      "ENTIRE career is product or program management with no technical IC signal",
+      "ENTIRE career is generic software engineering with no AI, benchmark, agent, evaluation, or research signal",
+      "ENTIRE career is MLOps, SRE, or platform infrastructure with no training, evaluation, or environment-design signal",
+      "ENTIRE career is annotation, data operations, or QA execution without engineering or methodology ownership"
+    ],
+    "trajectory_yes_patterns": [
+      "Career includes Research Engineer, Applied Scientist, Research Scientist, Staff ML Engineer, or Principal Engineer roles with RL, agents, post-training, evaluation, or coding-model context",
+      "Title or headline contains reward, verifier, environment, benchmark, post-training, coding agent, SWE eval, program synthesis, or agent evaluation terms",
+      "Technical role at a frontier lab, coding-agent company, or strong AI company with visible agent, code, or evaluation relevance",
+      "Progression from SWE, devtools, or research into coding-agent, agent-eval, or post-training work",
+      "Academic or research profile in RL, agents, LLM evaluation, or program synthesis with practical engineering signal"
+    ],
+    "trajectory_ambiguous_patterns": [
+      "Staff or principal engineer at an AI company with sparse bullets and unclear direct ownership of benchmarks or environments",
+      "Engineering manager or tech lead at an AI company who may or may not still code deeply",
+      "Research scientist profile with frontier employer or relevant publications but limited delivery detail",
+      "Robotics, simulation, or RL profile with possible transfer to LLM environments but unclear current bridge",
+      "Strong AI application or devtools builder with some agent terminology but no obvious model-improvement evidence"
+    ],
+    "trajectory_no_patterns": [
+      "ENTIRE career is generic app-layer AI delivery, FDE, or solutions work with no environment, evaluation, or post-training signal",
+      "ENTIRE career is data analytics, BI, or dashboarding",
+      "ENTIRE career is devtools, backend, or infrastructure with no AI or evaluation signal",
+      "ENTIRE career is annotation or review operations",
+      "ENTIRE career is non-technical management"
+    ],
+    "github_fast_exit_patterns": [
+      "Portfolio is mostly prompt apps, chat wrappers, or hackathon demos with no original evaluation, environment, or tooling code",
+      "Portfolio is mostly generic frontend, CRUD, or standard web apps unrelated to AI agents, benchmarks, or post-training",
+      "Portfolio is dominated by notebooks, tutorials, or forks with little original systems or evaluation work"
+    ],
+    "github_portfolio_yes_patterns": [
+      "Repos show benchmarks, verifiers, reward logic, environment simulators, repo sandboxes, code execution systems, or task-generation infrastructure",
+      "Portfolio includes coding-agent, SWE-eval, browser-use, computer-use, MCP, or tool-use infrastructure with real validation logic",
+      "Mixed ML and systems code shows post-training or evaluation rigor plus the APIs, databases, or worker systems needed to run it",
+      "Open-source contributions indicate meaningful work on agent evaluation, code benchmarks, RLHF or fine-tuning tooling, or workflow environments"
+    ],
+    "github_portfolio_ambiguous_patterns": [
+      "Strong agent apps or devtools projects with some eval code but unclear direct model-improvement ownership",
+      "Strong RL, simulation, or robotics repos with possible transfer but no clear LLM-agent bridge",
+      "Strong AI platform or serving repos with sparse evidence of evaluation or environment design"
+    ],
+    "github_portfolio_no_patterns": [
+      "Prompt collections, chat UIs, or API wrappers with no benchmark, verifier, or environment logic",
+      "Generic full-stack repositories without model-evaluation or environment-design work",
+      "Notebook-heavy portfolios with little reusable code or systems architecture"
+    ]
+  },
+  "market_density": "dense",
+  "employer_blacklist": [
+    "Turing"
+  ],
+  "jd_path": "config/FDL-Bay-Area/jd-frontier-data-lead-code-rl-bay-area.md",
+  "bias_controls": {
+    "max_consecutive_saves": 6,
+    "max_consecutive_rejects": 15,
+    "parse_failure_alarm_rate": 0.03
+  },
+  "post_save_modifiers": [
+    {
+      "name": "Frontier Lab / High-Trust Customer Credibility",
+      "trigger": "Candidate already qualifies as a SAVE, SIGNAL_SAVE, TRANSFERABLE_SAVE, or INFERENTIAL_SAVE based on the core capability areas",
+      "if_present": "Boost confidence by 0.05-0.1. Note that the candidate appears credible with frontier researchers or similarly demanding technical customers.",
+      "if_absent": "No adjustment. Lack of explicit customer-facing evidence is not a rejection reason if the technical bar is clearly met.",
+      "signals": [
+        "Direct collaboration with frontier lab researchers or elite technical customers",
+        "Owned technical progress reviews, evaluation reports, or solutioning conversations on high-stakes AI work",
+        "Acts as a trusted technical lead rather than a narrow individual contributor only"
+      ]
+    },
+    {
+      "name": "Public Technical Authority",
+      "trigger": "Candidate already qualifies as a SAVE, SIGNAL_SAVE, TRANSFERABLE_SAVE, or INFERENTIAL_SAVE based on the core capability areas",
+      "if_present": "Boost confidence by 0.03-0.08. Note that public open-source work, papers, or technical writing increases confidence in depth and signal clarity.",
+      "if_absent": "No adjustment. Do not penalize candidates whose best work is private.",
+      "signals": [
+        "Open-source repos or contributions tied to environments, evals, post-training, or coding agents",
+        "Research papers or technical posts on RL environments, benchmarks, program synthesis, or agent evaluation",
+        "Public benchmark reports, demo systems, or technical writeups that show unusual depth"
+      ]
+    }
+  ],
+  "version": "1.0",
+  "author": "OpenAI Codex",
+  "notes": "Created on April 8, 2026 by merging Turing roles 5822272004 (Frontier Data Lead, Code - US) and 5822287004 (Frontier Data Lead, RL Gyms - US) into one Bay Area search brief. Core thesis: save strong anchor-in-one-lane builders who can credibly span the broader frontier data project, rather than requiring perfect symmetry across both code and RL environments."
+}
