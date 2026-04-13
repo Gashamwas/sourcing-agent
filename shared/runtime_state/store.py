@@ -1473,8 +1473,23 @@ class RuntimeStateStore:
         queries: list[GitHubSearchQuery] = []
         for row in query_rows:
             payload = _json_loads(row["payload_json"])
+            query_id = _coerce_int(payload.get("id"), fallback=_coerce_int(row["source_unit_id"]))
+            query_name = str(
+                payload.get("name") or row["display_name"] or f"query-{query_id}"
+            ).strip()
+            query_text = str(
+                payload.get("query")
+                or payload.get("boolean")
+                or payload.get("search_query")
+                or query_name
+            ).strip()
+            channel = str(payload.get("channel") or "user_search").strip()
             payload.update(
                 {
+                    "id": query_id,
+                    "name": query_name,
+                    "query": query_text,
+                    "channel": channel,
                     "status": row["status"],
                     "result_count": row["result_count"],
                     "candidates_discovered": row["candidates_discovered"],
@@ -1687,6 +1702,13 @@ def _json_loads(raw: str | bytes | None) -> Any:
     if not raw:
         return {}
     return json.loads(raw)
+
+
+def _coerce_int(value: Any, fallback: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _utc_now() -> str:

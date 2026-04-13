@@ -5,11 +5,14 @@ from unittest.mock import patch
 
 from shared.brief_loader import load_brief
 from shared.schemas import BlockReport, SearchString
-from linkedin.strategy import _build_strategy_user, adapt_after_block, form_strategy
+from linkedin.strategy import _build_strategy_system, _build_strategy_user, adapt_after_block, form_strategy
 
 
 HEAD_AI_V2_BRIEF_PATH = str(
     Path(__file__).parent.parent / "config" / "brief-head-ai-lab-nyc-v2.json"
+)
+FDE_BRIEF_PATH = str(
+    Path(__file__).parent.parent / "config" / "Forward-Deployed-Engineer-NYC" / "brief-forward-deployed-engineer-us-v1.4.json"
 )
 
 
@@ -56,9 +59,21 @@ def test_build_strategy_user_includes_market_intel_lanes_and_cleanup_rule():
     prompt = _build_strategy_user(brief, [], prior_run_data={})
 
     assert "regulatory reporting" in prompt.lower()
-    assert "payment orchestration" in prompt.lower()
-    assert "founder or cto populations" in prompt.lower()
-    assert "archetype-first executive-builder strings are cleanup only" in prompt.lower()
+    assert "market infrastructure" in prompt.lower()
+    assert "capital markets and institutional finance remain the strongest domain prior" in prompt.lower()
+    assert "high-quality lead worth a conversation" in prompt.lower()
+
+
+def test_build_strategy_user_legacy_brief_omits_layered_retrieval_design_section():
+    brief = load_brief(FDE_BRIEF_PATH)
+    prompt = _build_strategy_user(brief, [], prior_run_data={})
+    system = _build_strategy_system(brief, has_kit=False, use_layered_retrieval=False)
+
+    assert "## Layered Retrieval Design" not in prompt
+    assert "Synthesize compound Boolean search strings" in prompt
+    assert "Generate 15-30 search strings total." in system
+    assert "Treat these priorities as semantic guidance" not in prompt
+    assert "These terms are anchors and hints" not in prompt
 
 
 def test_form_strategy_reorders_head_ai_opening_toward_edge_case():
@@ -390,3 +405,166 @@ def test_adapt_after_block_accepts_raw_search_memory_artifact():
         )
 
     assert adaptation.reorder[0]["move_to"] == "last"
+
+
+def test_form_strategy_materializes_retrieval_families_into_rendered_strings():
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    mock_plan = {
+        "architecture": "dragnet",
+        "architecture_rationale": "mock",
+        "architecture_success_criteria": [],
+        "architecture_pivot_triggers": [],
+        "strategy_rationale": "mock",
+        "retrieval_families": [
+            {
+                "family_id": "fde_delivery_builders",
+                "label": "FDE delivery builders",
+                "objective": "Open with broad delivery cohorts, then constrain to real builders.",
+                "priority": 90,
+                "enabled": True,
+                "variants_to_emit": 2,
+                "entry_signals": [
+                    {
+                        "item_id": "entry_delivery",
+                        "label": "Delivery engineers",
+                        "terms": ["deployment engineer", "implementation engineer"],
+                    }
+                ],
+                "capability_proxies": [
+                    {
+                        "item_id": "cap_orchestration",
+                        "label": "Orchestration work",
+                        "terms": ["workflow orchestration", "tool calling"],
+                    }
+                ],
+                "reality_filters": [
+                    {
+                        "item_id": "real_production",
+                        "label": "Production proof",
+                        "terms": ["production", "deployed"],
+                    }
+                ],
+                "context_constraints": [
+                    {
+                        "item_id": "ctx_customer",
+                        "label": "Customer environment",
+                        "terms": ["enterprise", "customer"],
+                    }
+                ],
+                "anti_noise": [
+                    {
+                        "item_id": "anti_sales",
+                        "label": "Sales-only noise",
+                        "terms": ["sales engineer", "account executive"],
+                    }
+                ],
+                "hypothesis_ids": ["post_sale_builders"],
+            }
+        ],
+        "generated_strings": [],
+        "coverage_gaps": [],
+        "noise_predictions": [],
+    }
+
+    with patch("linkedin.strategy.opus_llm", return_value=mock_plan):
+        plan = form_strategy(brief, [], prior_run_data={})
+
+    assert plan.retrieval_families
+    assert plan.generated_strings
+    rendered = plan.generated_strings[0]
+    assert "deployment engineer" in rendered["boolean"]
+    assert "workflow orchestration" in rendered["boolean"]
+    assert "production" in rendered["boolean"]
+    assert rendered["retrieval_recipe"]["family_id"] == "fde_delivery_builders"
+    assert rendered["retrieval_hypothesis_ids"] == ["post_sale_builders"]
+
+
+def test_form_strategy_legacy_brief_keeps_generated_strings_primary_over_retrieval_families():
+    brief = load_brief(FDE_BRIEF_PATH)
+    mock_plan = {
+        "architecture": "dragnet",
+        "architecture_rationale": "mock",
+        "architecture_success_criteria": [],
+        "architecture_pivot_triggers": [],
+        "strategy_rationale": "mock",
+        "retrieval_families": [
+            {
+                "family_id": "delivery_builders",
+                "label": "Delivery builders",
+                "objective": "Structured compatibility family.",
+                "priority": 90,
+                "enabled": True,
+                "variants_to_emit": 1,
+                "entry_signals": [
+                    {"item_id": "entry_delivery", "label": "Delivery", "terms": ["deployment engineer"]}
+                ],
+                "capability_proxies": [
+                    {"item_id": "cap_prod", "label": "Prod", "terms": ["workflow orchestration"]}
+                ],
+                "reality_filters": [
+                    {"item_id": "real_prod", "label": "Reality", "terms": ["production"]}
+                ],
+                "context_constraints": [],
+                "anti_noise": [],
+            }
+        ],
+        "generated_strings": [
+            {
+                "boolean": "(\"copilot\" OR \"assistant\") AND (\"workflow orchestration\" OR \"tool calling\") AND (\"production\" OR \"deployed\")",
+                "rationale": "Legacy primary string.",
+                "vocabulary_sources": "mock",
+                "family_key": "legacy_primary",
+                "novelty_bucket": "edge_case",
+                "domain_lane": "general",
+            }
+        ],
+        "coverage_gaps": [],
+        "noise_predictions": [],
+    }
+
+    with patch("linkedin.strategy.opus_llm", return_value=mock_plan):
+        plan = form_strategy(brief, [], prior_run_data={})
+
+    assert plan.generated_strings[0]["family_key"] == "legacy_primary"
+    assert "copilot" in plan.generated_strings[0]["boolean"]
+
+
+def test_form_strategy_legacy_brief_can_fallback_to_retrieval_families_when_strings_missing():
+    brief = load_brief(FDE_BRIEF_PATH)
+    mock_plan = {
+        "architecture": "dragnet",
+        "architecture_rationale": "mock",
+        "architecture_success_criteria": [],
+        "architecture_pivot_triggers": [],
+        "strategy_rationale": "mock",
+        "retrieval_families": [
+            {
+                "family_id": "delivery_builders",
+                "label": "Delivery builders",
+                "objective": "Structured fallback family.",
+                "priority": 90,
+                "enabled": True,
+                "variants_to_emit": 1,
+                "entry_signals": [
+                    {"item_id": "entry_delivery", "label": "Delivery", "terms": ["deployment engineer"]}
+                ],
+                "capability_proxies": [
+                    {"item_id": "cap_prod", "label": "Prod", "terms": ["workflow orchestration"]}
+                ],
+                "reality_filters": [
+                    {"item_id": "real_prod", "label": "Reality", "terms": ["production"]}
+                ],
+                "context_constraints": [],
+                "anti_noise": [],
+            }
+        ],
+        "generated_strings": [],
+        "coverage_gaps": [],
+        "noise_predictions": [],
+    }
+
+    with patch("linkedin.strategy.opus_llm", return_value=mock_plan):
+        plan = form_strategy(brief, [], prior_run_data={})
+
+    assert plan.generated_strings
+    assert "deployment engineer" in plan.generated_strings[0]["boolean"]

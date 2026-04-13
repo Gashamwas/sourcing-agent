@@ -51,8 +51,11 @@ MAX_SESSIONS_PER_DAY: int = 999  # effectively uncapped
 
 # --- Paths ---
 PROJECT_ROOT: Path = Path(__file__).parent.parent
-GITHUB_OUTPUT_DIR: Path = PROJECT_ROOT / "output" / "github"
-GITHUB_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+GITHUB_STATE_ROOT: Path = PROJECT_ROOT / "output" / "state" / "github"
+GITHUB_STATE_ROOT.mkdir(parents=True, exist_ok=True)
+# Deprecated compatibility alias. New runs should resolve a brief-scoped state dir
+# beneath GITHUB_STATE_ROOT rather than writing directly to this root.
+GITHUB_OUTPUT_DIR: Path = GITHUB_STATE_ROOT
 GITHUB_STATE_DIR: Path = Path.home() / ".sourcing-governor" / "github"
 GITHUB_STATE_DIR.mkdir(parents=True, exist_ok=True)
 

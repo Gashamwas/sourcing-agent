@@ -16,6 +16,11 @@ import sys
 from shared.schemas import KitString, ExecutionPlan, BlockReport, AdaptationResponse, SearchString
 from shared.llm_clients import opus_llm
 from shared.brief_loader import Brief
+from shared.retrieval_design import (
+    RetrievalDesign,
+    render_retrieval_design,
+    summarize_retrieval_design,
+)
 from shared.search_memory import (
     format_search_memory_summary,
     get_search_memory_families,
@@ -219,6 +224,17 @@ _EDGE_CASE_COMPANY_PATTERNS = (
 _MAX_PROMOTED_EDGE_CASE_GAPS = 3
 
 
+def _design_from_brief(brief: Brief) -> RetrievalDesign:
+    return RetrievalDesign.from_dict(getattr(brief, "retrieval_design", {}) or {})
+
+
+def _explicit_design_from_brief(brief: Brief) -> RetrievalDesign:
+    design = _design_from_brief(brief)
+    if design.is_explicit():
+        return design
+    return RetrievalDesign()
+
+
 def _brief_targets_edge_case_opening(brief: Brief) -> bool:
     """Whether the brief explicitly calls for a tapped-market edge-case opening."""
     haystack = " ".join(
@@ -300,16 +316,84 @@ def _annotate_string_metadata(item: dict, *, boolean_key: str = "boolean") -> di
     boolean = item.get(boolean_key, "") or ""
     rationale = item.get("rationale", "") or item.get("gap", "") or ""
     bucket, _score = _opening_priority(boolean, rationale)
+    retrieval_recipe = item.get("retrieval_recipe", {}) if isinstance(item.get("retrieval_recipe"), dict) else {}
+    hypothesis_ids = [
+        str(hypothesis_id).strip()
+        for hypothesis_id in retrieval_recipe.get("applied_hypothesis_ids", [])
+        if str(hypothesis_id).strip()
+    ]
 
-    item["family_key"] = normalize_family_key(item.get("family_key"), boolean, rationale)
-    item["novelty_bucket"] = normalize_novelty_bucket(
-        item.get("novelty_bucket")
-        or ("edge_case" if bucket == 0 else "canonical"),
+    item["family_key"] = normalize_family_key(
+        item.get("family_key") or retrieval_recipe.get("family_id"),
         boolean,
         rationale,
     )
-    item["domain_lane"] = infer_domain_lane(item.get("domain_lane"), boolean, rationale)
+    item["novelty_bucket"] = normalize_novelty_bucket(
+        item.get("novelty_bucket")
+        or ("edge_case" if hypothesis_ids or bucket == 0 else "canonical"),
+        boolean,
+        rationale,
+    )
+    item["domain_lane"] = infer_domain_lane(
+        item.get("domain_lane")
+        or retrieval_recipe.get("target_markets", [None])[0],
+        boolean,
+        rationale,
+    )
+    if retrieval_recipe:
+        item["retrieval_recipe"] = retrieval_recipe
+    if hypothesis_ids:
+        item["retrieval_hypothesis_ids"] = hypothesis_ids
     return item
+
+
+def _materialize_retrieval_plan(
+    plan: ExecutionPlan,
+    *,
+    base_design: RetrievalDesign | None = None,
+    prefer_rendered_strings: bool = False,
+) -> None:
+    if not plan.retrieval_families:
+        return
+    design_payload = (base_design.to_dict() if base_design else {})
+    design_payload["families"] = plan.retrieval_families
+    rendered_design = RetrievalDesign.from_dict(design_payload)
+    rendered_families, rendered_strings = render_retrieval_design(rendered_design)
+    if rendered_families:
+        plan.retrieval_families = rendered_families
+    if not rendered_strings:
+        return
+    if not prefer_rendered_strings and plan.generated_strings:
+        return
+
+    merged: list[dict] = []
+    seen_booleans: set[str] = set()
+    for item in rendered_strings + list(plan.generated_strings):
+        boolean = str(item.get("boolean", "")).strip()
+        if not boolean:
+            continue
+        key = boolean.lower()
+        if key in seen_booleans:
+            continue
+        seen_booleans.add(key)
+        merged.append(item)
+    plan.generated_strings = merged
+
+
+def _materialize_retrieval_adaptation(
+    adaptation: AdaptationResponse,
+    *,
+    base_design: RetrievalDesign | None = None,
+    prefer_rendered_strings: bool = False,
+) -> None:
+    if not adaptation.new_retrieval_families:
+        return
+    design_payload = (base_design.to_dict() if base_design else {})
+    design_payload["families"] = adaptation.new_retrieval_families
+    rendered_design = RetrievalDesign.from_dict(design_payload)
+    _rendered_families, rendered_strings = render_retrieval_design(rendered_design)
+    if rendered_strings and (prefer_rendered_strings or not adaptation.new_strings):
+        adaptation.new_strings = rendered_strings + list(adaptation.new_strings)
 
 
 def _annotate_plan_metadata(plan: ExecutionPlan) -> None:
@@ -517,13 +601,29 @@ def form_strategy(
     Returns:
         ExecutionPlan with generated compound strings and coverage gaps.
     """
-    system = _build_strategy_system(brief, has_kit=bool(kit_strings))
-    user_prompt = _build_strategy_user(brief, kit_strings, prior_run_data)
+    explicit_design = _explicit_design_from_brief(brief)
+    use_layered_retrieval = explicit_design.is_explicit()
+    system = _build_strategy_system(
+        brief,
+        has_kit=bool(kit_strings),
+        use_layered_retrieval=use_layered_retrieval,
+    )
+    user_prompt = _build_strategy_user(
+        brief,
+        kit_strings,
+        prior_run_data,
+        use_layered_retrieval=use_layered_retrieval,
+    )
 
     print("  Strategizing... (Opus is synthesizing compound search strings)")
     try:
         result = opus_llm(system, user_prompt, expect_json=True, max_tokens=16384)
         plan = ExecutionPlan.from_dict(result)
+        _materialize_retrieval_plan(
+            plan,
+            base_design=explicit_design if use_layered_retrieval else None,
+            prefer_rendered_strings=use_layered_retrieval,
+        )
         _annotate_plan_metadata(plan)
         if _brief_targets_edge_case_opening(brief):
             summary = _rebalance_execution_plan_for_edge_case_opening(plan)
@@ -544,6 +644,11 @@ def form_strategy(
         # Try to salvage a partial JSON response
         plan = _try_salvage_strategy(e)
         if plan:
+            _materialize_retrieval_plan(
+                plan,
+                base_design=explicit_design if use_layered_retrieval else None,
+                prefer_rendered_strings=use_layered_retrieval,
+            )
             _annotate_plan_metadata(plan)
             print(f"  [warn] Strategy JSON was truncated — salvaged partial plan", file=sys.stderr)
             return plan
@@ -553,7 +658,42 @@ def form_strategy(
         return _default_strategy(kit_strings)
 
 
-def _build_strategy_system(brief: Brief, has_kit: bool = True) -> str:
+def _build_strategy_system(
+    brief: Brief,
+    has_kit: bool = True,
+    *,
+    use_layered_retrieval: bool = False,
+) -> str:
+    total_count_guidance = "Generate 8-18 retrieval families total." if use_layered_retrieval else "Generate 15-30 search strings total."
+    mix_label = "family types" if use_layered_retrieval else "string types"
+    recall_label = "Recall families (4-10 families)" if use_layered_retrieval else "Recall strings (10-15 strings)"
+    precision_label = (
+        "Precision \"sniper\" families (3-8 families)"
+        if use_layered_retrieval
+        else "Precision \"sniper\" strings (5-15 strings)"
+    )
+    architecture_override_note = (
+        "Apply the constraints for your selected architecture. These override the base family counts above — both the total family count (8-18) and the recall/precision mix."
+        if use_layered_retrieval
+        else "Apply the constraints for your selected architecture. These override ALL default string counts above — both the total count (15-30) and the per-type counts (Type A: 10-15, Type B: 5-15). The ratio below supersedes those base counts:"
+    )
+    architecture_modifiers = (
+        """
+- **sniper**: 10-14 families, 60%+ Type B. Tight AND-gates, 20-500 expected results per rendered variant.
+- **dragnet**: 8-12 families, 70%+ Type A. Broad recall openings, with each family allowed to emit multiple rendered variants.
+- **titration**: Only 4-6 broad recon families for this first block. Hold remaining family budget for post-block-1 adaptation when you'll have real data.
+- **negative_space**: 8-12 families with anti-noise overlays. Structure: (entry_signals) AND (capability_proxies) AND (reality_filters) [NOT anti_noise].
+- **company_first**: 8-14 families by company cluster, not skill cluster. Company names as primary constraints inside entry/context layers.
+- **title_first**: 5-8 families with exact quoted title phrases as entry_signals. Minimal extra capability layers."""
+        if use_layered_retrieval
+        else """
+- **sniper**: 15-20 strings, 60%+ Type B. Tight AND-gates, 20-500 results each.
+- **dragnet**: 10-15 strings, 70%+ Type A. Fat OR groups (7+ variants). 500-5000 results. Noise expected.
+- **titration**: Only 5-8 broad recon strings for this first block. Hold remaining budget for post-block-1 adaptation when you'll have real data.
+- **negative_space**: 10-15 strings with NOT operators from noise_archetypes. Structure: (skills) AND (domain) NOT (noise_title OR noise_keyword).
+- **company_first**: 10-20 strings by company cluster, not skill cluster. Company names as primary AND constraints.
+- **title_first**: 5-10 strings with exact quoted title phrases. Minimal skill keywords."""
+    )
     noise_section = ""
     if brief.noise_archetypes:
         noise_section = f"\n## Noise Archetypes\n{json.dumps(brief.noise_archetypes, indent=2)}"
@@ -624,22 +764,24 @@ Select ONE architecture and explain your reasoning. Include in your JSON output:
 ## Your Task
 {"You are given a Search Kit — a library of Boolean search terms organized by competency domain. These kit strings are YOUR VOCABULARY — raw building blocks, NOT executable queries. Do NOT include kit strings directly in the execution queue." if has_kit else "No pre-built search kit is available. You will generate compound Boolean strings directly from the role description, archetypes, JD context, and any sourcing instructions provided."}
 
-Your job: synthesize targeted compound Boolean strings {"by combining terms from multiple kit clusters with domain qualifiers from the brief" if has_kit else "from the role requirements, using LinkedIn-compatible Boolean syntax"}.
+Your job: design targeted {"layered retrieval families and rendered search strings" if use_layered_retrieval else "compound Boolean search strings"} {"by combining terms from multiple kit clusters with domain qualifiers from the brief" if has_kit else "from the role requirements, using LinkedIn-compatible Boolean syntax"}.
 
-### 1. GENERATE compound Boolean strings
+{"Every search family should be expressed as:\n- entry_signals\n- capability_proxies\n- reality_filters\n- optional context_constraints\n- optional anti_noise\n- optional edge-case hypothesis overlays\n\nThe deterministic renderer downstream will convert these into executable booleans. retrieval_families are the primary planning contract for this brief." if use_layered_retrieval else "You may optionally include retrieval_families as structured metadata, but generated_strings remain the primary planning contract for this brief. Preserve the proven broad-to-narrow Boolean mechanics: cohort or adjacent-population doorway AND capability/workflow signals AND execution or production proof."}
+
+### 1. DESIGN {"layered retrieval families" if use_layered_retrieval else "compound Boolean searches"}
 {"The kit provides terms organized by skill cluster. This" if has_kit else "This"} role requires an INTERSECTION of skills.
-Create compound Boolean strings that AND-gate high-signal terms {"from different kit clusters with" if has_kit else "with"} domain/seniority qualifiers from the brief.
+Create {"retrieval families that AND-gate high-signal layers" if use_layered_retrieval else "compound searches that AND-gate high-signal concepts"} {"from different kit clusters with" if has_kit else "with"} domain/seniority qualifiers from the brief.
 
-Example compound: ("agentic" OR "LLM agent") AND ("financial services" OR "banking" OR "BFSI") AND ("production" OR "deployment" OR "enterprise")
+Example rendered compound: ("agentic" OR "LLM agent") AND ("financial services" OR "banking" OR "BFSI") AND ("production" OR "deployment" OR "enterprise")
 
-Generate 15-30 compound strings. You MUST include a mix of TWO string types:
+{total_count_guidance} {"Each family may emit one or more concrete booleans." if use_layered_retrieval else ""} You MUST include a mix of TWO {mix_label}:
 
-**Type A: Recall strings (10-15 strings)**
+**Type A: {recall_label}**
 Broad searches that surface the general cohort. 500-5000 expected results.
 - AND-gate 2-3 clusters: skill terms AND domain terms AND seniority/depth signals
 - Keep each clause to 3-6 OR'd terms
 
-**Type B: Precision "sniper" strings (5-15 strings)**
+**Type B: {precision_label}**
 Narrow searches using specific tool names, framework names, benchmark names, or niche technical terms that only genuine practitioners would have on their profile. 20-500 expected results.
 - {"Use the kit's Precision cluster terms — specific tools, libraries, benchmarks, methods" if has_kit else "Use specific tool names, framework names, benchmark names, or method-specific terms from the JD and role description"}
 - Cross with minimal domain qualifiers (or none — the tool name IS the qualifier)
@@ -647,7 +789,7 @@ Narrow searches using specific tool names, framework names, benchmark names, or 
 - These strings may return few results but nearly every result is a real practitioner
 - {"Look through the kit vocabulary for the most specific, least ambiguous terms and USE them" if has_kit else "Mine the JD for the most specific, least ambiguous terms and USE them"}
 
-Order: alternate between Type A and Type B so precision strings run early, not just as an afterthought.
+Order: alternate between Type A and Type B so precision-oriented families run early, not just as an afterthought.
 
 SEQUENCING — BACKLOAD RL/RLHF STRINGS:
 Place strings anchored primarily to RL/RLHF/post-training vocabulary in the SECOND HALF of the execution sequence. Front-load strings targeting other capability areas first (agentic systems, data quality/evaluation, coding agents, STEM/multimodal, embodied AI, general fine-tuning). Rationale:
@@ -681,13 +823,8 @@ NOVELTY ACCOUNTING (MANDATORY for tapped markets):
 
 ### Architecture-Specific Modifiers
 
-Apply the constraints for your selected architecture. These override ALL default string counts above — both the total count (15-30) and the per-type counts (Type A: 10-15, Type B: 5-15). The ratio below supersedes those base counts:
-- **sniper**: 15-20 strings, 60%+ Type B. Tight AND-gates, 20-500 results each.
-- **dragnet**: 10-15 strings, 70%+ Type A. Fat OR groups (7+ variants). 500-5000 results. Noise expected.
-- **titration**: Only 5-8 broad recon strings for this first block. Hold remaining budget for post-block-1 adaptation when you'll have real data.
-- **negative_space**: 10-15 strings with NOT operators from noise_archetypes. Structure: (skills) AND (domain) NOT (noise_title OR noise_keyword).
-- **company_first**: 10-20 strings by company cluster, not skill cluster. Company names as primary AND constraints.
-- **title_first**: 5-10 strings with exact quoted title phrases. Minimal skill keywords.
+{architecture_override_note}
+{architecture_modifiers}
 
 Guidelines for all strings:
 - {"Pull skill terms from the kit's high-value clusters" if has_kit else "Pull skill terms from the JD's capability areas and technical requirements"}
@@ -797,6 +934,21 @@ Return JSON with this structure:
 - "architecture_success_criteria": Array of 2-4 measurable success criteria (array of strings)
 - "architecture_pivot_triggers": Array of 2-3 pivot trigger signals (array of strings)
 - "strategy_rationale": Overall strategy explanation (string)
+- "retrieval_families": Array of structured family objects in priority order. Each object:
+  - "family_id": Stable id for the family (string)
+  - "label": Human label (string)
+  - "objective": Why this family exists (string)
+  - "priority": Priority score (int)
+  - "enabled": Whether to execute this family (bool)
+  - "variants_to_emit": How many rendered variants to emit (int)
+  - "entry_signals": Array of objects with "item_id", "label", "terms", optional "priority"
+  - "capability_proxies": Array of objects with "item_id", "label", "terms", optional "priority"
+  - "reality_filters": Array of objects with "item_id", "label", "terms", optional "priority"
+  - "context_constraints": Array of objects with "item_id", "label", "terms", optional "priority"
+  - "anti_noise": Array of objects with "item_id", "label", "terms", optional "priority"
+  - "target_employers": Optional employer targets (array of strings)
+  - "target_markets": Optional market/lane labels (array of strings)
+  - "hypothesis_ids": Optional applied edge-case hypotheses (array of strings)
 - "generated_strings": Array of compound strings to execute, in priority order. Each object:
   - "boolean": The full Boolean string (string)
   - "rationale": Why this compound is likely to surface strong candidates for the role (string)
@@ -804,6 +956,7 @@ Return JSON with this structure:
   - "family_key": Short stable label for this search family (string) — use the same label for close variants of the same idea
   - "novelty_bucket": "edge_case" or "canonical" (string)
   - "domain_lane": Primary lane this string targets (string, e.g. capital_markets, risk_compliance, asset_management, insurance, bfsi_vendors, general)
+  - "retrieval_recipe": Optional structured recipe describing the layer ids and applied hypotheses used to render this string
 - "coverage_gaps": Array of gaps identified. Each object:
   - "gap": Description of the missing coverage (string)
   - "suggested_boolean": Optional Boolean string to fill the gap, or null (string|null)
@@ -820,7 +973,10 @@ def _build_strategy_user(
     brief: Brief,
     kit_strings: list[KitString],
     prior_run_data: dict | None = None,
+    *,
+    use_layered_retrieval: bool = False,
 ) -> str:
+    retrieval_design = _explicit_design_from_brief(brief) if use_layered_retrieval else RetrievalDesign()
     # Group kit strings by block for clearer vocabulary presentation
     blocks: dict[str, list[KitString]] = {}
     for ks in kit_strings:
@@ -850,6 +1006,16 @@ the role description, archetypes, and JD context below. Apply all LinkedIn Boole
     if brief.intake_notes:
         prompt += f"\n## Intake Notes\n{brief.intake_notes}\n"
 
+    if use_layered_retrieval and not retrieval_design.is_empty():
+        prompt += (
+            "\n## Layered Retrieval Design\n"
+            f"{json.dumps(summarize_retrieval_design(retrieval_design), indent=2)}\n"
+            "\nPrefer using this structured retrieval design as the primary planning interface. "
+            "If you expand or revise it, keep the same layered model: entry_signals, "
+            "capability_proxies, reality_filters, optional context_constraints, optional anti_noise, "
+            "and edge-case hypothesis overlays.\n"
+        )
+
     if prior_run_data:
         raw_prior = dict(prior_run_data)
         raw_prior.pop("search_memory_summary", None)
@@ -872,14 +1038,29 @@ the role description, archetypes, and JD context below. Apply all LinkedIn Boole
 
     if brief.search_priorities:
         prompt += f"\n## User Hints\nSearch priorities: {', '.join(brief.search_priorities)}\n"
+        if use_layered_retrieval:
+            prompt += (
+                "Treat these priorities as semantic guidance, not as a checklist of phrases to restate. "
+                "Infer the target populations and generate your own discriminative search vocabulary.\n"
+            )
 
     if brief.additional_search_terms:
         prompt += f"\n## Additional Search Terms\nThese terms should be used for search string generation but are NOT evaluation criteria:\n{', '.join(brief.additional_search_terms)}\n"
+        if use_layered_retrieval:
+            prompt += (
+                "These terms are anchors and hints, not a mandate to repeat them verbatim. "
+                "Use them to infer adjacent practitioner language, hidden title variants, workflow language, "
+                "and more discriminative phrasing.\n"
+            )
 
     if brief.instructions:
         prompt += f"\n## Sourcing Instructions\n" + "\n".join(f"- {i}" for i in brief.instructions) + "\n"
 
-    prompt += "\nSynthesize compound search strings" + (" from this vocabulary." if kit_strings else " from the JD and role context.")
+    prompt += (
+        "\nSynthesize layered retrieval families and rendered search strings"
+        if use_layered_retrieval
+        else "\nSynthesize compound Boolean search strings"
+    ) + (" from this vocabulary." if kit_strings else " from the JD and role context.")
     return prompt
 
 
@@ -931,6 +1112,8 @@ def adapt_after_block(
     pivot_count: int = 0,
     block_aggregate: str = "",
     search_memory_summary: dict | None = None,
+    checkpoint_mode: str = "normal_block_checkpoint",
+    market_intel_advisory_context: str = "",
 ) -> AdaptationResponse:
     """Ask Opus to adapt after a block completes — generate new strings from vocabulary.
 
@@ -988,13 +1171,28 @@ If any pivot triggers are firing, you MAY recommend switching architectures by i
 
 A pivot clears remaining queued strings and replaces them with your new_strings (generated under the new architecture). Only recommend when evidence is clear.{pivot_note}"""
 
+    opening_checkpoint_guidance = ""
+    if checkpoint_mode == "opening_checkpoint":
+        opening_checkpoint_guidance = """
+
+This is the OPENING CHECKPOINT. Treat it differently from a normal later-stage block adaptation:
+- prioritize exploitation of productive institution/lane patterns over novelty-chasing
+- skip dead hidden-population hypotheses sooner
+- use new_strings to pull proven direct BFSI / market-institution lanes forward
+- do NOT spend this checkpoint rediscovering adjacent edge-case populations that already failed
+- only recommend a pivot if the opening block is uniformly dead and coherently wrong
+"""
+
+    explicit_design = _explicit_design_from_brief(brief)
+    use_layered_retrieval = explicit_design.is_explicit()
+
     system = f"""You are a sourcing strategist adapting a search plan mid-run.
 
 Role: {brief.role_title}
 {brief.role_description}
 
 You've just received a report on a batch of completed Boolean searches. Based on the results:
-1. Generate NEW compound Boolean strings that target signal patterns you observed — use the kit vocabulary below as building blocks
+1. Generate NEW {"layered retrieval families and/or rendered Boolean strings" if use_layered_retrieval else "rendered Boolean strings"} that target signal patterns you observed — use the kit vocabulary below as building blocks
 2. Identify remaining queued strings to skip (redundant, similar to zero-save strings)
 3. Suggest reordering of remaining queued strings based on observed signal
 4. Update noise pattern knowledge
@@ -1003,13 +1201,17 @@ IMPORTANT: Each Boolean string is a NET that catches candidates for ANY archetyp
 A string built from post-training terms might surface a STEM reasoning engineer. That's expected and good.
 Evaluate string productivity by total saves across ALL archetypes, not just the archetype the string was "designed for."
 
-When generating new strings, combine terms from the kit vocabulary with domain qualifiers. The most valuable new strings will target the specific intersection of skills and domain this role requires.
+{"When generating new retrieval families, use the layered retrieval model:\n- entry_signals\n- capability_proxies\n- reality_filters\n- optional context_constraints\n- optional anti_noise\n- optional edge-case hypothesis overlays\n\nRendered booleans should still follow the same broad-to-narrow pattern:\n(entry_signals) AND (capability_proxies) AND (reality_filters) [AND context_constraints] [NOT anti_noise]" if use_layered_retrieval else "Continue using the proven broad-to-narrow pattern: cohort or adjacent-population doorway AND capability or workflow signals AND execution or production proof. You may optionally include new_retrieval_families as traceability metadata, but new_strings remain primary."}
+
+When generating new strings or families, combine terms from the kit vocabulary with domain qualifiers. The most valuable updates will target the specific intersection of skills and domain this role requires.
 
 Include BOTH broad recall strings AND narrow precision "sniper" strings that use specific tool/framework/benchmark names from the kit vocabulary — terms only real practitioners would have on their profiles.
 
 If the brief says the obvious pool is tapped, prefer generating new strings that expand productive edge-case populations before emitting direct framework-name cleanup strings or exact-title cleanup strings.
 
 When adapting, continue using the same loop: identify what a standard sourcer would search next, then push one layer outward toward adjacent but same-caliber populations that the standard next step would still miss.
+
+{opening_checkpoint_guidance}
 
 In tapped markets, evaluate BLOCK QUALITY on two axes:
 1. productivity: saves, facial pass rate, result quality
@@ -1029,9 +1231,12 @@ If a string is productive but mostly confirms the obvious pool, treat it as clea
 - Tool/library names are proper nouns — do not fabricate compound expansions
 {block_aggregate}
 {arch_review}
+{market_intel_advisory_context}
 
 Return JSON with this structure:
 - "new_strings": Array of objects with "boolean" (string), "rationale" (string), "family_key" (string), "novelty_bucket" ("edge_case"|"canonical"), "domain_lane" (string)
+- "new_retrieval_families": Optional array of structured family objects using the same schema as strategy formation
+- "hypothesis_updates": Optional array of objects with "hypothesis_id", "status", "reason", and optional "promote_to_family_id"
 - "skip_remaining": Array of objects with "string_id" (int), "reason" (string)
 - "reorder": Array of objects with "string_id" (int), "move_to" ("next" | "last"), "reason" (string)
 - "noise_updates": Array of objects with "term" (string), "status" ("confirmed_signal" | "confirmed_noise" | "mixed"), "note" (string)
@@ -1064,13 +1269,23 @@ Return valid JSON only."""
 ## Kit Vocabulary (building blocks for new strings)
 {vocab_section}
 """
+    if use_layered_retrieval and not explicit_design.is_empty():
+        user_prompt += (
+            "\n## Current Layered Retrieval Design\n"
+            f"{json.dumps(summarize_retrieval_design(explicit_design), indent=2)}\n"
+        )
 
     user_prompt += "\nSuggest adaptations."
 
     result = opus_llm(system, user_prompt, expect_json=True)
     adaptation = AdaptationResponse.from_dict(result)
+    _materialize_retrieval_adaptation(
+        adaptation,
+        base_design=explicit_design if use_layered_retrieval else None,
+        prefer_rendered_strings=use_layered_retrieval,
+    )
     _annotate_adaptation_metadata(adaptation)
-    if _brief_targets_edge_case_opening(brief):
+    if checkpoint_mode != "opening_checkpoint" and _brief_targets_edge_case_opening(brief):
         adaptation = _rebalance_adaptation_for_edge_case_opening(adaptation, remaining_strings)
     _apply_search_memory_to_adaptation(adaptation, remaining_strings, search_memory_summary)
     return adaptation

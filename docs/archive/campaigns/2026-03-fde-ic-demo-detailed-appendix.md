@@ -1,4 +1,6 @@
-# Forward Deployed Engineer (IC) Sourcing Demo
+# Forward Deployed Engineer (IC) Sourcing Demo — Detailed Appendix (March 2026 Campaign Snapshot)
+
+Historical campaign artifact preserved for context.
 
 ## Detailed Appendix
 

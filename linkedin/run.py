@@ -16,13 +16,10 @@ import sys
 import urllib.request
 from pathlib import Path
 
-from shared import config
 from shared.console_tee import enable_console_tee
+from shared.output_paths import resolve_linkedin_state_dir
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
-OUTPUT_DIR = Path(__file__).parent.parent / "output"
-
-
 # ------------------------------------------------------------------
 # Interactive mode
 # ------------------------------------------------------------------
@@ -64,9 +61,9 @@ def _brief_label(path: Path) -> str:
         return path.name
 
 
-def _has_progress() -> bool:
+def _has_progress(brief_path: Path) -> bool:
     """Check if a resumable progress file exists."""
-    progress_path = OUTPUT_DIR / "progress.json"
+    progress_path = resolve_linkedin_state_dir(brief_path=brief_path) / "progress.json"
     if not progress_path.exists():
         return False
     try:
@@ -79,10 +76,12 @@ def _has_progress() -> bool:
         return False
 
 
-def _progress_summary() -> str:
+def _progress_summary(brief_path: Path) -> str:
     """One-line summary of existing progress."""
     try:
-        data = json.loads((OUTPUT_DIR / "progress.json").read_text())
+        data = json.loads(
+            (resolve_linkedin_state_dir(brief_path=brief_path) / "progress.json").read_text()
+        )
         strings = data.get("strings", [])
         done = sum(1 for s in strings if s.get("status") == "done")
         total = len(strings)
@@ -116,9 +115,9 @@ def interactive():
     ]
 
     # Offer resume if progress exists
-    resumable = _has_progress()
+    resumable = _has_progress(brief_path)
     if resumable:
-        modes.insert(0, f"Resume previous run ({_progress_summary()})")
+        modes.insert(0, f"Resume previous run ({_progress_summary(brief_path)})")
 
     mode_idx = _pick("Run mode?", modes)
 
@@ -164,18 +163,22 @@ def _launch(
     test_single_page: bool = False,
     search_config: str | None = None,
     rejudge_from: str | None = None,
-    output_dir: str | None = None,
+    state_dir: str | None = None,
     input_mode: str = "concurrent",
 ):
     """Import Pipeline and run."""
     from linkedin.orchestrator import Pipeline
 
-    enable_console_tee(Path(output_dir) if output_dir else config.OUTPUT_DIR)
+    resolved_state_dir = resolve_linkedin_state_dir(
+        brief_path=brief_path,
+        state_dir=state_dir,
+    )
+    enable_console_tee(resolved_state_dir)
 
     pipeline = Pipeline(
         brief_path=str(brief_path),
         search_config_path=search_config,
-        output_dir=output_dir,
+        output_dir=str(resolved_state_dir),
         test_mode=test_single_page,
         input_mode=input_mode,
     )
@@ -207,8 +210,12 @@ def cli():
         help="Path to the search config JSON"
     )
     parser.add_argument(
+        "--state-dir", default=None,
+        help="Mutable brief-scoped state directory (default: output/state/linkedin/<brief-id>/)"
+    )
+    parser.add_argument(
         "--output-dir", default=None,
-        help="Output directory (default: output/)"
+        help="Deprecated alias for --state-dir"
     )
     parser.add_argument(
         "--test-single-page", action="store_true",
@@ -239,6 +246,8 @@ def cli():
         print(f"Error: Brief file not found: {args.brief}")
         sys.exit(1)
 
+    state_dir = args.state_dir or args.output_dir
+
     _launch(
         brief_path=Path(args.brief),
         full_run=args.full_run,
@@ -246,7 +255,7 @@ def cli():
         test_single_page=args.test_single_page,
         search_config=args.search_config,
         rejudge_from=args.rejudge_from,
-        output_dir=args.output_dir,
+        state_dir=state_dir,
         input_mode=args.input_mode,
     )
 

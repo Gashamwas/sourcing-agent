@@ -16,7 +16,28 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+from shared.retrieval_design import (
+    derive_legacy_search_views,
+    retrieval_design_from_payload,
+    validate_retrieval_design,
+)
+
 KIT_BASE_URL = "https://search-kit-library.vercel.app/kit"
+
+
+def _ensure_valid_retrieval_design(
+    *,
+    explicit_retrieval_design: Any,
+    retrieval_design: Any,
+) -> None:
+    if not (isinstance(explicit_retrieval_design, dict) and retrieval_design.is_explicit()):
+        return
+    issues = validate_retrieval_design(retrieval_design)
+    if not issues:
+        return
+    raise ValueError(
+        "Invalid explicit retrieval_design: " + " | ".join(issues)
+    )
 
 
 def _is_v2_brief(raw: dict) -> bool:
@@ -53,6 +74,7 @@ class Brief:
     instructions: list[str] = field(default_factory=list)
     employer_blacklist: list[str] = field(default_factory=list)
     additional_search_terms: list[str] = field(default_factory=list)
+    retrieval_design: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict)
     # V2 brief schema object (set when loading a V2 brief)
     _new_brief: Any = field(default=None, repr=False)
@@ -148,7 +170,30 @@ def _load_v2_brief(raw: dict) -> Brief:
             signals=psm.get("signals", []),
         ) for psm in raw.get("post_save_modifiers", [])
     ]
-    additional_search_terms = raw.get("additional_search_terms", [])
+    explicit_retrieval_design = raw.get("retrieval_design")
+    retrieval_design = retrieval_design_from_payload(
+        explicit_retrieval_design,
+        legacy_search_priorities=raw.get("search_priorities", []),
+        legacy_additional_search_terms=raw.get("additional_search_terms", []),
+        role_title=raw.get("role_title", ""),
+    )
+    use_explicit_retrieval_design = (
+        isinstance(explicit_retrieval_design, dict)
+        and retrieval_design.is_explicit()
+    )
+    if use_explicit_retrieval_design:
+        derived_search_priorities, derived_additional_search_terms = derive_legacy_search_views(
+            retrieval_design
+        )
+        additional_search_terms = derived_additional_search_terms or raw.get("additional_search_terms", [])
+        search_priorities = derived_search_priorities or raw.get("search_priorities", [])
+    else:
+        additional_search_terms = raw.get("additional_search_terms", [])
+        search_priorities = raw.get("search_priorities", [])
+    _ensure_valid_retrieval_design(
+        explicit_retrieval_design=explicit_retrieval_design,
+        retrieval_design=retrieval_design,
+    )
 
     new_brief = NewBrief(
         role_title=raw["role_title"],
@@ -174,6 +219,7 @@ def _load_v2_brief(raw: dict) -> Brief:
         instructions=raw.get("instructions", []),
         post_save_modifiers=post_save_modifiers,
         additional_search_terms=additional_search_terms,
+        retrieval_design=retrieval_design,
         version=raw.get("version", "2.0"),
         author=raw.get("author", ""),
         notes=raw.get("notes", ""),
@@ -245,10 +291,11 @@ def _load_v2_brief(raw: dict) -> Brief:
         experience_floor=experience_floor,
         employer_blacklist=raw.get("employer_blacklist", []),
         additional_search_terms=additional_search_terms,
+        retrieval_design=retrieval_design.to_dict(),
         jd_text=jd_text,
         intake_notes=raw.get("intake_notes", ""),
         instructions=raw.get("instructions", []),
-        search_priorities=raw.get("search_priorities", []),
+        search_priorities=search_priorities,
         market_density=new_brief.market_density.value if new_brief.market_density else "",
         key_terms_by_area={
             ca.name: ca.key_terms
@@ -326,7 +373,30 @@ def normalize_brief(raw: dict) -> Brief:
         }
 
     # --- Strategy hints ---
-    search_priorities = raw.get("search_priorities", [])
+    explicit_retrieval_design = raw.get("retrieval_design")
+    retrieval_design = retrieval_design_from_payload(
+        explicit_retrieval_design,
+        legacy_search_priorities=raw.get("search_priorities", []),
+        legacy_additional_search_terms=raw.get("additional_search_terms", []),
+        role_title=role_title,
+    )
+    use_explicit_retrieval_design = (
+        isinstance(explicit_retrieval_design, dict)
+        and retrieval_design.is_explicit()
+    )
+    if use_explicit_retrieval_design:
+        derived_search_priorities, derived_additional_search_terms = derive_legacy_search_views(
+            retrieval_design
+        )
+        search_priorities = derived_search_priorities or raw.get("search_priorities", [])
+        additional_search_terms = derived_additional_search_terms or raw.get("additional_search_terms", [])
+    else:
+        search_priorities = raw.get("search_priorities", [])
+        additional_search_terms = raw.get("additional_search_terms", [])
+    _ensure_valid_retrieval_design(
+        explicit_retrieval_design=explicit_retrieval_design,
+        retrieval_design=retrieval_design,
+    )
     noise_predictions = raw.get("noise_predictions", [])
 
     # --- Lightweight brief fields (JD-driven mode) ---
@@ -367,6 +437,8 @@ def normalize_brief(raw: dict) -> Brief:
         intake_notes=intake_notes,
         instructions=instructions,
         employer_blacklist=employer_blacklist,
+        additional_search_terms=additional_search_terms,
+        retrieval_design=retrieval_design.to_dict(),
         raw=raw,
     )
 

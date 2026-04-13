@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from github.outreach import generate_outreach
+from shared.output_paths import source_exports_root
 from shared.execution import SideEffectOutcome
 from shared.judger import extract_priority_rank
 from shared.storage import append_jsonl, log_event
@@ -176,7 +177,15 @@ class GitHubSideEffectsService:
         try:
             from github.export import export_saved_candidates_csv
 
-            csv_path = export_saved_candidates_csv(pipeline.output_dir)
+            csv_path = export_saved_candidates_csv(
+                pipeline.output_dir,
+                csv_path=source_exports_root(
+                    "github",
+                    pipeline.brief_obj.id,
+                    output_root=pipeline.output_dir,
+                )
+                / "saved_candidates.csv",
+            )
             pipeline._observer.console.emit_info(f"CSV export: {csv_path}")
             if getattr(pipeline, "_runtime_run_id", None):
                 pipeline._runtime_state.record_event(

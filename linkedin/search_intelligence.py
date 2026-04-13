@@ -70,6 +70,8 @@ class LinkedInSearchIntent:
     family_key: str = ""
     novelty_bucket: str = ""
     domain_lane: str = ""
+    retrieval_recipe: dict[str, Any] = field(default_factory=dict)
+    applied_hypothesis_ids: list[str] = field(default_factory=list)
     structured_filters: LinkedInStructuredFilters = field(default_factory=LinkedInStructuredFilters)
 
     def to_dict(self) -> dict[str, Any]:
@@ -78,6 +80,8 @@ class LinkedInSearchIntent:
             "family_key": self.family_key,
             "novelty_bucket": self.novelty_bucket,
             "domain_lane": self.domain_lane,
+            "retrieval_recipe": dict(self.retrieval_recipe),
+            "applied_hypothesis_ids": list(self.applied_hypothesis_ids),
             "structured_filters": self.structured_filters.to_dict(),
         }
 
@@ -89,6 +93,8 @@ class LinkedInSearchIntent:
             family_key=payload.get("family_key", ""),
             novelty_bucket=payload.get("novelty_bucket", ""),
             domain_lane=payload.get("domain_lane", ""),
+            retrieval_recipe=dict(payload.get("retrieval_recipe", {})),
+            applied_hypothesis_ids=list(payload.get("applied_hypothesis_ids", [])),
             structured_filters=LinkedInStructuredFilters.from_dict(payload.get("structured_filters")),
         )
 
@@ -341,6 +347,9 @@ class LinkedInExperimentState:
     family_duplicates_total: int = 0
     family_signal_total: int = 0
     family_saves_total: int = 0
+    precommit_recovery_attempts_used: int = 0
+    committed_pages_reviewed: int = 0
+    committed_zero_signal_streak: int = 0
     early_signal_snapshot: LinkedInVariantSnapshot | None = None
     recent_noise_snapshot: LinkedInVariantSnapshot | None = None
     drift_attempt_count: int = 0
@@ -381,6 +390,9 @@ class LinkedInExperimentState:
             "family_duplicates_total": self.family_duplicates_total,
             "family_signal_total": self.family_signal_total,
             "family_saves_total": self.family_saves_total,
+            "precommit_recovery_attempts_used": self.precommit_recovery_attempts_used,
+            "committed_pages_reviewed": self.committed_pages_reviewed,
+            "committed_zero_signal_streak": self.committed_zero_signal_streak,
             "early_signal_snapshot": self.early_signal_snapshot.to_dict() if self.early_signal_snapshot else None,
             "recent_noise_snapshot": self.recent_noise_snapshot.to_dict() if self.recent_noise_snapshot else None,
             "drift_attempt_count": self.drift_attempt_count,
@@ -417,6 +429,9 @@ class LinkedInExperimentState:
             family_duplicates_total=int(payload.get("family_duplicates_total", 0)),
             family_signal_total=int(payload.get("family_signal_total", 0)),
             family_saves_total=int(payload.get("family_saves_total", 0)),
+            precommit_recovery_attempts_used=int(payload.get("precommit_recovery_attempts_used", 0)),
+            committed_pages_reviewed=int(payload.get("committed_pages_reviewed", 0)),
+            committed_zero_signal_streak=int(payload.get("committed_zero_signal_streak", 0)),
             early_signal_snapshot=LinkedInVariantSnapshot.from_dict(payload.get("early_signal_snapshot")),
             recent_noise_snapshot=LinkedInVariantSnapshot.from_dict(payload.get("recent_noise_snapshot")),
             drift_attempt_count=int(payload.get("drift_attempt_count", 0)),
@@ -504,6 +519,7 @@ class LinkedInExperimentState:
         return None
 
     def activate_variant(self, variant_id: str) -> LinkedInSearchVariant:
+        current_mode = self.mode
         if self.active_variant_id in self.variants and self.variants[self.active_variant_id].status == "active":
             self.variants[self.active_variant_id].status = "explored"
         variant = self.variants[variant_id]
@@ -514,6 +530,8 @@ class LinkedInExperimentState:
         self.pages_since_last_mutation = 0
         if variant_id in self.planned_variant_ids:
             self.executed_sibling_count += 1
+            if current_mode in {"recon", "experiment"} and self.committed_variant_id is None:
+                self.precommit_recovery_attempts_used += 1
         return variant
 
     def commit_variant(self, variant_id: str | None = None) -> LinkedInSearchVariant:
@@ -525,6 +543,9 @@ class LinkedInExperimentState:
         self.active_variant_id = variant_id
         self.mode = "paginate"
         self.planned_variant_ids = []
+        self.executed_sibling_count = 0
+        self.committed_pages_reviewed = 0
+        self.committed_zero_signal_streak = 0
         self.early_signal_snapshot = None
         self.recent_noise_snapshot = None
         self.drift_attempt_count = 0
@@ -587,8 +608,18 @@ class LinkedInExperimentState:
                     page_stats=page_stats,
                 )
         if is_committed_variant_page:
+            self.committed_pages_reviewed += 1
             no_signal = page_signal == 0
             noisy_page = bool(page_insights.noise_anchors) or page_insights.glance_action == "reformulate"
+            if no_signal:
+                self.committed_zero_signal_streak += 1
+            else:
+                self.committed_zero_signal_streak = 0
+                if self.last_drift_refinement_summary.get("outcome") == "not_rescued":
+                    self.last_drift_refinement_summary = {
+                        **self.last_drift_refinement_summary,
+                        "outcome": "signal_returned",
+                    }
             if no_signal and noisy_page:
                 self.recent_noise_snapshot = LinkedInVariantSnapshot.from_page(
                     page_num=page_num,
@@ -633,6 +664,17 @@ class LinkedInExperimentState:
         if self.mode == "drift":
             self.mode = "paginate" if self.committed_variant_id else "recon"
 
+    def resume_committed_after_failed_drift(self) -> None:
+        if self.active_variant_id in self.variants:
+            self.variants[self.active_variant_id].status = "explored"
+        if self.committed_variant_id:
+            self.active_variant_id = self.committed_variant_id
+        self.pending_drift_variant_id = None
+        self.pending_drift_parent_variant_id = None
+        self.pending_drift_started_at = ""
+        self.mode = "paginate" if self.committed_variant_id else "recon"
+        self.pages_since_last_mutation = 0
+
     def best_variant(self) -> LinkedInSearchVariant:
         candidates = [
             variant
@@ -658,6 +700,9 @@ class LinkedInExperimentState:
             "family_duplicates_total": self.family_duplicates_total,
             "family_signal_total": self.family_signal_total,
             "family_saves_total": self.family_saves_total,
+            "precommit_recovery_attempts_used": self.precommit_recovery_attempts_used,
+            "committed_pages_reviewed": self.committed_pages_reviewed,
+            "committed_zero_signal_streak": self.committed_zero_signal_streak,
             "active_variant_page": active_variant.pages_reviewed,
             "active_variant_pages_reviewed": active_variant.pages_reviewed,
             "active_variant_result_count": active_variant.result_count,
@@ -698,6 +743,8 @@ def bootstrap_experiment_state(search_string: SearchString) -> LinkedInExperimen
         family_key=search_string.family_key,
         novelty_bucket=search_string.novelty_bucket,
         domain_lane=search_string.domain_lane,
+        retrieval_recipe=dict(search_string.retrieval_recipe or {}),
+        applied_hypothesis_ids=list(search_string.retrieval_hypothesis_ids or []),
     )
     state = LinkedInExperimentState(
         root_string_id=search_string.id,
@@ -748,6 +795,8 @@ def reset_experiment_state(
         family_key=state.intent.family_key or search_string.family_key,
         novelty_bucket=state.intent.novelty_bucket or search_string.novelty_bucket,
         domain_lane=state.intent.domain_lane or search_string.domain_lane,
+        retrieval_recipe=state.intent.retrieval_recipe or dict(search_string.retrieval_recipe or {}),
+        applied_hypothesis_ids=state.intent.applied_hypothesis_ids or list(search_string.retrieval_hypothesis_ids or []),
         structured_filters=state.intent.structured_filters,
     )
     reset_state = LinkedInExperimentState(root_string_id=search_string.id, intent=intent, mode="recon")

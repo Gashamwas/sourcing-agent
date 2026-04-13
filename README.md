@@ -1,359 +1,196 @@
-# Autonomous Sourcing Agents
-
-Two autonomous agents — one for LinkedIn Recruiter, one for GitHub — that take a sourcing brief and execute it without human intervention. The brief is not configuration. It is the recruiter's expertise about a role, its target candidate archetypes, and the noise patterns specific to a geography, codified into a machine-executable policy. The agents write their own search strategies, evaluate every candidate through structured claim-and-evidence procedures that distinguish builders from users, adapt in real time based on the signal they're getting, and generate entirely new queries mid-run when they discover unexpected talent patterns.
-
-They do not keyword-match. They synthesize whole-candidate judgments the way a trained sourcer would: reading career trajectories, inferring depth from verbs and objects in work descriptions, recognizing when methodology transfers across domains even when the domain itself doesn't match.
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        SOURCING BRIEF                           │
-│  Capability areas · Depth distinction · Non-fit patterns        │
-│  Employer signal tiers · Facial calibration · Bias controls     │
-└──────────────────────────┬──────────────────────────────────────┘
-                           │
-              ┌────────────┴────────────┐
-              ▼                         ▼
-   ┌──────────────────┐     ┌──────────────────────┐
-   │  LINKEDIN AGENT   │     │    GITHUB AGENT       │
-   │                   │     │                       │
-   │  Boolean strings  │     │  Multi-channel search │
-   │  Browser auto.    │     │  REST API queries     │
-   │  Recruiter UI     │     │  Code/repo/org mining │
-   │  Ghost-cursor     │     │  Graph expansion      │
-   │  Decoy system     │     │  Stargazer mining     │
-   └────────┬──────────┘     └──────────┬────────────┘
-            │                           │
-            └────────────┬──────────────┘
-                         ▼
-          ┌──────────────────────────┐
-          │    SHARED INFRASTRUCTURE  │
-          │                          │
-          │  Judgment chain           │
-          │  Bias monitoring          │
-          │  Brief schema             │
-          │  Session governor          │
-          │  Human timing simulation  │
-          │  LLM dispatch             │
-          └──────────────────────────┘
-```
-
----
+# Sourcing Agent
 
-## The Brief — Recruiting Expertise, Codified
+Sourcing Agent is a role-driven sourcing system for LinkedIn Recruiter and GitHub. It takes a structured brief, plans searches, evaluates candidates, adapts as it learns from results, and writes resumable run state so work can continue across sessions.
 
-Everything both agents know about a role lives in a single JSON document. A brief defines **capability areas** with explicit builder/user signal distinctions (did this person *build* a reward model, or did they *use* one via API?), **non-fit patterns** calibrated to the specific labor market (BPO annotation work is the highest-volume noise pattern in Colombia; fintech ML engineers who only do fraud scoring are the trap in Brazil), **employer signal tiers** that encode which company names carry signal and how much, and **facial calibration** that sets expected triage pass-through rates so the bias monitor can detect evaluation drift.
+The repo started as an autonomous search agent, but the current system is broader than that. It now includes the search adapters themselves, a shared runtime layer, operator tooling, end-of-run reporting, market-intelligence generation, and a workflow for turning run learnings back into the next version of a brief.
 
-The **depth distinction** is the single most important calibration in the brief. It governs every evaluation across both agents: "Has done hands-on ML work where data quality, model training, or evaluation methodology was a primary focus" vs. "Uses ML models as components in applications without involvement in how those models are trained, evaluated, or improved." Builder vs. user. This distinction is role-specific — the boundary shifts depending on what the role actually needs.
+## What the brief does
 
-The Colombia brief defines 7 capability areas (from RL & Post-Training Data Systems to Embodied AI & Simulation), 6 non-fit patterns, 4 employer signal tiers, and inferential save rules for sparse profiles with strong priors. Swapping roles means swapping briefs. Nothing else changes.
+The brief is the center of the system. It is where the role-specific judgment lives: what kind of work the team actually needs, where the yes/no boundary sits, which lookalike profiles usually waste time, how the search should open, and what kinds of evidence should matter on LinkedIn and GitHub.
 
----
-
-## LinkedIn Agent
-
-### Strategy Formation
-
-The agent receives the brief and an optional **kit vocabulary** — Boolean search terms organized by competency domain. Kit terms are raw building blocks, not executable queries. The agent synthesizes them into 15-30+ compound Boolean strings in a single planning call.
+That design choice is deliberate. Recruiting judgment is usually scattered across
+intake notes, recruiter memory, search strings, and ad hoc evaluation habits.
+Here it is captured in one place and made executable. The result is a role
+definition the team can reuse, inspect, and apply consistently across runs.
 
-Two string types. **Type A recall strings** cast broad nets — 500 to 5,000 expected results — by AND-gating skill clusters with geography and seniority qualifiers. **Type B precision "sniper" strings** use specific tool names, framework names, and benchmark names that only genuine practitioners would have on their profile — SWE-bench, Axolotl, Constitutional AI, TRL, vLLM — producing 20-500 results where nearly every hit is a real builder.
+The loader supports older brief formats as well as the newer structured schema. Newer briefs can also carry an explicit `retrieval_design`, which lets the search open from layered intent instead of a flat list of terms.
 
-The sequencing is deliberate. Precision strings run early. RL/RLHF strings — the densest, most well-trodden talent pool — are backloaded. Rationale: thinner capability areas surface more net-new candidates per string, RL practitioners appear incidentally in non-RL strings, and by the time RL strings execute, the adaptation loop has learned from earlier noise patterns.
+## Current system
 
-Every string is governed by LinkedIn Boolean rules that most sourcers get wrong. LinkedIn has no stemming — "model" does not match "models," "fine-tuning" does not match "fine-tuned" — so the agent includes all morphological variants. Substring embedding means superstrings are never added. Abbreviations with dominant non-ML meanings are filtered: "DPO" matches Data Protection Officer, "IPO" matches Initial Public Offering — these are only used paired with their full expansions.
+### LinkedIn
 
-### Evaluation Pipeline
+The LinkedIn side of the system connects to a live Chrome session over CDP, works inside LinkedIn Recruiter, generates search strings from the brief, and evaluates candidates in two stages: a lightweight snippet pass followed by a deeper profile review when the snippet looks promising.
 
-```
-LinkedIn Recruiter results page
-        │
-        ▼
-  Scroll to render all cards (virtual scrolling)
-        │
-        ▼
-  Extract snippets ──→ [Cheap Model] ──→ Structured candidate data
-        │
-        ▼
-  Facial judgment ──→ [Opus] ──→ FACIAL_YES / FACIAL_NO
-        │                              │
-        │ (FACIAL_YES only)            │ (skip — no profile open)
-        ▼                              │
-  Open profile panel (ghost-cursor)    │
-        │                              │
-        ▼                              │
-  Extract full profile ──→ [Cheap Model]
-        │
-        ▼
-  Full judgment ──→ [Opus] ──→ SAVE / REJECT / INFERENTIAL_SAVE
-        │
-        ▼
-  Save to Recruiter pipeline (if qualifying)
-```
-
-**Facial triage** reads the full career trajectory from snippet data alone — name, headline, positions with titles and dates. Fast exits apply only when the *entire* trajectory clearly indicates work outside scope. One relevant-looking position anywhere in the history blocks a fast exit. Ambiguity defaults to YES: the cost of a false positive is one cheap profile extraction; the cost of a false negative is a permanently missed candidate. Expected pass-through is 25-50%.
-
-**Full evaluation** follows a four-step structured procedure:
-
-1. **Capability Mapping.** Map actual work (from experience bullets, not titles) to the brief's capability areas. Result: DIRECT, ADJACENT, or NONE.
-2. **Depth Test.** Builder or user? Reads verbs and objects. "Designed, built, fine-tuned, trained" are builder verbs. "Deployed, integrated, managed, used a pre-built model" are user verbs. "Fine-tuned" is a builder verb. "Fine-tuned via API" is a user verb.
-3. **Transferability** (when no direct capability match). Would this person's methodology apply if pointed at the target domain? Evaluation framework design transfers. Data curation pipeline design transfers. Classical engineering simulation does not.
-4. **Decision.** Strongest case for and against, then decide. DIRECT + BUILDER = SAVE. ADJACENT + BUILDER = SAVE. No match + BUILDER + TRANSFERABLE = TRANSFERABLE_SAVE. Any match + USER = REJECT.
-
-### Within-String Adaptation
-
-The agent treats page 1 as a scout. After evaluating it, the agent decides: **paginate** (signal looks good), **narrow** (too much noise — add AND clauses), or **abandon** (wrong population entirely). During pagination, accumulated statistics after each page drive decisions: **continue**, **narrow**, **broaden**, **stop**, or **abandon**.
-
-Narrowing pushes the current Boolean onto a refinement stack; broadening pops it. The agent navigates the specificity gradient in either direction with full history:
-
-```
-Original: ("agentic" OR "LLM agent") AND ("financial services" OR "banking")
-  → Narrow: + AND ("production" OR "deployment" OR "enterprise")
-    → Narrow again: + AND NOT ("RPA" OR "chatbot")
-      → Broaden: revert to first narrowing
-```
+The search loop has moved beyond a simple narrow-or-broaden cycle. The current implementation tracks root queries, sibling variants, rescue attempts, and drift over time, then persists that search state in runtime storage. The session orchestrator also manages pacing, resumability, session budgets, and optional decoy activity for safer long-running Recruiter sessions.
 
-### Block-Level Adaptation
+### GitHub
 
-After every batch of strings, the agent reviews a **BlockReport** — which strings produced saves, which were zero-save noise, what unexpected populations appeared, what terms collided with undesired demographics. It generates new compound strings targeting discovered signal patterns, recommends skipping redundant queued strings, reorders remaining strings by observed productivity, and updates noise pattern knowledge.
+The GitHub side uses API-driven search rather than browser automation. It works across several channels, including user search, code search, topic search, repository mining, stargazer mining, and graph expansion from strong candidates. It enriches candidates with repository, contribution, profile, and contact data before running the same kind of structured judgment flow used on LinkedIn.
 
-This is the formalization of what a recruiter does naturally when adjusting search strategy mid-session based on who they're actually finding. The difference is perfect recall of every candidate evaluated, every save rate, and every noise collision across every string.
+For saved candidates, the GitHub flow can generate outreach copy and export a CSV for operator use. It also feeds strong candidates back into graph expansion so the search can move outward from real signal instead of staying trapped in the initial query set.
 
-### Decoy System & Anti-Detection
+### Shared runtime and reporting
 
-The agent produces browser behavior structurally identical to a human sourcer's — not merely randomized, but shaped by the same distributions that govern human interaction timing.
+Both adapters now sit on top of a shared execution model. `runtime_state.sqlite3`
+is the authoritative record of candidate lifecycle, work-unit status, side
+effects, and resume state. Files such as `progress.json` and the stage JSONLs
+are still written because they are useful operationally, but they exist as
+compatibility and visibility artifacts rather than control-state inputs.
 
-A **decoy agent** runs in a separate browser tab, generating ambient LinkedIn activity (feed scrolling, notification checking, job browsing) that obscures sourcing as an isolated behavior. It operates during sourcing sessions (interleave bursts every ~30 minutes) and between sessions (dormant-mode bursts every ~25 minutes). All timing follows log-normal distributions with temporal autocorrelation — the statistical signature of human attention patterns, not the entropy profile of automation.
+That runtime layer is what makes the rest of the repo possible. It supports resumable runs, projection rebuilds, targeted restarts, run snapshots, structured debriefs, market-intelligence artifacts, and draft brief iteration based on what the search actually learned.
 
-| Layer | Implementation |
-|-------|---------------|
-| **Browser** | `rebrowser-playwright` CDP connection to a real Chrome session |
-| **Mouse** | `python-ghost-cursor` Bezier trajectories with Fitts's Law timing |
-| **Scrolling** | Chunked wheel events, 40-150px increments, variable delays |
-| **Timing** | Log-normal distributions with autocorrelation. No uniform random. |
-| **Sessions** | Log-normal durations (median ~4h), dormant periods (median ~110 min) |
-| **Time-of-day** | Operating window jittered ±30 min per session. Hard cutoff at 1 AM. |
+## Repository layout
 
----
-
-## GitHub Agent
-
-The GitHub agent operates on a fundamentally different information surface. LinkedIn gives you career trajectories and self-described experience bullets. GitHub gives you code — what people actually built, the tools they chose, the repositories they contributed to, and who they collaborate with. The evaluation challenge is different: LinkedIn candidates over-describe; GitHub candidates under-describe. A GitHub profile might have no bio, no company, and no README, but the commit history in a fork of `trl` tells you everything the brief needs to know.
-
-### Multi-Channel Search Strategy
-
-Where the LinkedIn agent writes Boolean strings against a single search interface, the GitHub agent operates across 7 distinct search channels, each surfacing candidates through different signal:
-
-| Channel | What it finds | Example |
-|---------|--------------|---------|
-| **User Search** | Profiles by bio, location, language | `language:python location:Brazil followers:>50` |
-| **Code Search** | People who wrote specific imports | `"from trl import" language:python` |
-| **Topic Search** | Repos tagged with discriminating topics | `topic:reinforcement-learning stars:>20` |
-| **Repo Mining** | Contributors to frontier repositories | All committers to OpenRLHF, vLLM, Axolotl |
-| **Org Exploration** | Members of known AI organizations | Anthropic, DeepMind, Cohere org members |
-| **Stargazer Mining** | People who starred niche repos | Who starred a Constitutional AI implementation? |
-| **Graph Expansion** | Social connections of seed experts | Followers/following of known practitioners |
-
-The agent generates 15-30+ queries across these channels in a single strategy call, then validates and repairs each query's syntax before execution (`github/query_validator.py` strips natural language filler, converts prose to API syntax, and deduplicates against executed queries).
-
-### Frontier Toolchain Fingerprinting
-
-The key innovation in the GitHub agent is **code-level signal extraction**. Instead of relying on how people describe themselves, it finds what they actually imported:
-
-```python
-# These imports are fingerprints — only practitioners write them
-"from trl import PPOTrainer"          # Post-training / RLHF
-"from axolotl.utils import"           # Fine-tuning infrastructure
-"from swebench import"                # Code agent evaluation
-"from vllm import LLM"                # Inference optimization
-"from constitutional_ai import"       # Alignment research
-```
-
-The cheap model reads repository descriptions and README content, then classifies each repo as **builder** (custom training loop, RLHF pipeline, novel architecture) or **user** (fork with minimal changes, tutorial notebook, API wrapper). This distinction — the same builder/user depth test from the brief — operates on code artifacts instead of self-reported experience bullets.
-
-### Enrichment Pipeline
-
-```
-GitHub search result (username)
-        │
-        ▼
-  Light enrich ──→ Profile + geo-gate against brief's permanent filters
-        │
-        │ (passes geo-filter)
-        ▼
-  Full enrich ──→ Top repos + languages + README content
-        │          + frontier repo contributions (forks, commits)
-        │          + personal website crawl
-        │          + arXiv paper extraction
-        │          + contact discovery (email, social links)
-        │
-        ▼
-  [Cheap Model] ──→ Portfolio synthesis (toolchain, ML signal strength)
-        │
-        ▼
-  Facial judgment ──→ [Opus] ──→ FACIAL_YES / FACIAL_NO
-        │
-        │ (FACIAL_YES only)
-        ▼
-  Full judgment ──→ [Opus] ──→ SAVE / REJECT / INFERENTIAL_SAVE
-        │
-        ▼
-  Priority-ranked save + outreach generation
-```
-
-**Graph expansion** captures practitioners invisible to keyword search — people working at small startups, maintaining side projects, or in academic labs with no public profile text. Seed with known frontier experts, mine their social graph, evaluate the connections.
-
-### Adaptation
-
-After every batch of queries, the agent compiles results — strings run, saves produced, zero-save strings, observed noise patterns — and asks Opus to generate new queries targeting discovered signal. The same adaptive loop as the LinkedIn agent, but across 7 search channels instead of one.
-
-**Exhaustion detection** (`github/query_validator.py`) tracks per-channel saturation. When a channel stops producing net-new candidates, the agent shifts budget to channels that are still productive rather than grinding through diminishing returns.
-
----
-
-## Shared Infrastructure
-
-### Judgment Chain
-
-Both agents use the same three-layer evaluation framework, but with platform-specific templates:
-
-| Layer | LinkedIn | GitHub |
-|-------|----------|--------|
-| **Facial triage** | Career trajectory from snippet | Portfolio text from enrichment |
-| **Full evaluation** | Experience bullets + work history | Repo analysis + code signals + contributions |
-| **Post-save modifiers** | Secondary confidence boosts | Priority ranking for outreach |
-
-The judgment templates (`linkedin/judgment_templates.py`, `github/judgment_templates.py`) encode the same recruiting logic — capability mapping, depth testing, transferability assessment — but read different evidence. A LinkedIn candidate's depth shows in their bullet points ("fine-tuned a reward model on 50K human preference pairs"). A GitHub candidate's depth shows in their code ("authored `reward_model.py` with custom loss function, not a fork").
-
-### Bias Monitoring
-
-Five monitors run continuously during every session:
-
-| Monitor | Trigger | Action |
-|---------|---------|--------|
-| **Consecutive saves** | N≥5 (configurable per brief) | Pause string |
-| **Save rate spike** | >60% over rolling 15 evaluations | Pause string |
-| **Consecutive rejects** | N≥20 | Flag for review |
-| **Facial YES rate anomaly** | Outside brief's expected range | Flag drift |
-| **Parse failure rate** | ≥3% across 20+ decisions | Flag extraction issue |
-
-These thresholds come from the brief — role-specific calibration, not hardcoded defaults. The Colombia brief sets consecutive saves at 7 and consecutive rejects at 15, reflecting a denser talent market.
-
-Early in the project, the LinkedIn agent saved 398 annotation workers in a single session because the evaluation criteria were too permissive for the population a broad string surfaced. That failure mode — saving everyone because the cohort *looks* vaguely relevant — is what the bias control system prevents.
-
-### Session Governor
-
-Hard limits enforced across both agents:
-
-| Limit | LinkedIn | GitHub |
-|-------|----------|--------|
-| Max session duration | 3.5-5h (log-normal) | Configurable |
-| Max profile opens / session | 200 | N/A (API-based) |
-| Max profile opens / 24h | 400 | N/A |
-| API rate limiting | N/A | Token bucket per endpoint |
-| Operating window | ~7 AM - 1 AM (jittered) | Unrestricted |
-| Max sessions / day | 3 | Unrestricted |
-
-The LinkedIn governor enforces limits that prevent account-level risk. The GitHub governor enforces API rate limits that prevent token exhaustion. Different constraints, same pattern: cooperative shutdown at safe checkpoints, never mid-evaluation.
-
-### Human Timing Simulation
-
-All delays across both agents follow log-normal distributions with temporal autocorrelation — consecutive delays are correlated, matching the clustering pattern of human attention shifts. Uniform random delays are detectable by entropy classifiers; log-normal is not. Parameters: μ≈1.5, σ≈0.8 → median ~4.5s, with a long tail up to ~30s.
-
----
-
-## Architecture
-
-```
+```text
 sourcing-agent/
-├── config/                  # Sourcing briefs (one per role)
-├── github/                  # GitHub agent
-│   ├── orchestrator.py      # Pipeline: strategy → search → enrich → evaluate → save
-│   ├── strategy.py          # Multi-channel query generation + adaptation
-│   ├── enricher.py          # Profile + repo + website + paper enrichment
-│   ├── client.py            # GitHub REST API client with rate limiting
-│   ├── query_validator.py   # Syntax repair, dedup, exhaustion tracking
-│   ├── outreach.py          # Personalized message generation
-│   ├── judgment_templates.py # GitHub-specific evaluation prompts
-│   ├── governor.py          # API rate limit enforcement
-│   ├── observability/       # Session metrics, strategy tracking, reporting
-│   └── session_orchestrator.py
-├── linkedin/                # LinkedIn agent
-│   ├── orchestrator.py      # Pipeline: strategy → scroll → extract → evaluate → save
-│   ├── browser.py           # Playwright automation + ghost-cursor + scrolling
-│   ├── strategy.py          # Boolean string synthesis + adaptation
-│   ├── judgment_templates.py # LinkedIn-specific evaluation prompts
-│   └── session_orchestrator.py  # Multi-session cycling + decoy interleaving
-├── decoy/                   # Ambient browsing noise generator
-│   ├── agent.py             # Activity burst execution
-│   ├── scheduler.py         # Log-normal inter-burst timing
-│   └── actions/             # Feed, jobs, notifications browsing
-├── shared/                  # Cross-agent infrastructure
-│   ├── judger.py            # Judgment dispatch (facial/full × linkedin/github)
-│   ├── bias_controls.py     # Decision recording + anomaly detection
-│   ├── governor.py          # Session limits + time-of-day gating
-│   ├── brief_loader.py      # Brief normalization (V1/V2)
-│   ├── brief_schema.py      # Capability areas, depth distinction, employer tiers
-│   ├── schemas.py           # CandidateSnippet, ProfileSummary, OpusDecision
-│   ├── llm_clients.py       # Opus + cheap model dispatch
-│   ├── human_timing.py      # Log-normal delays + autocorrelation
-│   ├── config.py            # Environment + behavioral parameters
-│   └── storage.py           # JSONL append, dedup, event logging
-└── output/                  # Run artifacts (candidates, logs, progress)
+├── config/                # Role briefs and supporting job-description files
+├── linkedin/              # LinkedIn Recruiter adapter, browser automation, search intelligence
+├── github/                # GitHub adapter, enrichment, query planning, exports, observability
+├── market_intelligence/   # Post-run synthesis, research backends, artifact generation
+├── shared/                # Brief loading, schemas, runtime state, execution engine, utilities
+├── tools/                 # Runtime admin, brief iteration, market-intel update helpers
+├── docs/                  # Runbooks, cheat sheets, architecture notes, archived campaign docs
+└── output/                # Mutable state, finalized run snapshots, exports, market intel
 ```
 
----
-
-## Quick Start
-
-### LinkedIn Agent
+## Setup
 
 ```bash
-# Launch Chrome with CDP
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp config.example.env .env
+```
+
+Fill in the keys you need in `.env`.
+
+- `ANTHROPIC_API_KEY` is required for the higher-judgment steps.
+- `OPENAI_API_KEY` or `GOOGLE_API_KEY` is used for lower-cost extraction and synthesis work.
+- `GITHUB_TOKEN` is required for GitHub sourcing.
+- `PERPLEXITY_API_KEY` is optional and only matters if you want external research during market-intelligence updates.
+
+If you plan to run LinkedIn, start Chrome through the helper script and keep your Recruiter session logged in:
+
+```bash
 ./launch-chrome.sh
+```
 
-# Check 24h budget
-python3 linkedin/session_orchestrator.py --status
+## Common commands
 
-# Full day cycle — agent writes its own search strings
-python3 linkedin/session_orchestrator.py --brief config/brief-fdl-colombia-v3.json
+These examples use two current briefs that already exist in the repo:
 
-# Single session
-python3 linkedin/session_orchestrator.py --brief config/brief-fdl-colombia-v3.json --single-session
+```bash
+LINKEDIN_BRIEF=config/Forward-Deployed-Engineer-NYC/brief-forward-deployed-engineer-us-v1.4.json
+GITHUB_BRIEF=config/Forward-Deployed-Engineer-NYC/brief-forward-deployed-engineer-us-github-v1.json
+```
 
-# Resume from saved progress
-python3 linkedin/session_orchestrator.py --brief config/brief-fdl-colombia-v3.json --resume
+### LinkedIn runs
 
-# Decoy only (cool-down days)
+Recommended entry point:
+
+```bash
+python3 linkedin/session_orchestrator.py --brief "$LINKEDIN_BRIEF"
+```
+
+Useful variants:
+
+```bash
+python3 linkedin/session_orchestrator.py --brief "$LINKEDIN_BRIEF" --single-session
+python3 linkedin/session_orchestrator.py --brief "$LINKEDIN_BRIEF" --resume
+python3 linkedin/session_orchestrator.py --brief "$LINKEDIN_BRIEF" --status
+python3 linkedin/session_orchestrator.py --brief "$LINKEDIN_BRIEF" --restart-string 12 --resume
 python3 linkedin/session_orchestrator.py --decoy-only
 ```
 
-### GitHub Agent
+If you want the direct pipeline without the session orchestrator:
 
 ```bash
-# Full autonomous run
-python3 run_github.py --brief config/brief-fdl-colombia-v3.json
-
-# Resume from saved progress
-python3 run_github.py --brief config/brief-fdl-colombia-v3.json --resume
+python3 run_linkedin.py --brief "$LINKEDIN_BRIEF" --full-run
 ```
 
-### Stop
+### GitHub runs
 
-**Ctrl+C** once — graceful shutdown. Finishes current evaluation, saves progress, exits cleanly. **Ctrl+C** twice — force shutdown. Both agents auto-stop at governor limits.
+Recommended entry point:
 
----
+```bash
+python3 run_github.py --brief "$GITHUB_BRIEF"
+```
 
-## Dependencies
+Useful variants:
 
-- Python 3.11+
-- `rebrowser-playwright` — CDP browser automation with detection evasion
-- `python-ghost-cursor` — Bezier mouse trajectory generation
-- `anthropic` — Claude Opus for judgment and strategy
-- `openai` or `google-generativeai` — cheap model for extraction and synthesis
-- `python-dotenv` — environment config
-- Chrome with `--remote-debugging-port=9222` (LinkedIn agent)
-- GitHub personal access token (GitHub agent)
-- LinkedIn Recruiter seat with active session (LinkedIn agent)
+```bash
+python3 run_github.py --brief "$GITHUB_BRIEF" --resume
+python3 run_github.py --brief "$GITHUB_BRIEF" --status
+python3 github/session_orchestrator.py --brief "$GITHUB_BRIEF" --single-session
+python3 github/run.py --brief "$GITHUB_BRIEF"
+```
+
+### Post-run workflow
+
+Update market intelligence from a finalized run snapshot:
+
+```bash
+python3 tools/update_market_intel.py \
+  --brief "$LINKEDIN_BRIEF" \
+  --run-dir output/runs/linkedin/<brief-id>/<run-stamp>__run-<id> \
+  --mode post_run
+```
+
+Draft the next version of a brief from a run report:
+
+```bash
+python3 -m tools.iterate_brief \
+  --brief "$LINKEDIN_BRIEF" \
+  --report output/runs/linkedin/<brief-id>/<run-stamp>__run-<id>/run-report.json \
+  --search-memory output/runs/linkedin/<brief-id>/<run-stamp>__run-<id>/search_memory-<brief-id>.json \
+  --final-judgments output/runs/linkedin/<brief-id>/<run-stamp>__run-<id>/final_judgments.jsonl \
+  --output-dir output
+```
+
+### Runtime administration
+
+If a run already has `runtime_state.sqlite3`, use the admin surface instead of editing `progress.json` or JSONL files by hand.
+
+```bash
+python3 tools/runtime_state_admin.py \
+  --output-dir output/state/linkedin/<brief-id> \
+  --source linkedin \
+  --brief-id <brief-id> \
+  rebuild-projections
+```
+
+Other supported admin operations include inspecting orphaned attempts, inspecting stop reasons, replaying side effects, requeueing work units, and restarting a specific LinkedIn string.
+
+## Output model
+
+Live work happens under `output/state/`. Completed runs are copied into immutable snapshots under `output/runs/`. Market-level synthesis lives under `output/market_intelligence/`, and operator-facing exports land under `output/exports/`.
+
+In practice, the layout looks like this:
+
+- `output/state/linkedin/<brief-id>/` for live LinkedIn state
+- `output/state/github/<brief-id>/` for live GitHub state
+- `output/runs/<source>/<brief-id>/<run-stamp>__run-<id>/` for finalized snapshots
+- `output/market_intelligence/<market-key>/` for canonical market-intel artifacts
+- `output/exports/<source>/<brief-id>/` for CSVs and other operator-facing outputs
+
+The important implementation detail is that the SQLite runtime store is canonical. Compatibility artifacts are rebuilt from it when needed.
+
+## Testing
+
+The repo has a broad test suite around runtime state, search intelligence, adapter services, market intelligence, brief iteration, and the shared execution layer.
+
+```bash
+python3 -m pytest
+```
+
+## Notes
+
+This is an internal project. The system is intentionally opinionated because it
+is designed to preserve sourcing judgment alongside automation. The newer parts
+of the repo reflect that direction: better runtime discipline, clearer operator
+tooling, stronger post-run analysis, and a tighter loop between what the search
+learns and how the brief evolves.
 
 ## License
 
-Private — internal use only.
+Private and internal use only.

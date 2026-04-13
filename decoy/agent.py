@@ -61,6 +61,7 @@ class DecoyAgent:
         self._context = browser_context
         self._page = None
         self._cursor = None
+        self._owns_page = False
 
     async def _ensure_tab(self):
         """Find or create a linkedin.com tab (non-Recruiter).
@@ -69,16 +70,10 @@ class DecoyAgent:
         if self._page and not self._page.is_closed():
             return
 
-        # Look for an existing linkedin.com tab (not Recruiter)
-        for page in self._context.pages:
-            url = page.url
-            if "linkedin.com" in url and "/talent" not in url and "/recruiter" not in url:
-                self._page = page
-                self._init_cursor()
-                return
-
-        # Create a new tab
+        # Always create a dedicated decoy tab so we never hijack the user's
+        # normal LinkedIn browsing or any auxiliary automation tab.
         self._page = await self._context.new_page()
+        self._owns_page = True
         await self._page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
         await asyncio.sleep(human_delay(2, 4))
         self._init_cursor()
@@ -168,3 +163,11 @@ class DecoyAgent:
                 await self._page.goto("https://www.linkedin.com/feed/", wait_until="domcontentloaded")
             except Exception:
                 pass
+            if self._owns_page:
+                try:
+                    await self._page.close()
+                except Exception:
+                    pass
+        self._page = None
+        self._cursor = None
+        self._owns_page = False

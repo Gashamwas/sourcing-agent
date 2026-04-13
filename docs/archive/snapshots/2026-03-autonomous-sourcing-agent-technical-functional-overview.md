@@ -1,4 +1,7 @@
-The Autonomous Sourcing Agent
+# The Autonomous Sourcing Agent — Technical & Functional Overview (March 2026 Snapshot)
+
+Historical technical snapshot preserved for context. It reflects the system as described in March 2026 and is not the authoritative current operator or architecture reference.
+
 From Prototype to Production
 
 Sam Vangelos — Senior Recruiter, Applied AI & GTM Turing

@@ -6,6 +6,7 @@ import asyncio
 import random
 from typing import TYPE_CHECKING
 
+from shared import config
 from shared.execution import SideEffectOutcome
 from shared.human_timing import human_delay_correlated
 from shared.storage import log_event
@@ -103,8 +104,20 @@ class LinkedInSideEffectsService:
                     pipeline._saved_urls.add(profile_url)
                 else:
                     print("    [warn] LinkedIn save may have failed")
-                linger = max(2.5, min(8.0, human_delay_correlated(4.5, channel="save_linger")))
-                chunks_back = random.randint(1, 3)
+                linger = max(
+                    config.LINKEDIN_SAVE_LINGER_MIN_SECONDS,
+                    min(
+                        config.LINKEDIN_SAVE_LINGER_MAX_SECONDS,
+                        human_delay_correlated(
+                            config.LINKEDIN_SAVE_LINGER_BASE_SECONDS,
+                            channel="save_linger",
+                        ),
+                    ),
+                )
+                chunks_back = random.randint(
+                    config.LINKEDIN_SAVE_LINGER_MIN_CHUNKS_BACK,
+                    config.LINKEDIN_SAVE_LINGER_MAX_CHUNKS_BACK,
+                )
                 px = await pipeline.browser.scroll_for_linger(chunks_back)
                 await asyncio.sleep(linger)
                 print(f"    [profile-read] SAVE verdict → lingering {linger:.1f}s, scrolled back {chunks_back} chunks")

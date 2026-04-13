@@ -140,33 +140,35 @@ def test_head_ai_v2_brief_loads():
     assert brief.linkedin_project == "Head of Applied AI Lab"
     assert brief.linkedin_project_id == "1957683706"
     assert brief.additional_search_terms
-    assert "analyst assistant" in brief.additional_search_terms
-    assert "regulatory reporting" in brief.additional_search_terms
-    assert "payment orchestration" in brief.additional_search_terms
-    assert "ISDA" in brief.additional_search_terms
-    assert "Research copilot" in brief.search_priorities[0]
-    assert any("Payments" in priority for priority in brief.search_priorities)
-    assert "first 8 strings" in brief.intake_notes.lower() or any(
-        "first 8 strings" in instruction.lower() for instruction in brief.instructions
+    assert (
+        "capital-markets or broader financial-institution workflow exposure with applied genai depth"
+        in brief.additional_search_terms
     )
+    assert (
+        "document or knowledge workflows tied to financial-institution artifacts rather than generic legal-tech"
+        in brief.additional_search_terms
+    )
+    assert any("Capital markets" in priority or "capital-markets" in priority for priority in brief.search_priorities)
+    assert any("Payments" in priority or "payments" in priority for priority in brief.search_priorities)
+    assert any("first 8 strings" in instruction.lower() for instruction in brief.instructions)
     assert any("first 10-12 strings" in instruction.lower() for instruction in brief.instructions)
     assert brief.market_density == "sparse"
 
 
 def test_head_ai_v2_full_prompt_includes_market_intel_calibration():
     prompt = assemble_full_evaluation_system(HEAD_AI_V2_BRIEF._new_brief)
-    assert "Mithun Azhagappan" in prompt
-    assert "mini-CTO" in prompt
+    assert "Ashish Garg" in prompt
+    assert "Pratik Shah" in prompt
     assert "Executive Director" in prompt
     assert "Principal Architect" in prompt
 
 
 def test_head_ai_v2_facial_prompt_includes_updated_trajectory_patterns():
     prompt = assemble_facial_system(HEAD_AI_V2_BRIEF._new_brief)
-    assert "Career progression from big-bank, market-infrastructure, or market-data builder roles" in prompt
-    assert "Startup CTO or co-founder at a small fintech, regtech, payments, market-data, or institutional-workflow company" in prompt
-    assert "Trajectory centers on surveillance, compliance-tech, or risk operations without explicit post-2022 GenAI builder evidence" in prompt
-    assert "field CTO, customer engineering, solutions, or vendor advisory leadership" in prompt
+    assert "Career progression from big-bank, market-infrastructure, market-data, or top-tech builder roles" in prompt
+    assert "Startup CTO or co-founder at a small fintech, regtech, payments, market-data, insurance, or other BFSI-serving company with obvious hands-on language" in prompt
+    assert "Trajectory centers on surveillance, compliance-tech, or risk operations and shows no credible recent AI or GenAI ownership" in prompt
+    assert "field CTO, customer engineering, solutions, or vendor advisory leadership without direct production build ownership" in prompt
 
 
 def test_both_briefs_have_kit_url():

@@ -7,6 +7,7 @@ import time
 import shared.config as config
 
 from shared.failures import classify_runtime_failure
+from shared.llm_usage import anthropic_usage_dict, record_llm_usage
 
 
 # ---------------------------------------------------------------------------
@@ -60,7 +61,13 @@ def cheap_llm(system_prompt: str, user_prompt: str, expect_json: bool = True) ->
         raise RuntimeError(f"Unknown CHEAP_MODEL_PROVIDER: {config.CHEAP_MODEL_PROVIDER}")
 
 
-def opus_llm(system_prompt: str, user_prompt: str, expect_json: bool = True, max_tokens: int = 8192) -> str | dict:
+def opus_llm(
+    system_prompt: str,
+    user_prompt: str,
+    expect_json: bool = True,
+    max_tokens: int = 8192,
+    usage_context: dict | None = None,
+) -> str | dict:
     """Call Opus for candidate judgment. Returns parsed JSON or raw string."""
     import anthropic
 
@@ -73,18 +80,40 @@ def opus_llm(system_prompt: str, user_prompt: str, expect_json: bool = True, max
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
-        if message.stop_reason != "end_turn":
-            raise RuntimeError(f"Opus response truncated: stop_reason={message.stop_reason}. Increase max_tokens or reduce prompt size.")
-        return message.content[0].text.strip()
+        return message
 
-    text = _retry_with_backoff(_call, label="Opus")
+    message = _retry_with_backoff(_call, label="Opus")
+    record_llm_usage(
+        provider="anthropic",
+        model=config.OPUS_MODEL_NAME,
+        usage=anthropic_usage_dict(message),
+        request={
+            "system_prompt_chars": len(system_prompt),
+            "user_prompt_chars": len(user_prompt),
+            "max_tokens": max_tokens,
+            "expect_json": bool(expect_json),
+            "stop_reason": getattr(message, "stop_reason", None),
+        },
+        usage_context=usage_context,
+    )
+    if message.stop_reason != "end_turn":
+        raise RuntimeError(
+            f"Opus response truncated: stop_reason={message.stop_reason}. Increase max_tokens or reduce prompt size."
+        )
+    text = message.content[0].text.strip()
 
     if expect_json:
         return _parse_json_response(text)
     return text
 
 
-def opus_llm_cached(system_prompt: str, user_prompt: str, expect_json: bool = True, max_tokens: int = 8192) -> str | dict:
+def opus_llm_cached(
+    system_prompt: str,
+    user_prompt: str,
+    expect_json: bool = True,
+    max_tokens: int = 8192,
+    usage_context: dict | None = None,
+) -> str | dict:
     """Call Opus with prompt caching on the system prompt.
 
     System prompt is sent as a content block with cache_control: {"type": "ephemeral"}.
@@ -107,18 +136,41 @@ def opus_llm_cached(system_prompt: str, user_prompt: str, expect_json: bool = Tr
             ],
             messages=[{"role": "user", "content": user_prompt}],
         )
-        if message.stop_reason != "end_turn":
-            raise RuntimeError(f"Opus response truncated: stop_reason={message.stop_reason}. Increase max_tokens or reduce prompt size.")
-        return message.content[0].text.strip()
+        return message
 
-    text = _retry_with_backoff(_call, label="Opus-cached")
+    message = _retry_with_backoff(_call, label="Opus-cached")
+    record_llm_usage(
+        provider="anthropic",
+        model=config.OPUS_MODEL_NAME,
+        usage=anthropic_usage_dict(message),
+        request={
+            "system_prompt_chars": len(system_prompt),
+            "user_prompt_chars": len(user_prompt),
+            "max_tokens": max_tokens,
+            "expect_json": bool(expect_json),
+            "prompt_cache": "ephemeral",
+            "stop_reason": getattr(message, "stop_reason", None),
+        },
+        usage_context=usage_context,
+    )
+    if message.stop_reason != "end_turn":
+        raise RuntimeError(
+            f"Opus response truncated: stop_reason={message.stop_reason}. Increase max_tokens or reduce prompt size."
+        )
+    text = message.content[0].text.strip()
 
     if expect_json:
         return _parse_json_response(text)
     return text
 
 
-def facial_llm(system_prompt: str, user_prompt: str, expect_json: bool = True, max_tokens: int = 2048) -> str | dict:
+def facial_llm(
+    system_prompt: str,
+    user_prompt: str,
+    expect_json: bool = True,
+    max_tokens: int = 2048,
+    usage_context: dict | None = None,
+) -> str | dict:
     """Call the facial triage model with prompt caching.
 
     Defaults to Opus (same as opus_llm_cached) but can be overridden to Sonnet
@@ -142,11 +194,28 @@ def facial_llm(system_prompt: str, user_prompt: str, expect_json: bool = True, m
             ],
             messages=[{"role": "user", "content": user_prompt}],
         )
-        if message.stop_reason != "end_turn":
-            raise RuntimeError(f"Facial model response truncated: stop_reason={message.stop_reason}.")
-        return message.content[0].text.strip()
+        return message
 
-    text = _retry_with_backoff(_call, label="Facial")
+    message = _retry_with_backoff(_call, label="Facial")
+    record_llm_usage(
+        provider="anthropic",
+        model=config.FACIAL_MODEL_NAME,
+        usage=anthropic_usage_dict(message),
+        request={
+            "system_prompt_chars": len(system_prompt),
+            "user_prompt_chars": len(user_prompt),
+            "max_tokens": max_tokens,
+            "expect_json": bool(expect_json),
+            "prompt_cache": "ephemeral",
+            "stop_reason": getattr(message, "stop_reason", None),
+        },
+        usage_context=usage_context,
+    )
+    if message.stop_reason != "end_turn":
+        raise RuntimeError(
+            f"Facial model response truncated: stop_reason={message.stop_reason}."
+        )
+    text = message.content[0].text.strip()
 
     if expect_json:
         return _parse_json_response(text)

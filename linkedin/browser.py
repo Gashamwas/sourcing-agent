@@ -13,10 +13,11 @@ import random
 import re
 import subprocess
 import sys
+from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 from shared import config
 from shared.human_timing import human_delay_correlated
-from linkedin.input_backends import create_input_backend
+from linkedin.input_backends import TypingPlan, TypingResult, build_boolean_typing_plan, create_input_backend
 
 if TYPE_CHECKING:
     from rebrowser_playwright.async_api import Browser, Page, BrowserContext
@@ -29,6 +30,12 @@ _TARGET_CRASH_PATTERNS = (
     "session closed",
     "target closed",
 )
+
+
+@dataclass(frozen=True)
+class SearchEntryResult:
+    typing_result: TypingResult
+    results_wait_ms: int
 
 
 def _is_target_crash_error(error: BaseException | str) -> bool:
@@ -59,18 +66,34 @@ class LinkedInBrowser:
         self._browser: Optional[Browser] = None
         self._context: Optional[BrowserContext] = None
         self._page: Optional[Page] = None
+        self._owns_connection = False
         self.input_mode = input_mode
         self._input_backend = create_input_backend(input_mode)
         self._project_id: Optional[str] = None  # Auto-detected from browser URL
 
+    def attach_existing_connection(
+        self,
+        browser: Browser,
+        *,
+        context: BrowserContext | None = None,
+    ) -> None:
+        """Reuse an already-attached CDP browser/context from the session orchestrator."""
+        self._browser = browser
+        self._context = context
+        self._owns_connection = False
+
     async def connect(self) -> None:
-        from rebrowser_playwright.async_api import async_playwright
-        self._playwright = await async_playwright().start()
-        self._browser = await self._playwright.chromium.connect_over_cdp(config.CDP_URL)
+        if self._browser is None:
+            from rebrowser_playwright.async_api import async_playwright
+
+            self._playwright = await async_playwright().start()
+            self._browser = await self._playwright.chromium.connect_over_cdp(config.CDP_URL)
+            self._owns_connection = True
+
         if not self._browser.contexts:
             raise RuntimeError("No browser contexts found. Is the browser open?")
 
-        if await self._bind_existing_recruiter_page():
+        if await self._bind_existing_recruiter_page(preferred_context=self._context):
             print(
                 f"  Connected to browser ({self._input_backend.status_label}). "
                 f"Active page: {self._page.url}"
@@ -94,29 +117,62 @@ class LinkedInBrowser:
 
     async def disconnect(self) -> None:
         await self._input_backend.shutdown()
-        if self._playwright:
+        if self._owns_connection and self._playwright:
             await self._playwright.stop()
+        self._playwright = None
+        self._browser = None
+        self._context = None
+        self._page = None
+        self._owns_connection = False
 
-    async def _bind_existing_recruiter_page(self) -> bool:
+    async def _bind_existing_recruiter_page(
+        self,
+        *,
+        preferred_context: BrowserContext | None = None,
+    ) -> bool:
         """Bind to the first healthy LinkedIn Recruiter tab in the attached browser."""
         if not self._browser:
             return False
 
+        contexts: list[BrowserContext] = []
+        if preferred_context is not None and preferred_context in self._browser.contexts:
+            contexts.append(preferred_context)
         for ctx in self._browser.contexts:
+            if ctx not in contexts:
+                contexts.append(ctx)
+
+        candidates: list[tuple[int, BrowserContext, Page, str]] = []
+        for ctx_index, ctx in enumerate(contexts):
             for page in ctx.pages:
                 try:
                     url = page.url
                 except Exception:
                     continue
-                if "linkedin.com/talent" not in url:
+                if "linkedin.com/talent" not in url or "/login" in url:
                     continue
-                self._context = ctx
-                self._page = page
-                m = re.search(r"/talent/hire/(\d+)", url)
-                if m:
-                    self._project_id = m.group(1)
-                await self._input_backend.initialize(self._page)
-                return True
+                score = 0
+                if "/discover/" in url or "/recruiterSearch" in url:
+                    score += 3
+                if "/talent/hire/" in url:
+                    score += 2
+                if "/talent/search" in url:
+                    score += 1
+                candidates.append((score - ctx_index, ctx, page, url))
+
+        for _, ctx, page, url in sorted(candidates, key=lambda item: item[0], reverse=True):
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                await self._input_backend.initialize(page)
+            except Exception as e:
+                print(f"  [bind] Skipping unstable Recruiter tab ({url[:100]}): {e}")
+                continue
+
+            self._context = ctx
+            self._page = page
+            m = re.search(r"/talent/hire/(\d+)", url)
+            if m:
+                self._project_id = m.group(1)
+            return True
         return False
 
     async def _ghost_click(self, selector: str) -> bool:
@@ -146,6 +202,11 @@ class LinkedInBrowser:
         handled = await self._input_backend.press_key(self.page, key)
         if not handled:
             await self.page.keyboard.press(key)
+
+    async def _press_combo(self, combo: str) -> None:
+        handled = await self._input_backend.press_combo(self.page, combo)
+        if not handled:
+            await self.page.keyboard.press(combo)
 
     async def _send_os_refresh_shortcut(self) -> bool:
         """Best-effort macOS Cmd+R fallback when Playwright page methods are unhealthy."""
@@ -332,7 +393,99 @@ class LinkedInBrowser:
     # Search: enter Boolean into Keywords field
     # ------------------------------------------------------------------
 
-    async def enter_search_string(self, boolean: str) -> None:
+    async def _wait_for_visible_poll(self, locator, *, timeout_ms: int, interval_ms: int) -> bool:
+        attempts = max(1, timeout_ms // interval_ms)
+        for _ in range(attempts):
+            try:
+                if await locator.is_visible(timeout=250):
+                    return True
+            except Exception:
+                pass
+            await self.page.wait_for_timeout(interval_ms)
+        try:
+            return await locator.is_visible(timeout=250)
+        except Exception:
+            return False
+
+    async def _read_textarea_value(self, textarea) -> str:
+        try:
+            return await textarea.input_value()
+        except Exception:
+            try:
+                return await textarea.evaluate("el => el.value || ''")
+            except Exception:
+                return ""
+
+    async def _clear_keyword_textarea(self, textarea) -> None:
+        await self._ghost_click_locator(textarea)
+        await self._press_combo("Meta+A")
+        await asyncio.sleep(random.uniform(0.08, 0.18))
+        await self._press_key("Backspace")
+        value = await self._read_textarea_value(textarea)
+        if value:
+            await asyncio.sleep(random.uniform(0.08, 0.18))
+            await self._press_combo("Meta+A")
+            await asyncio.sleep(random.uniform(0.08, 0.18))
+            await self._press_key("Backspace")
+            value = await self._read_textarea_value(textarea)
+        if value:
+            raise RuntimeError("keyword textarea did not clear after select-all + backspace")
+
+    async def _peek_results_count_text(self) -> str:
+        try:
+            el = self.page.locator(".search-query-summary__title").first
+            text = (await el.inner_text(timeout=250)).strip()
+            if not text:
+                return ""
+            match = re.search(r"([\d.,]+[KkMm]?\+?)", text)
+            return match.group(1) if match else ""
+        except Exception:
+            return ""
+
+    async def _peek_top_card_signature(self) -> tuple[str, str]:
+        try:
+            link = self.page.locator(
+                'ol.profile-list article.profile-list-item [class*="lockup__title"] a'
+            ).first
+            name = (await link.inner_text(timeout=250)).strip()
+            url = (await link.get_attribute("href")) or ""
+            return (name, url)
+        except Exception:
+            return ("", "")
+
+    async def _wait_for_search_results_ready(
+        self,
+        *,
+        previous_count_text: str,
+        previous_top_card_signature: tuple[str, str],
+        min_wait_ms: int = 1200,
+        interval_ms: int = 150,
+        timeout_ms: int = 3000,
+    ) -> int:
+        waited_ms = min_wait_ms
+        await self.page.wait_for_timeout(min_wait_ms)
+        while waited_ms < timeout_ms:
+            count_text = await self._peek_results_count_text()
+            card_signature = await self._peek_top_card_signature()
+            if (
+                count_text
+                and previous_count_text
+                and count_text != previous_count_text
+            ) or (
+                card_signature != ("", "")
+                and card_signature != previous_top_card_signature
+            ):
+                return waited_ms
+            await self.page.wait_for_timeout(interval_ms)
+            waited_ms += interval_ms
+        return timeout_ms
+
+    async def enter_search_string(
+        self,
+        boolean: str,
+        *,
+        typing_plan: TypingPlan | None = None,
+    ) -> SearchEntryResult:
         """Enter a Boolean into the sidebar Keywords field (NOT the global search bar).
 
         Uses the project search page sidebar: Clear Keywords button → edit button → textarea.
@@ -342,6 +495,9 @@ class LinkedInBrowser:
         """
         # Pre-flight: dismiss any stale profile slide-in blocking the sidebar
         await self.go_back_to_results()
+        typing_plan = typing_plan or build_boolean_typing_plan(boolean)
+        previous_count_text = await self._peek_results_count_text()
+        previous_top_card_signature = await self._peek_top_card_signature()
 
         async def _do():
             # Step 1: Reveal the textarea.
@@ -366,9 +522,12 @@ class LinkedInBrowser:
                     try:
                         btn = self.page.locator(selector).first
                         if await btn.is_visible(timeout=1500):
-                            await btn.click()
-                            await self.page.wait_for_timeout(1500)
-                            if await textarea.is_visible(timeout=1500):
+                            await self._ghost_click_locator(btn)
+                            if await self._wait_for_visible_poll(
+                                textarea,
+                                timeout_ms=1200,
+                                interval_ms=100,
+                            ):
                                 expanded = True
                                 break
                     except Exception:
@@ -400,15 +559,38 @@ class LinkedInBrowser:
 
             # Step 3: Fill the sidebar textarea (the ONLY correct target)
             await textarea.wait_for(state="visible", timeout=10000)
-            await textarea.fill(boolean)
+            await self._clear_keyword_textarea(textarea)
+            typing_result = await self._input_backend.type_text(
+                self.page,
+                textarea,
+                boolean,
+                plan=typing_plan,
+            )
+            await asyncio.sleep(
+                human_delay_correlated(
+                    random.uniform(
+                        config.LINKEDIN_SEARCH_TYPING_PRE_SUBMIT_MIN_SECONDS,
+                        config.LINKEDIN_SEARCH_TYPING_PRE_SUBMIT_MAX_SECONDS,
+                    ),
+                    channel="search_typing_submit",
+                )
+            )
 
             # Step 4: Submit
             await self._press_key("Enter")
+            return typing_result
 
-        await _retry(_do)
+        typing_result = await _retry(_do)
 
         # Step 5: Wait for results (outside retry — never re-submit on timeout)
-        await self.page.wait_for_timeout(3000)
+        results_wait_ms = await self._wait_for_search_results_ready(
+            previous_count_text=previous_count_text,
+            previous_top_card_signature=previous_top_card_signature,
+        )
+        return SearchEntryResult(
+            typing_result=typing_result,
+            results_wait_ms=results_wait_ms,
+        )
 
     async def has_next_page(self) -> bool:
         """Check if the Next pagination button exists and is enabled."""
@@ -1247,12 +1429,17 @@ class LinkedInBrowser:
                     if visible:
                         await self._ghost_click_locator(el)
                         clicked += 1
-                        await asyncio.sleep(human_delay_correlated(0.4, channel="profile_expand"))
+                        await asyncio.sleep(
+                            human_delay_correlated(
+                                config.LINKEDIN_PROFILE_EXPAND_CLICK_DWELL_SECONDS,
+                                channel="profile_expand",
+                            )
+                        )
             except Exception:
                 continue
 
         if clicked:
-            await self.page.wait_for_timeout(800)
+            await self.page.wait_for_timeout(int(config.LINKEDIN_PROFILE_EXPAND_SETTLE_SECONDS * 1000))
             print(f"    [profile] Expanded {clicked} collapsed section(s)")
 
     async def go_back_to_results(self) -> None:

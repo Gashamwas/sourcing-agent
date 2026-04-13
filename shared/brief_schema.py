@@ -13,6 +13,8 @@ from dataclasses import dataclass, field
 from typing import Optional
 from enum import Enum
 
+from shared.retrieval_design import RetrievalDesign
+
 
 class MarketDensity(str, Enum):
     """How talent-dense the search geography/domain is. Controls pagination depth."""
@@ -167,6 +169,7 @@ class Brief:
     # --- V4 Extensions ---
     post_save_modifiers: list[PostSaveModifier] = field(default_factory=list)
     additional_search_terms: list[str] = field(default_factory=list)
+    retrieval_design: RetrievalDesign = field(default_factory=RetrievalDesign)
 
     # --- Metadata ---
     version: str = "1.0"
@@ -513,6 +516,54 @@ If YES to all three: Override to INFERENTIAL_SAVE with confidence 0.45-0.50. The
             return ""
         return ", ".join(self.additional_search_terms)
 
+    def retrieval_design_block(self) -> str:
+        """Compact retrieval-design summary for strategy/adaptation prompts."""
+        if not self.retrieval_design or self.retrieval_design.is_empty():
+            return ""
+        lines = ["Layered retrieval design:"]
+        for family in self.retrieval_design.families[:8]:
+            lines.append(f"- {family.family_id}: {family.label}")
+            if family.objective:
+                lines.append(f"  Objective: {family.objective}")
+            if family.entry_signals:
+                lines.append(
+                    "  Entry signals: "
+                    + ", ".join(item.label for item in family.entry_signals[:4])
+                )
+            if family.capability_proxies:
+                lines.append(
+                    "  Capability proxies: "
+                    + ", ".join(item.label for item in family.capability_proxies[:4])
+                )
+            if family.reality_filters:
+                lines.append(
+                    "  Reality filters: "
+                    + ", ".join(item.label for item in family.reality_filters[:3])
+                )
+            if family.context_constraints:
+                lines.append(
+                    "  Context constraints: "
+                    + ", ".join(item.label for item in family.context_constraints[:3])
+                )
+            if family.anti_noise:
+                lines.append(
+                    "  Anti-noise: "
+                    + ", ".join(item.label for item in family.anti_noise[:3])
+                )
+            if family.hypothesis_ids:
+                lines.append(
+                    "  Edge-case overlays: "
+                    + ", ".join(family.hypothesis_ids[:3])
+                )
+        if self.retrieval_design.edge_case_hypotheses:
+            lines.append("Edge-case hypotheses:")
+            for hypothesis in self.retrieval_design.edge_case_hypotheses[:5]:
+                lines.append(
+                    f"- {hypothesis.hypothesis_id}: {hypothesis.hidden_cohort} "
+                    f"(why missed: {hypothesis.why_missed})"
+                )
+        return "\n".join(lines)
+
     def capability_area_stack_rank_guidance(self) -> str:
         """Dynamic stack-rank guidance based on actual number of capability areas."""
         n = len(self.capability_areas)
@@ -526,4 +577,3 @@ If YES to all three: Override to INFERENTIAL_SAVE with confidence 0.45-0.50. The
                 f"score toward the TOP of the confidence range for areas ranked 1-{top} and toward the BOTTOM for area #{n}. "
                 f"Example: ADJACENT to area #1 → 0.65-0.75; ADJACENT to area #{n} → 0.60-0.65. "
                 f"Never score below the range floor regardless of area rank.")
-

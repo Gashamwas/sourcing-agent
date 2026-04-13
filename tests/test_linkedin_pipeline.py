@@ -1080,6 +1080,476 @@ def test_process_string_runs_variant_experiment_before_commit():
         assert "Stopped after page 2." in (search_string.notes or "")
 
 
+def test_process_string_uses_real_scout_gate_for_large_noisy_pool():
+    """A 6k noisy scout page should trigger a bounded sibling experiment before commit."""
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+
+        search_string = SearchString(id=91, name="scout", boolean="foo", status="queued")
+        progress = Progress(brief_name="test", strings=[search_string], current_string_id=91, current_page=0)
+
+        no_results = MagicMock()
+        no_results.is_visible = AsyncMock(return_value=False)
+        locator = MagicMock()
+        locator.first = no_results
+
+        p.browser.page = MagicMock(url="https://www.linkedin.com/talent/search")
+        p.browser.page.locator.return_value = locator
+        p.browser.enter_search_string = AsyncMock()
+        p.browser.get_results_count_text = AsyncMock(side_effect=["6K+", "220"])
+        p.browser.get_results_count = AsyncMock(side_effect=[6000, 220])
+        p.browser.go_to_next_page = AsyncMock(return_value=False)
+        p._ensure_browser_healthy = AsyncMock()
+        p._record_runtime_event = MagicMock()
+
+        async def _review_page(*, search_string, page_num, result_count, page_report, all_candidates, string_stats, progress):
+            if search_string.boolean == "foo":
+                string_stats["candidates"] += 11
+                string_stats["facial_yes"] += 2
+                string_stats["facial_no"] += 10
+                all_candidates.extend(
+                    [
+                        {"title": "Applied Scientist", "company": "OpenAI", "facial": "yes", "save_reason": "strong"},
+                        {"title": "Research Engineer", "company": "Anthropic", "facial": "yes", "save_reason": "strong"},
+                        {"title": "Product Manager", "company": "BankCorp", "facial": "no"},
+                        {"title": "Program Manager", "company": "BigCo", "facial": "no"},
+                        {"title": "Engineering Manager", "company": "Enterprise Inc", "facial": "no"},
+                    ]
+                )
+                p._latest_page_preview_snippets = [
+                    _make_snippet(current_title="Applied Scientist", current_company="OpenAI"),
+                    _make_snippet(current_title="Research Engineer", current_company="Anthropic"),
+                    _make_snippet(current_title="Product Manager", current_company="BankCorp"),
+                    _make_snippet(current_title="Program Manager", current_company="BigCo"),
+                ]
+                return GlanceResult(action="reformulate", summary="manager-heavy noise dominates", confidence=0.92)
+
+            string_stats["candidates"] += 2
+            string_stats["saves"] += 1
+            all_candidates.extend(
+                [
+                    {"title": "Staff Applied Scientist", "company": "Anthropic", "final_decision": "save"},
+                    {"title": "Research Engineer", "company": "OpenAI", "facial": "yes"},
+                ]
+            )
+            p._latest_page_preview_snippets = [
+                _make_snippet(current_title="Staff Applied Scientist", current_company="Anthropic"),
+                _make_snippet(current_title="Research Engineer", current_company="OpenAI"),
+            ]
+            return None
+
+        p._review_page_sequentially = AsyncMock(side_effect=_review_page)
+        p._plan_variant_experiments = AsyncMock(
+            return_value=[
+                LinkedInSearchVariant(
+                    variant_id="precision-1",
+                    parent_variant_id="root",
+                    root_string_id=91,
+                    boolean="bar",
+                    variant_kind="precision",
+                    hypothesis="preserve frontier applied scientists and exclude manager-heavy noise",
+                    target_result_min=75,
+                    target_result_max=400,
+                )
+            ]
+        )
+
+        async def _apply_variant(*, search_string, experiment_state, variant):
+            experiment_state.activate_variant(variant.variant_id)
+            return SearchMutationResult(applied=True, result_count=220, result_count_text="220")
+
+        p._search_mutation_executor.apply_variant = AsyncMock(side_effect=_apply_variant)
+
+        with patch("linkedin.orchestrator.human_delay_correlated", return_value=0):
+            asyncio.run(p._process_string(search_string, progress))
+
+        assert p._plan_variant_experiments.await_count == 1
+        p._search_mutation_executor.apply_variant.assert_awaited_once()
+        assert search_string.boolean == "bar"
+        assert search_string.refinement_stack == ["foo"]
+        assert "Variant precision applied on page 1." in (search_string.notes or "")
+        assert "Committed precision variant on page 1." in (search_string.notes or "")
+        assess_events = [
+            call.kwargs["payload"]
+            for call in p._record_runtime_event.call_args_list
+            if call.kwargs.get("event_type") == "linkedin_search_assess"
+        ]
+        assert assess_events
+        assert assess_events[0]["real_signal"] is True
+        assert assess_events[0]["scout_gate_bucket"] == "precommit_real_signal_noisy_recovery"
+        assert assess_events[0]["noise_dominant"] is True
+
+
+def test_build_ordered_search_strings_uses_opening_micro_block():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p._execution_plan = ExecutionPlan(
+            strategy_rationale="test",
+            generated_strings=[
+                {"boolean": f"foo {idx}", "rationale": f"string {idx}"}
+                for idx in range(1, 9)
+            ],
+            coverage_gaps=[],
+        )
+
+        strings = p._build_ordered_search_strings()
+
+        assert [s.block for s in strings[:3]] == ["Compound Batch 1"] * 3
+        assert [s.block for s in strings[3:8]] == ["Compound Batch 2"] * 5
+
+
+def test_run_block_adaptation_uses_opening_checkpoint_mode():
+        with tempfile.TemporaryDirectory() as td:
+            p = _make_pipeline(td)
+            progress = Progress(
+                brief_name="test",
+                strings=[
+                    SearchString(id=1, name="one", boolean="foo", status="done", block="Compound Batch 1"),
+                    SearchString(id=2, name="two", boolean="bar", status="queued", block="Compound Batch 2"),
+                ],
+            )
+        block_strings = [
+            SearchString(
+                id=1,
+                name="one",
+                boolean="foo",
+                status="done",
+                block="Compound Batch 1",
+                facial_yes_count=1,
+                facial_no_count=3,
+                candidates_count=4,
+                duplicates_count=0,
+                saves=[],
+                result_count=900,
+                pages_reviewed=1,
+            )
+        ]
+        observed = {}
+
+        def fake_adapt(*args, **kwargs):
+            observed["checkpoint_mode"] = kwargs["checkpoint_mode"]
+            return AdaptationResponse()
+
+        asyncio.run(p._run_block_adaptation("Compound Batch 1", block_strings, progress, fake_adapt))
+
+        assert observed["checkpoint_mode"] == "opening_checkpoint"
+
+
+def test_run_block_adaptation_treats_adaptive_followup_as_normal_checkpoint():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        progress = Progress(
+            brief_name="test",
+            strings=[
+                SearchString(id=1, name="adaptive followup", boolean="foo", status="done", block="Compound Batch 1", string_type="Adaptive"),
+                SearchString(id=2, name="two", boolean="bar", status="queued", block="Compound Batch 2"),
+            ],
+        )
+        block_strings = [
+            SearchString(
+                id=1,
+                name="adaptive followup",
+                boolean="foo",
+                status="done",
+                block="Compound Batch 1",
+                string_type="Adaptive",
+                facial_yes_count=1,
+                facial_no_count=1,
+                candidates_count=2,
+                duplicates_count=0,
+                saves=["Ada"],
+                result_count=220,
+                pages_reviewed=1,
+                family_key="capital_markets_head_ai",
+                novelty_bucket="edge_case",
+                domain_lane="capital_markets",
+            )
+        ]
+        observed = {}
+
+        def fake_adapt(*args, **kwargs):
+            observed["checkpoint_mode"] = kwargs["checkpoint_mode"]
+            return AdaptationResponse()
+
+        asyncio.run(p._run_block_adaptation("Compound Batch 1", block_strings, progress, fake_adapt))
+
+        assert observed["checkpoint_mode"] == "normal_block_checkpoint"
+
+
+def test_run_block_adaptation_exploitation_bias_promotes_live_lane_and_demotes_dead_family():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+
+        winner = SearchString(
+            id=1,
+            name="winner",
+            boolean="winner",
+            status="done",
+            block="Compound Batch 1",
+            pages_reviewed=2,
+            saves=["Ada"],
+            facial_yes_count=2,
+            facial_no_count=3,
+            candidates_count=5,
+            family_key="market_infra_head_ai",
+            novelty_bucket="edge_case",
+            domain_lane="capital_markets",
+        )
+        loser = SearchString(
+            id=2,
+            name="loser",
+            boolean="loser",
+            status="done",
+            block="Compound Batch 1",
+            pages_reviewed=2,
+            facial_yes_count=0,
+            facial_no_count=8,
+            candidates_count=8,
+            family_key="dead_hidden_population",
+            novelty_bucket="edge_case",
+            domain_lane="insurance",
+        )
+
+        winner_state = p._experiment_state_for(winner)
+        winner_state.commit_variant("root")
+        winner_state.family_signal_total = 4
+        winner_state.family_saves_total = 1
+        winner_state.precommit_recovery_attempts_used = 1
+        winner_state.last_drift_refinement_summary = {"outcome": "rescued"}
+
+        loser_state = p._experiment_state_for(loser)
+        loser_state.commit_variant("root")
+        loser_state.family_signal_total = 0
+        loser_state.family_saves_total = 0
+
+        progress = Progress(
+            brief_name="test",
+            strings=[
+                winner,
+                loser,
+                SearchString(
+                    id=3,
+                    name="same family",
+                    boolean="family",
+                    block="Compound Batch 2",
+                    family_key="market_infra_head_ai",
+                    novelty_bucket="edge_case",
+                    domain_lane="capital_markets",
+                ),
+                SearchString(
+                    id=4,
+                    name="same lane",
+                    boolean="lane",
+                    block="Compound Batch 2",
+                    family_key="adjacent_market_infra",
+                    novelty_bucket="edge_case",
+                    domain_lane="capital_markets",
+                ),
+                SearchString(
+                    id=5,
+                    name="dead family",
+                    boolean="dead",
+                    block="Compound Batch 2",
+                    family_key="dead_hidden_population",
+                    novelty_bucket="edge_case",
+                    domain_lane="insurance",
+                ),
+                SearchString(
+                    id=6,
+                    name="neutral edge",
+                    boolean="neutral",
+                    block="Compound Batch 2",
+                    family_key="neutral_lane",
+                    novelty_bucket="edge_case",
+                    domain_lane="payments",
+                ),
+            ],
+        )
+
+        captured = {}
+
+        def fake_adapt(*args, **kwargs):
+            report = args[1]
+            captured["summary"] = report.search_intelligence_summary
+            captured["detail"] = report.string_details[0]["search_intelligence"]
+            return AdaptationResponse()
+
+        asyncio.run(p._run_block_adaptation("Compound Batch 1", [winner, loser], progress, fake_adapt))
+
+        queued_ids = [s.id for s in progress.strings if s.status == "queued"]
+        assert queued_ids == [3, 4, 6, 5]
+        assert captured["summary"]["proven_family_keys"] == ["market_infra_head_ai"]
+        assert captured["summary"]["dead_family_keys"] == ["dead_hidden_population"]
+        assert captured["detail"]["drift_rescue_summary"]["outcome"] == "rescued"
+
+
+def test_assess_string_state_stops_committed_variant_after_zero_signal_streak():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        search_string = SearchString(id=21, name="builders", boolean="foo")
+        state = p._experiment_state_for(search_string)
+        state.commit_variant("root")
+        state.committed_pages_reviewed = 2
+        state.committed_zero_signal_streak = 2
+
+        assessment = asyncio.run(
+            p._assess_string_state(
+                search_string=search_string,
+                experiment_state=state,
+                page_num=3,
+                result_count=3200,
+                string_stats={"facial_no": 4},
+                page_stats={"facial_no": 4},
+                page_insights=LinkedInPageInsights(
+                    page=3,
+                    result_count=3200,
+                    result_window="150-800",
+                    noise_anchors=["Product manager at BankCorp"],
+                    dominant_non_fit_patterns=["product-heavy profiles dominate"],
+                    glance_action="reformulate",
+                ),
+                remaining_queued_strings=4,
+            )
+        )
+
+        assert assessment["decision"] == "stop"
+        assert "zero-signal decay limit" in assessment["rationale"]
+
+
+def test_search_intelligence_aggregate_does_not_label_productive_family_as_dead():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        winner = SearchString(
+            id=1,
+            name="Winner",
+            boolean="winner",
+            status="done",
+            pages_reviewed=2,
+            saves=["Ada Lovelace"],
+            family_key="shared_family",
+            domain_lane="market_infra",
+        )
+        loser = SearchString(
+            id=2,
+            name="Loser",
+            boolean="loser",
+            status="done",
+            pages_reviewed=1,
+            family_key="shared_family",
+            domain_lane="market_infra",
+        )
+
+        winner_state = p._experiment_state_for(winner)
+        winner_state.family_signal_total = 3
+        loser_state = p._experiment_state_for(loser)
+        loser_state.family_signal_total = 0
+
+        summary = p._search_intelligence_aggregate([loser, winner])
+
+        assert summary["proven_family_keys"] == ["shared_family"]
+        assert summary["dead_family_keys"] == []
+
+
+def test_exploitation_overlay_never_demotes_proven_families_even_if_summary_is_contaminated():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        adaptation = AdaptationResponse()
+        remaining = [
+            SearchString(
+                id=10,
+                name="Hot family A",
+                boolean="foo",
+                family_key="shared_family",
+                domain_lane="market_infra",
+                novelty_bucket="canonical",
+            ),
+            SearchString(
+                id=11,
+                name="Hot family B",
+                boolean="bar",
+                family_key="shared_family",
+                domain_lane="market_infra",
+                novelty_bucket="canonical",
+            ),
+            SearchString(
+                id=12,
+                name="Hot family C",
+                boolean="baz",
+                family_key="shared_family",
+                domain_lane="market_infra",
+                novelty_bucket="canonical",
+            ),
+            SearchString(
+                id=13,
+                name="Actually dead family",
+                boolean="qux",
+                family_key="dead_family",
+                domain_lane="payments",
+                novelty_bucket="canonical",
+            ),
+        ]
+
+        overlay = p._apply_exploitation_bias_to_adaptation(
+            adaptation=adaptation,
+            remaining=remaining,
+            block_summary={
+                "proven_family_keys": ["shared_family"],
+                "proven_domain_lanes": ["market_infra"],
+                "dead_family_keys": ["shared_family", "dead_family"],
+            },
+            checkpoint_mode="normal_block_checkpoint",
+        )
+
+        assert overlay["promoted_string_ids"] == [10, 11, 12]
+        assert overlay["demoted_string_ids"] == [13]
+        assert all(
+            action["string_id"] != 10 or action["move_to"] != "last"
+            for action in adaptation.reorder
+        )
+        assert all(
+            action["string_id"] != 11 or action["move_to"] != "last"
+            for action in adaptation.reorder
+        )
+        assert all(
+            action["string_id"] != 12 or action["move_to"] != "last"
+            for action in adaptation.reorder
+        )
+
+
+def test_assess_string_state_stops_after_single_zero_signal_page_post_failed_drift():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        search_string = SearchString(id=22, name="builders", boolean="foo")
+        state = p._experiment_state_for(search_string)
+        state.commit_variant("root")
+        state.committed_pages_reviewed = 1
+        state.committed_zero_signal_streak = 1
+        state.last_drift_refinement_summary = {"outcome": "not_rescued"}
+
+        assessment = asyncio.run(
+            p._assess_string_state(
+                search_string=search_string,
+                experiment_state=state,
+                page_num=4,
+                result_count=3200,
+                string_stats={"facial_no": 3},
+                page_stats={"facial_no": 3},
+                page_insights=LinkedInPageInsights(
+                    page=4,
+                    result_count=3200,
+                    result_window="150-800",
+                    noise_anchors=["Program manager at BankCorp"],
+                    dominant_non_fit_patterns=["manager-heavy profiles dominate"],
+                    glance_action="reformulate",
+                ),
+                remaining_queued_strings=4,
+            )
+        )
+
+        assert assessment["decision"] == "stop"
+        assert "failed drift rescue" in assessment["rationale"]
+
+
 def test_assess_pagination_drift_prefers_recall_when_overfit_risk_is_high():
     with tempfile.TemporaryDirectory() as td:
         p = _make_pipeline(td)
@@ -1448,3 +1918,54 @@ def test_generate_run_report_failure_is_warning_only(capsys):
         assert "Report generation failed: boom" in captured.out
         assert not Path(td, "run-report.json").exists()
         assert not Path(td, "run-report.md").exists()
+
+
+def test_build_run_report_snapshot_includes_search_intelligence_summary():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.brief_obj.role_title = "Head of Applied AI Lab"
+        p.brief_obj.linkedin_project = "Head of Applied AI Lab"
+        p.brief_obj.linkedin_project_id = "1957683706"
+        p.brief_obj.raw = {"version": "2.1"}
+        p.stats["snippets_extracted"] = 12
+        p.stats["facial_yes"] = 3
+        p.stats["facial_no"] = 9
+        p.stats["saved"] = 1
+        p.stats["rejected"] = 2
+
+        winner = SearchString(
+            id=2,
+            name="Market infra lane",
+            boolean="market infra",
+            status="done",
+            result_count=214,
+            pages_reviewed=3,
+            saves=["Ada"],
+            facial_yes_count=3,
+            facial_no_count=4,
+            candidates_count=7,
+            family_key="market_infra_head_ai",
+            novelty_bucket="edge_case",
+            domain_lane="capital_markets",
+        )
+        state = p._experiment_state_for(winner)
+        state.commit_variant("root")
+        state.family_signal_total = 5
+        state.family_saves_total = 1
+        state.precommit_recovery_attempts_used = 1
+        state.drift_attempt_count = 1
+        state.last_drift_refinement_summary = {"outcome": "rescued", "decision": "refine_committed"}
+
+        progress = Progress(brief_name="head-ai-lab", strings=[winner])
+
+        snapshot = p._build_run_report_snapshot(progress)
+
+        assert snapshot["metrics_summary"]["strings_with_precommit_experiments"] == 1
+        assert snapshot["metrics_summary"]["strings_with_drift_rescue_attempts"] == 1
+        assert snapshot["metrics_summary"]["strings_rescued_by_drift"] == 1
+        assert snapshot["metrics_summary"]["proven_family_keys"] == ["market_infra_head_ai"]
+        assert snapshot["string_performance"][0]["search_intelligence"]["family_signal_total"] == 5
+        assert (
+            snapshot["string_performance"][0]["search_intelligence"]["drift_rescue_summary"]["outcome"]
+            == "rescued"
+        )

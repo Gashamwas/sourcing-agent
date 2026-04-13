@@ -120,6 +120,13 @@ class LinkedInSearchMutationExecutor:
                 "target_result_min": variant.target_result_min,
                 "target_result_max": variant.target_result_max,
                 "mutation_kind": mutation_kind,
+                "input_mode": pipeline.input_mode,
+                "typing_transport": None,
+                "typing_duration_ms": None,
+                "typo_count": None,
+                "used_correction": None,
+                "fallback_char_count": None,
+                "results_wait_ms": None,
             },
         )
         log_event(
@@ -130,6 +137,7 @@ class LinkedInSearchMutationExecutor:
             variant_kind=variant.variant_kind,
             hypothesis=variant.hypothesis,
             mutation_kind=mutation_kind,
+            input_mode=pipeline.input_mode,
         )
 
         try:
@@ -140,9 +148,9 @@ class LinkedInSearchMutationExecutor:
                     summary=mutation_summary,
                 )
             await pipeline.browser.go_back_to_results()
-            await asyncio.sleep(human_delay_correlated(0.8, channel="search_mutation"))
-            await pipeline.browser.enter_search_string(variant.boolean)
-            await asyncio.sleep(human_delay_correlated(random.uniform(0.9, 1.6), channel="search_mutation"))
+            await asyncio.sleep(human_delay_correlated(0.45, channel="search_mutation"))
+            entry_result = await pipeline.browser.enter_search_string(variant.boolean)
+            await asyncio.sleep(human_delay_correlated(random.uniform(0.35, 0.75), channel="search_mutation"))
             result_count_text = await pipeline.browser.get_results_count_text()
             result_count = await pipeline.browser.get_results_count()
             top_card_snapshot = None
@@ -155,6 +163,8 @@ class LinkedInSearchMutationExecutor:
                 experiment_state.rollback_pending_drift()
             raise
 
+        typing_result = getattr(entry_result, "typing_result", None)
+        results_wait_ms = getattr(entry_result, "results_wait_ms", 0)
         pipeline._search_mutation_budget_used += 1
         experiment_state.activate_variant(variant.variant_id)
 
@@ -165,6 +175,13 @@ class LinkedInSearchMutationExecutor:
             "result_count_text": result_count_text,
             "top_card_snapshot": top_card_snapshot or {},
             "mutation_kind": mutation_kind,
+            "input_mode": pipeline.input_mode,
+            "typing_transport": getattr(typing_result, "transport", None),
+            "typing_duration_ms": getattr(typing_result, "duration_ms", None),
+            "typo_count": getattr(typing_result, "typo_count", None),
+            "used_correction": getattr(typing_result, "used_correction", None),
+            "fallback_char_count": getattr(typing_result, "fallback_char_count", None),
+            "results_wait_ms": results_wait_ms,
         }
         self._record_event(
             search_string=search_string,
@@ -179,6 +196,13 @@ class LinkedInSearchMutationExecutor:
             result_count=result_count,
             result_count_text=result_count_text,
             mutation_kind=mutation_kind,
+            input_mode=pipeline.input_mode,
+            typing_transport=getattr(typing_result, "transport", None),
+            typing_duration_ms=getattr(typing_result, "duration_ms", None),
+            typo_count=getattr(typing_result, "typo_count", None),
+            used_correction=getattr(typing_result, "used_correction", None),
+            fallback_char_count=getattr(typing_result, "fallback_char_count", None),
+            results_wait_ms=results_wait_ms,
         )
         return SearchMutationResult(
             applied=True,

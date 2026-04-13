@@ -15,9 +15,10 @@ import signal
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 from shared.human_timing import human_delay, human_delay_correlated
+from shared.output_paths import resolve_linkedin_state_dir, source_archive_root
 
 from shared.schemas import (
     CandidateSnippet, CandidateProfileSummary, OpusDecision,
@@ -142,13 +143,19 @@ class Pipeline:
         test_mode: bool = False,
         input_mode: str = "concurrent",
     ):
+        self.brief_path = str(brief_path)
         self.brief_obj = load_brief(brief_path)
         self.search_config = (
             read_json(search_config_path)
             if search_config_path and Path(search_config_path).exists()
             else {"strings": []}
         )
-        self.output_dir = Path(output_dir) if output_dir else config.OUTPUT_DIR
+        self.state_dir = resolve_linkedin_state_dir(
+            brief_path=self.brief_path,
+            brief=self.brief_obj,
+            state_dir=output_dir,
+        )
+        self.output_dir = self.state_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.test_mode = test_mode
         self.input_mode = input_mode
@@ -307,24 +314,35 @@ class Pipeline:
 
     def _hydrate_search_string_metadata(self, search_string: SearchString) -> None:
         """Backfill family metadata for older progress files or unlabeled strings."""
+        retrieval_recipe = (
+            search_string.retrieval_recipe
+            if isinstance(search_string.retrieval_recipe, dict)
+            else {}
+        )
         if not search_string.family_key:
             search_string.family_key = normalize_family_key(
-                None,
+                retrieval_recipe.get("family_id"),
                 search_string.boolean,
                 search_string.name,
             )
         if not search_string.novelty_bucket:
             search_string.novelty_bucket = normalize_novelty_bucket(
-                None,
+                "edge_case" if search_string.retrieval_hypothesis_ids or retrieval_recipe.get("applied_hypothesis_ids") else None,
                 search_string.boolean,
                 search_string.name,
             )
         if not search_string.domain_lane:
             search_string.domain_lane = infer_domain_lane(
-                None,
+                (retrieval_recipe.get("target_markets") or [None])[0],
                 search_string.boolean,
                 search_string.name,
             )
+        if not search_string.retrieval_hypothesis_ids and retrieval_recipe:
+            search_string.retrieval_hypothesis_ids = [
+                str(hypothesis_id).strip()
+                for hypothesis_id in retrieval_recipe.get("applied_hypothesis_ids", [])
+                if str(hypothesis_id).strip()
+            ]
 
     def _checkpoint_progress(
         self,
@@ -608,6 +626,7 @@ class Pipeline:
                     status=run_status,
                     stop_reason=stop_reason,
                 )
+                self._finalize_run_snapshot()
             if lock_acquired:
                 self._runtime_lock.release()
 
@@ -1114,6 +1133,7 @@ class Pipeline:
                     status=run_status,
                     stop_reason=stop_reason,
                 )
+                self._finalize_run_snapshot()
             if lock_acquired:
                 self._runtime_lock.release()
 
@@ -1333,6 +1353,9 @@ class Pipeline:
                 remaining_queued_strings=self._remaining_queued_strings(progress, current_string_id=search_string.id),
             )
             decision = assessment["decision"]
+            if experiment_state.mode == "recon":
+                scout_bucket = assessment.get("scout_gate_bucket") or "recon"
+                print(f"  [adapt] Scout gate ({scout_bucket}): {assessment['rationale']}")
 
             if decision in {"refine_committed", "spawn_recall_sibling"}:
                 drift_variant, drift_summary = await self._plan_drift_refinement(
@@ -1369,6 +1392,17 @@ class Pipeline:
                         string_stats = self._fresh_string_stats()
                         self._checkpoint_progress(progress, search_string=search_string, page_num=1)
                         continue
+                decision = "continue"
+
+            if decision == "resume_committed":
+                experiment_state.resume_committed_after_failed_drift()
+                current_boolean = experiment_state.current_boolean()
+                search_string.result_count = experiment_state.active_variant.result_count or result_count
+                experiment_state.apply_shadow(search_string)
+                search_string.notes = (
+                    (search_string.notes or "")
+                    + f" Drift rescue failed on page {page_num}; resumed committed variant."
+                )
                 decision = "continue"
 
             if decision == "experiment":
@@ -2040,17 +2074,6 @@ class Pipeline:
 
         return glance_result
 
-    def _get_min_pages(self, result_count: int) -> int:
-        """Get minimum pages to review before allowing stop/abandon."""
-        overrides = {}
-        if self._execution_plan and self._execution_plan.architecture:
-            overrides = config.ARCHITECTURE_OVERRIDES.get(self._execution_plan.architecture, {})
-        thresholds = overrides.get("min_pages_by_result_count", config.MIN_PAGES_BY_RESULT_COUNT)
-        for threshold, min_pages in thresholds:
-            if result_count >= threshold:
-                return min_pages
-        return 1
-
     @staticmethod
     def _fresh_string_stats() -> dict[str, int]:
         return {
@@ -2140,6 +2163,155 @@ class Pipeline:
             glance_summary=glance_result.summary if glance_result else "",
         )
 
+    @staticmethod
+    def _scout_metrics(
+        *,
+        page_stats: dict[str, int],
+        page_insights: LinkedInPageInsights,
+    ) -> dict[str, object]:
+        saves = int(page_stats.get("saves", 0))
+        facial_yes = int(page_stats.get("facial_yes", 0))
+        rejects = int(page_stats.get("rejects", 0))
+        facial_no = int(page_stats.get("facial_no", 0))
+        page_signal = saves + facial_yes + rejects
+        noise_dominant = any(
+            (
+                page_insights.glance_action == "reformulate",
+                bool(page_insights.dominant_non_fit_patterns),
+                facial_no >= max(8, page_signal * 2),
+                len(page_insights.noise_anchors) >= len(page_insights.signal_anchors) + 2,
+            )
+        )
+        real_signal = any(
+            (
+                saves >= 1,
+                facial_yes >= 2,
+                rejects >= 2,
+            )
+        )
+        weak_but_real_signal = page_signal > 0 and not real_signal
+        return {
+            "page_signal": page_signal,
+            "saves": saves,
+            "facial_yes": facial_yes,
+            "rejects": rejects,
+            "facial_no": facial_no,
+            "noise_dominant": noise_dominant,
+            "real_signal": real_signal,
+            "strong_scout_signal": real_signal,
+            "weak_but_real_signal": weak_but_real_signal,
+        }
+
+    @staticmethod
+    def _scout_quality_for_recon(
+        *,
+        result_count: int,
+        scout_metrics: dict[str, object],
+        precommit_recovery_attempts_used: int,
+    ) -> tuple[str, str, str]:
+        page_signal = int(scout_metrics["page_signal"])
+        noise_dominant = bool(scout_metrics["noise_dominant"])
+        real_signal = bool(scout_metrics["real_signal"])
+        weak_but_real_signal = bool(scout_metrics["weak_but_real_signal"])
+        recovery_budget_remaining = max(
+            0,
+            config.PRECOMMIT_MAX_RECOVERY_ATTEMPTS - precommit_recovery_attempts_used,
+        )
+
+        if result_count < 500:
+            if page_signal == 0 and noise_dominant:
+                return (
+                    "stop",
+                    "small pool is already dead/noisy on page 1, so it should stop rather than spend rescue budget",
+                    "small_pool_dead_stop",
+                )
+            return (
+                "commit",
+                "result pool is already small enough that direct pagination is cheaper than pre-commit rescue branching",
+                "small_pool_direct",
+            )
+        if result_count < 5000:
+            if page_signal > 0:
+                return (
+                    "commit",
+                    "mid-sized pool already shows enough directional scout signal to paginate without pre-commit rescue branching",
+                    "mid_pool_signal_commit",
+                )
+            if noise_dominant and recovery_budget_remaining > 0:
+                return (
+                    "experiment",
+                    "mid-sized pool is dead/noisy on the scout page, so one bounded rescue attempt is justified before stop",
+                    "mid_pool_dead_noisy_recovery",
+                )
+            return (
+                "stop",
+                "mid-sized pool is not surfacing signal and lacks a coherent scout-time rescue path, so stop cleanly",
+                "mid_pool_unsalvageable_stop",
+            )
+
+        if page_signal == 0 and noise_dominant:
+            if recovery_budget_remaining > 0:
+                return (
+                    "experiment",
+                    "large/noisy scout page is dead, so spend a bounded pre-commit rescue attempt before abandoning the family",
+                    "precommit_dead_noisy_recovery",
+                )
+            return (
+                "stop",
+                "pre-commit rescue budget is exhausted and the large pool is still dead/noisy, so stop instead of paying more pagination tax",
+                "precommit_recovery_exhausted_stop",
+            )
+        if real_signal and noise_dominant:
+            if recovery_budget_remaining > 0:
+                return (
+                    "experiment",
+                    "large pool shows real signal, but dominant noise means it should get one bounded rescue attempt before direct pagination",
+                    "precommit_real_signal_noisy_recovery",
+                )
+            return (
+                "commit",
+                "large pool still shows real signal and rescue budget is exhausted, so fall back to direct pagination rather than stopping a live lane",
+                "precommit_real_signal_budget_exhausted_commit",
+            )
+        if real_signal:
+            return (
+                "commit",
+                "root scout already shows real signal without dominant noise, so it has earned direct pagination",
+                "root_real_signal_commit",
+            )
+        if weak_but_real_signal:
+            if recovery_budget_remaining > 0:
+                return (
+                    "experiment",
+                    "scout page has only weak signal, so it should survive a bounded rescue attempt before the root query earns pagination",
+                    "precommit_weak_signal_recovery",
+                )
+            return (
+                "stop",
+                "pre-commit rescue budget is exhausted and the large pool still only shows weak scout signal, so stop instead of paying more pagination tax",
+                "precommit_recovery_exhausted_stop",
+            )
+        return (
+            "stop",
+            "large pool is not surfacing signal and the scout did not produce a coherent rescue path, so stop cleanly",
+            "precommit_unsalvageable_stop",
+        )
+
+    @staticmethod
+    def _variant_has_earned_commit(variant: LinkedInSearchVariant) -> bool:
+        real_signal = (
+            variant.saves > 0
+            or variant.facial_yes >= 2
+            or variant.rejects >= 2
+        )
+        if real_signal:
+            return True
+        return (
+            variant.within_target_window()
+            and variant.score() >= 6.0
+            and (variant.facial_yes > 0 or variant.rejects > 0)
+        )
+
     async def _assess_string_state(
         self,
         *,
@@ -2151,46 +2323,45 @@ class Pipeline:
         page_stats: dict[str, int],
         page_insights: LinkedInPageInsights,
         remaining_queued_strings: int,
-    ) -> dict[str, str]:
-        page_signal = int(page_stats.get("saves", 0)) + int(page_stats.get("facial_yes", 0)) + int(
-            page_stats.get("rejects", 0)
-        )
+    ) -> dict[str, object]:
+        scout_metrics = self._scout_metrics(page_stats=page_stats, page_insights=page_insights)
+        page_signal = int(scout_metrics["page_signal"])
         active_variant = experiment_state.active_variant
-        min_pages = self._get_min_pages(result_count)
+        scout_gate_bucket = ""
+        real_signal = bool(scout_metrics["real_signal"])
+        post_drift_stop_limit = (
+            config.POST_DRIFT_ZERO_SIGNAL_STOP_STREAK
+            if experiment_state.last_drift_refinement_summary.get("outcome") == "not_rescued"
+            else config.COMMITTED_ZERO_SIGNAL_STOP_STREAK
+        )
 
         if experiment_state.mode == "recon":
-            if result_count < 500 or page_signal > 0:
-                decision = "commit"
-                rationale = "page 1 already shows signal or the pool is small enough to paginate directly"
-            elif page_insights.glance_action == "reformulate" or result_count >= 1500:
-                decision = "experiment"
-                rationale = "large/noisy pool should be explored through sibling keyword variants before deeper pagination"
-            else:
-                decision = "commit"
-                rationale = "result window is manageable enough to paginate without variant branching"
+            decision, rationale, scout_gate_bucket = self._scout_quality_for_recon(
+                result_count=result_count,
+                scout_metrics=scout_metrics,
+                precommit_recovery_attempts_used=experiment_state.precommit_recovery_attempts_used,
+            )
         elif experiment_state.mode == "experiment":
             best_variant = experiment_state.best_variant()
-            if active_variant.saves > 0 or active_variant.facial_yes > 0 or active_variant.within_target_window():
+            variant_earned_commit = self._variant_has_earned_commit(active_variant)
+            best_variant_earned_commit = self._variant_has_earned_commit(best_variant)
+            if variant_earned_commit:
                 decision = "commit"
-                rationale = "active experiment variant is surfacing signal or landed in the desired result window"
+                rationale = "active rescue variant surfaced enough real signal density to earn commit"
             elif (
                 experiment_state.executed_sibling_count < config.SEARCH_EXPERIMENT_MAX_EXECUTED_SIBLINGS
                 and experiment_state.next_planned_variant() is not None
             ):
                 decision = "experiment"
-                rationale = "current variant overfit or stayed noisy, but another planned sibling is still worth testing"
-            elif best_variant.variant_id != "root" and (
-                best_variant.saves > 0
-                or best_variant.facial_yes > 0
-                or best_variant.within_target_window()
-            ):
+                rationale = "current rescue variant did not earn commit, but another planned sibling is still available"
+            elif best_variant.variant_id != "root" and best_variant_earned_commit:
                 decision = "commit"
-                rationale = "best explored sibling looks better than the root family and should be promoted"
+                rationale = "best explored sibling earned commit and should be promoted over the root path"
             else:
                 decision = "stop"
-                rationale = "experiment siblings did not surface enough signal to justify further pagination"
+                rationale = "pre-commit rescue attempts are exhausted and no explored sibling earned commit"
         elif experiment_state.mode == "drift":
-            if active_variant.saves > 0 or active_variant.facial_yes > 0 or active_variant.within_target_window():
+            if self._variant_has_earned_commit(active_variant):
                 decision = "commit"
                 rationale = "drift rescue recovered a higher-signal slice and should become the new committed path"
                 experiment_state.last_drift_refinement_summary = {
@@ -2199,8 +2370,8 @@ class Pipeline:
                     "reviewed_page": page_num,
                 }
             else:
-                decision = "stop"
-                rationale = "drift rescue did not recover signal and the family should stop cleanly instead of churning rewrites"
+                decision = "resume_committed"
+                rationale = "drift rescue did not recover signal; resume the committed path and stop after one more zero-signal page unless signal returns"
                 experiment_state.last_drift_refinement_summary = {
                     **experiment_state.last_drift_refinement_summary,
                     "outcome": "not_rescued",
@@ -2226,9 +2397,16 @@ class Pipeline:
                     "result_count": result_count,
                     "outcome": "pending",
                 }
-            elif page_num >= min_pages and page_signal == 0:
+            elif (
+                experiment_state.committed_pages_reviewed >= 1
+                and experiment_state.committed_zero_signal_streak >= post_drift_stop_limit
+                and page_signal == 0
+            ):
                 decision = "stop"
-                rationale = "minimum review depth has been met and the latest page produced no usable signal"
+                if post_drift_stop_limit == config.POST_DRIFT_ZERO_SIGNAL_STOP_STREAK:
+                    rationale = "committed path stayed empty after a failed drift rescue, so stop after the first subsequent zero-signal page"
+                else:
+                    rationale = "committed path has hit the zero-signal decay limit, so stop instead of paying more pagination tax"
             else:
                 decision = "continue"
                 rationale = "keep paginating the committed variant"
@@ -2241,6 +2419,18 @@ class Pipeline:
             "mode": experiment_state.mode,
             "active_variant_id": experiment_state.active_variant_id,
             "remaining_queued_strings": remaining_queued_strings,
+            "page_signal": scout_metrics["page_signal"],
+            "real_signal": real_signal,
+            "saves": scout_metrics["saves"],
+            "facial_yes": scout_metrics["facial_yes"],
+            "rejects": scout_metrics["rejects"],
+            "facial_no": scout_metrics["facial_no"],
+            "noise_dominant": scout_metrics["noise_dominant"],
+            "strong_scout_signal": scout_metrics["strong_scout_signal"],
+            "scout_gate_bucket": scout_gate_bucket,
+            "precommit_recovery_attempts_used": experiment_state.precommit_recovery_attempts_used,
+            "committed_pages_reviewed": experiment_state.committed_pages_reviewed,
+            "committed_zero_signal_streak": experiment_state.committed_zero_signal_streak,
         }
         if decision == "commit" and page_signal > 0:
             payload["bootstrap_early_snapshot"] = True
@@ -3006,6 +3196,26 @@ Medium noise tolerance. Facial NO rates between {expected_no_low:.0%} and {expec
             expected_no_high = 0.75
 
         triage_note = f"- IMPORTANT: Facial triage is intentionally strict — ambiguity defaults to NO. A high facial NO rate ({expected_no_low:.0%}-{expected_no_high:.0%}) is EXPECTED and normal for this brief. Only consider a string unproductive when SAVES dry up, not when facial NO is high. High facial NO + occasional saves = healthy string under strict triage."
+        market_intel_advisory_context = ""
+        try:
+            from market_intelligence.live_advisory import (
+                record_page_checkpoint_and_get_context,
+            )
+
+            market_intel_advisory_context = record_page_checkpoint_and_get_context(
+                brief_path=self.brief_path,
+                state_dir=self.state_dir,
+                brief_id=self.brief_obj.linkedin_project_id
+                or self.brief_obj.id
+                or Path(self.brief_path).stem,
+                search_string_family_key=search_string.family_key or search_string.name,
+                string_stats=string_stats,
+                recent_candidates=all_candidates[-5:],
+                glance_summary=glance_summary,
+                architecture=architecture,
+            )
+        except Exception:
+            market_intel_advisory_context = ""
 
         # Phase-specific action menu
         if is_scout:
@@ -3061,6 +3271,7 @@ Judge string productivity by total saves and facial YES rates across ALL archety
 
 ## Current Phase: {"SCOUT (page 1 exploration)" if is_scout else "PAGINATE (deep pagination)"}
 {self._format_arch_context(architecture)}
+{market_intel_advisory_context}
 {actions_section}
 
 ## LinkedIn Boolean Rules (MANDATORY when writing refined Booleans)
@@ -3442,7 +3653,12 @@ Provide a narrowed Boolean."""
             self._in_flight_urls.discard(snippet.profile_url)
             try:
                 await self.browser.go_back_to_results()
-                await asyncio.sleep(human_delay_correlated(0.8, channel="panel_close"))
+                await asyncio.sleep(
+                    human_delay_correlated(
+                        config.LINKEDIN_PANEL_CLOSE_SETTLE_SECONDS,
+                        channel="panel_close",
+                    )
+                )
             except Exception:
                 final._panel_stuck = True
             return final
@@ -3500,13 +3716,27 @@ Provide a narrowed Boolean."""
             if page_report:
                 page_report.add_skipped_opened(snippet, final)
             # Quick exit — saw enough, moving on
-            reject_dwell = max(0.2, min(2.0, human_delay_correlated(0.5, channel="reject_close")))
+            reject_dwell = max(
+                config.LINKEDIN_REJECT_CLOSE_MIN_SECONDS,
+                min(
+                    config.LINKEDIN_REJECT_CLOSE_MAX_SECONDS,
+                    human_delay_correlated(
+                        config.LINKEDIN_REJECT_CLOSE_BASE_SECONDS,
+                        channel="reject_close",
+                    ),
+                ),
+            )
             await asyncio.sleep(reject_dwell)
             print(f"    [profile-read] REJECT verdict → closing in {reject_dwell:.1f}s")
 
         try:
             await self.browser.go_back_to_results()
-            await asyncio.sleep(human_delay_correlated(0.8, channel="panel_close"))
+            await asyncio.sleep(
+                human_delay_correlated(
+                    config.LINKEDIN_PANEL_CLOSE_SETTLE_SECONDS,
+                    channel="panel_close",
+                )
+            )
         except Exception as e:
             if _is_browser_disconnect_error(e):
                 print(f"    [ERROR] Browser session dropped while closing profile: {e}")
@@ -3528,11 +3758,12 @@ Provide a narrowed Boolean."""
 
         Kit strings are vocabulary — they NEVER appear in the execution queue.
         Only generated compounds and coverage gap strings are queued.
-        Strings are assigned to blocks of ~5 so block-level adaptation triggers mid-run.
+        The opening block is intentionally smaller so the run can exploit earlier.
         """
         next_id = 1
         ordered: list[SearchString] = []
-        batch_size = 5
+        opening_block_size = max(1, config.OPENING_BLOCK_SIZE)
+        later_block_size = 5
 
         if not self._execution_plan:
             return ordered
@@ -3544,7 +3775,10 @@ Provide a narrowed Boolean."""
             if not boolean:
                 continue
             compound_idx += 1
-            batch_num = (compound_idx - 1) // batch_size + 1
+            if compound_idx <= opening_block_size:
+                batch_num = 1
+            else:
+                batch_num = 2 + ((compound_idx - opening_block_size - 1) // later_block_size)
             rationale = gs.get("rationale", "")
             ss = SearchString(
                 id=next_id,
@@ -3556,6 +3790,8 @@ Provide a narrowed Boolean."""
                 family_key=gs.get("family_key", ""),
                 novelty_bucket=gs.get("novelty_bucket", ""),
                 domain_lane=gs.get("domain_lane", ""),
+                retrieval_recipe=gs.get("retrieval_recipe", {}),
+                retrieval_hypothesis_ids=list(gs.get("retrieval_hypothesis_ids", [])),
             )
             ordered.append(ss)
             next_id += 1
@@ -3578,6 +3814,8 @@ Provide a narrowed Boolean."""
                 family_key=gap.get("family_key", ""),
                 novelty_bucket=gap.get("novelty_bucket", ""),
                 domain_lane=gap.get("domain_lane", ""),
+                retrieval_recipe=gap.get("retrieval_recipe", {}),
+                retrieval_hypothesis_ids=list(gap.get("retrieval_hypothesis_ids", [])),
             )
             ordered.append(ss)
             next_id += 1
@@ -3665,6 +3903,394 @@ Provide a narrowed Boolean."""
 
         return snapshots
 
+    @staticmethod
+    def _checkpoint_mode_for_block(
+        block_name: str,
+        block_strings: list[SearchString] | None = None,
+    ) -> str:
+        if block_name != "Compound Batch 1":
+            return "normal_block_checkpoint"
+        if block_strings and any(
+            (search_string.string_type or "").lower() == "adaptive"
+            for search_string in block_strings
+        ):
+            return "normal_block_checkpoint"
+        return "opening_checkpoint"
+
+    def _search_intelligence_detail_for_string(self, search_string: SearchString) -> dict[str, Any]:
+        state = self._experiment_states.get(search_string.id)
+        if state is None:
+            return {}
+
+        summary = state.metrics_summary()
+        best_variant = state.best_variant()
+        return {
+            "mode": summary.get("mode", ""),
+            "mutations_used": int(summary.get("mutations_used", 0) or 0),
+            "precommit_recovery_attempts_used": int(
+                summary.get("precommit_recovery_attempts_used", 0) or 0
+            ),
+            "drift_attempt_count": int(summary.get("drift_attempt_count", 0) or 0),
+            "family_pages_reviewed_total": int(summary.get("family_pages_reviewed_total", 0) or 0),
+            "family_signal_total": int(summary.get("family_signal_total", 0) or 0),
+            "family_saves_total": int(summary.get("family_saves_total", 0) or 0),
+            "committed_variant_id": summary.get("committed_variant_id"),
+            "active_variant_id": summary.get("active_variant_id"),
+            "family_outcome_summary": dict(summary.get("family_outcome_summary", {})),
+            "drift_rescue_summary": dict(summary.get("drift_rescue_summary", {})),
+            "best_variant": {
+                "variant_id": best_variant.variant_id,
+                "variant_kind": best_variant.variant_kind,
+                "score": round(best_variant.score(), 2),
+                "result_count": best_variant.result_count,
+                "within_target_window": best_variant.within_target_window(),
+            },
+        }
+
+    def _search_intelligence_aggregate(
+        self,
+        strings: list[SearchString],
+    ) -> dict[str, Any]:
+        family_scores: dict[str, float] = {}
+        lane_scores: dict[str, float] = {}
+        strings_with_precommit_experiments: list[int] = []
+        strings_with_drift_rescue_attempts: list[int] = []
+        strings_rescued_by_drift: list[int] = []
+        productive_string_ids: list[int] = []
+        dead_family_candidates: list[str] = []
+
+        for search_string in strings:
+            detail = self._search_intelligence_detail_for_string(search_string)
+            if not detail:
+                continue
+
+            precommit_recovery_attempts_used = int(
+                detail.get("precommit_recovery_attempts_used", 0) or 0
+            )
+            if precommit_recovery_attempts_used > 0:
+                strings_with_precommit_experiments.append(search_string.id)
+
+            drift_attempt_count = int(detail.get("drift_attempt_count", 0) or 0)
+            if drift_attempt_count > 0:
+                strings_with_drift_rescue_attempts.append(search_string.id)
+
+            drift_summary = detail.get("drift_rescue_summary", {}) or {}
+            rescued = drift_summary.get("outcome") in {"rescued", "signal_returned"}
+            if rescued:
+                strings_rescued_by_drift.append(search_string.id)
+
+            family_signal_total = int(detail.get("family_signal_total", 0) or 0)
+            proven = bool(search_string.saves) or (rescued and family_signal_total > 0)
+            if proven:
+                productive_string_ids.append(search_string.id)
+                score = float(len(search_string.saves) * 20 + family_signal_total * 2 + (6 if rescued else 0))
+                if search_string.family_key:
+                    family_scores[search_string.family_key] = max(
+                        family_scores.get(search_string.family_key, 0.0),
+                        score,
+                    )
+                if search_string.domain_lane:
+                    lane_scores[search_string.domain_lane] = max(
+                        lane_scores.get(search_string.domain_lane, 0.0),
+                        score,
+                    )
+            elif (
+                not search_string.saves
+                and family_signal_total == 0
+                and search_string.pages_reviewed >= 1
+                and search_string.family_key
+                and search_string.family_key not in dead_family_candidates
+            ):
+                dead_family_candidates.append(search_string.family_key)
+
+        proven_family_keys = [
+            family_key
+            for family_key, _score in sorted(
+                family_scores.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:3]
+        ]
+        proven_domain_lanes = [
+            lane
+            for lane, _score in sorted(
+                lane_scores.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:3]
+        ]
+        dead_family_keys = [
+            family_key
+            for family_key in dead_family_candidates
+            if family_key not in family_scores
+        ]
+
+        return {
+            "strings_with_precommit_experiments": strings_with_precommit_experiments,
+            "strings_with_drift_rescue_attempts": strings_with_drift_rescue_attempts,
+            "strings_rescued_by_drift": strings_rescued_by_drift,
+            "productive_string_ids": productive_string_ids,
+            "proven_family_keys": proven_family_keys,
+            "proven_domain_lanes": proven_domain_lanes,
+            "dead_family_keys": dead_family_keys,
+        }
+
+    @staticmethod
+    def _reprioritize_new_strings_for_exploitation(
+        new_strings: list[dict[str, Any]],
+        *,
+        proven_family_keys: set[str],
+        proven_domain_lanes: set[str],
+    ) -> list[dict[str, Any]]:
+        annotated: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
+        for index, item in enumerate(new_strings):
+            family_match = item.get("family_key", "") in proven_family_keys
+            lane_match = item.get("domain_lane", "") in proven_domain_lanes
+            novelty_bucket = item.get("novelty_bucket", "")
+            priority = (
+                0 if family_match else 1 if lane_match else 2,
+                0 if novelty_bucket == "edge_case" else 1,
+                index,
+            )
+            annotated.append((priority, item))
+        annotated.sort(key=lambda pair: pair[0])
+        return [item for _, item in annotated]
+
+    @staticmethod
+    def _merge_reorder_actions(
+        base_actions: list[dict[str, Any]],
+        overlay_actions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        merged: dict[int, dict[str, Any]] = {}
+        sequence = 0
+
+        for item in list(base_actions) + list(overlay_actions):
+            try:
+                string_id = int(item.get("string_id"))
+            except Exception:
+                continue
+            candidate = dict(item)
+            candidate["_priority"] = int(candidate.get("_priority", 0) or 0)
+            candidate["_sequence"] = sequence
+            sequence += 1
+            existing = merged.get(string_id)
+            if existing is None:
+                merged[string_id] = candidate
+                continue
+
+            existing_priority = int(existing.get("_priority", 0) or 0)
+            candidate_priority = int(candidate.get("_priority", 0) or 0)
+            if candidate_priority > existing_priority:
+                merged[string_id] = candidate
+                continue
+            if (
+                candidate_priority == existing_priority
+                and existing.get("move_to") != "next"
+                and candidate.get("move_to") == "next"
+            ):
+                merged[string_id] = candidate
+
+        next_actions = sorted(
+            (
+                item
+                for item in merged.values()
+                if item.get("move_to") == "next"
+            ),
+            key=lambda item: (-int(item.get("_priority", 0) or 0), int(item.get("_sequence", 0) or 0)),
+        )
+        last_actions = sorted(
+            (
+                item
+                for item in merged.values()
+                if item.get("move_to") != "next"
+            ),
+            key=lambda item: (-int(item.get("_priority", 0) or 0), int(item.get("_sequence", 0) or 0)),
+        )
+
+        ordered = next_actions + last_actions
+        for item in ordered:
+            item.pop("_priority", None)
+            item.pop("_sequence", None)
+        return ordered
+
+    def _apply_exploitation_bias_to_adaptation(
+        self,
+        *,
+        adaptation: AdaptationResponse,
+        remaining: list[SearchString],
+        block_summary: dict[str, Any],
+        checkpoint_mode: str,
+    ) -> dict[str, Any]:
+        proven_family_keys = set(block_summary.get("proven_family_keys", []))
+        proven_domain_lanes = set(block_summary.get("proven_domain_lanes", []))
+        dead_family_keys = set(block_summary.get("dead_family_keys", [])) - proven_family_keys
+        if not proven_family_keys and not proven_domain_lanes and not dead_family_keys:
+            return {
+                "promoted_string_ids": [],
+                "demoted_string_ids": [],
+                "reprioritized_new_strings": False,
+            }
+
+        if adaptation.new_strings:
+            adaptation.new_strings = self._reprioritize_new_strings_for_exploitation(
+                adaptation.new_strings,
+                proven_family_keys=proven_family_keys,
+                proven_domain_lanes=proven_domain_lanes,
+            )
+
+        overlay_actions: list[dict[str, Any]] = []
+        skip_ids = {
+            int(item.get("string_id"))
+            for item in adaptation.skip_remaining
+            if item.get("string_id") is not None
+        }
+        promoted_string_ids: list[int] = []
+        demoted_string_ids: list[int] = []
+
+        promotion_limit = max(1, config.SEARCH_INTELLIGENCE_EXPLOIT_PROMOTION_LIMIT)
+        demotion_limit = max(1, config.SEARCH_INTELLIGENCE_EXPLOIT_DEMOTION_LIMIT)
+
+        for search_string in remaining:
+            if search_string.id in skip_ids:
+                continue
+
+            if (
+                len(promoted_string_ids) < promotion_limit
+                and search_string.family_key
+                and search_string.family_key in proven_family_keys
+            ):
+                overlay_actions.append(
+                    {
+                        "string_id": search_string.id,
+                        "move_to": "next",
+                        "reason": "Promoted because this exact family is already producing saves in the live run.",
+                        "_priority": 300,
+                    }
+                )
+                promoted_string_ids.append(search_string.id)
+                continue
+
+            if (
+                len(promoted_string_ids) < promotion_limit
+                and search_string.domain_lane
+                and search_string.domain_lane in proven_domain_lanes
+                and search_string.family_key not in dead_family_keys
+            ):
+                overlay_actions.append(
+                    {
+                        "string_id": search_string.id,
+                        "move_to": "next",
+                        "reason": (
+                            "Promoted because this lane is already working and should get more runway before colder hypotheses."
+                        ),
+                        "_priority": 200 if search_string.novelty_bucket == "edge_case" else 150,
+                    }
+                )
+                promoted_string_ids.append(search_string.id)
+                continue
+
+            if (
+                len(demoted_string_ids) < demotion_limit
+                and search_string.family_key
+                and search_string.family_key in dead_family_keys
+            ):
+                overlay_actions.append(
+                    {
+                        "string_id": search_string.id,
+                        "move_to": "last",
+                        "reason": (
+                            "Demoted because this family already ran cold while other families are producing real signal."
+                        ),
+                        "_priority": 260,
+                    }
+                )
+                demoted_string_ids.append(search_string.id)
+
+        if checkpoint_mode == "opening_checkpoint" and proven_domain_lanes:
+            for search_string in remaining:
+                if (
+                    len(demoted_string_ids) >= demotion_limit
+                    or search_string.id in skip_ids
+                    or search_string.id in demoted_string_ids
+                    or search_string.id in promoted_string_ids
+                ):
+                    continue
+                if (
+                    search_string.novelty_bucket == "canonical"
+                    and search_string.domain_lane
+                    and search_string.domain_lane not in proven_domain_lanes
+                ):
+                    overlay_actions.append(
+                        {
+                            "string_id": search_string.id,
+                            "move_to": "last",
+                            "reason": (
+                                "Demoted because the opening checkpoint already found a productive lane elsewhere and this looks like lower-leverage cleanup."
+                            ),
+                            "_priority": 120,
+                        }
+                    )
+                    demoted_string_ids.append(search_string.id)
+                    if len(demoted_string_ids) >= demotion_limit:
+                        break
+
+        adaptation.reorder = self._merge_reorder_actions(adaptation.reorder, overlay_actions)
+
+        return {
+            "promoted_string_ids": promoted_string_ids,
+            "demoted_string_ids": demoted_string_ids,
+            "reprioritized_new_strings": bool(adaptation.new_strings),
+        }
+
+    @staticmethod
+    def _apply_reorder_actions(progress: Progress, reorder_actions: list[dict[str, Any]]) -> None:
+        next_actions = [action for action in reorder_actions if action.get("move_to") == "next"]
+        last_actions = [action for action in reorder_actions if action.get("move_to") != "next"]
+
+        for action in reversed(next_actions):
+            string_id = action.get("string_id")
+            for index, search_string in enumerate(progress.strings):
+                if search_string.id == string_id and search_string.status == "queued":
+                    progress.strings.pop(index)
+                    for insert_index, queued in enumerate(progress.strings):
+                        if queued.status == "queued":
+                            progress.strings.insert(insert_index, search_string)
+                            break
+                    else:
+                        progress.strings.append(search_string)
+                    break
+
+        for action in last_actions:
+            string_id = action.get("string_id")
+            for index, search_string in enumerate(progress.strings):
+                if search_string.id == string_id and search_string.status == "queued":
+                    progress.strings.pop(index)
+                    progress.strings.append(search_string)
+                    break
+
+    def _opening_checkpoint_all_dead_and_coherent(self, block_strings: list[SearchString]) -> bool:
+        if not block_strings or any(search_string.saves for search_string in block_strings):
+            return False
+
+        pattern_counts: dict[str, int] = {}
+        inspected = 0
+        for search_string in block_strings:
+            state = self._experiment_states.get(search_string.id)
+            insights = state.last_page_insights if state else None
+            if insights is None:
+                continue
+            inspected += 1
+            patterns = list(insights.dominant_non_fit_patterns)
+            if not patterns and insights.glance_summary:
+                patterns = [insights.glance_summary]
+            for pattern in patterns[:1]:
+                normalized = " ".join(pattern.strip().lower().split())
+                if not normalized:
+                    continue
+                pattern_counts[normalized] = pattern_counts.get(normalized, 0) + 1
+
+        if inspected < 2 or not pattern_counts:
+            return False
+        return max(pattern_counts.values()) >= max(2, inspected - 1)
+
     # ------------------------------------------------------------------
     # Full run: block-level adaptation
     # ------------------------------------------------------------------
@@ -3677,6 +4303,7 @@ Provide a narrowed Boolean."""
         adapt_fn,
     ) -> None:
         """After a batch of strings completes, send summary to Opus and apply adaptations."""
+        checkpoint_mode = self._checkpoint_mode_for_block(block_name, block_strings)
         print(f"\n{'═' * 60}")
         print(f"  Adaptation checkpoint (after {len(block_strings)} strings)")
         print(f"{'═' * 60}")
@@ -3684,6 +4311,7 @@ Provide a narrowed Boolean."""
         profile_index = self._load_profile_index_for_adaptation()
         for search_string in block_strings:
             self._hydrate_search_string_metadata(search_string)
+        block_search_intelligence_summary = self._search_intelligence_aggregate(block_strings)
 
         # Build block report
         strings_with_saves = [s for s in block_strings if s.saves]
@@ -3725,9 +4353,11 @@ Provide a narrowed Boolean."""
                     "novelty_bucket": s.novelty_bucket,
                     "domain_lane": s.domain_lane,
                     "notes": s.notes,
+                    "search_intelligence": self._search_intelligence_detail_for_string(s),
                 }
                 for s in block_strings
             ],
+            search_intelligence_summary=block_search_intelligence_summary,
         )
 
         print(f"  {report.to_summary_text()}")
@@ -3744,6 +4374,25 @@ Provide a narrowed Boolean."""
             print("  No remaining strings — skipping adaptation.")
             return
 
+        market_intel_advisory_context = ""
+        try:
+            from market_intelligence.live_advisory import (
+                record_block_checkpoint_and_get_context,
+            )
+
+            market_intel_advisory_context = record_block_checkpoint_and_get_context(
+                brief_path=self.brief_path,
+                state_dir=self.state_dir,
+                brief_id=self.brief_obj.linkedin_project_id
+                or self.brief_obj.id
+                or Path(self.brief_path).stem,
+                block_name=block_name,
+                block_report=report,
+                search_memory_summary=build_search_memory_summary(self._search_memory),
+            )
+        except Exception:
+            market_intel_advisory_context = ""
+
         try:
             block_aggregate = self._compute_block_aggregate(block_strings)
 
@@ -3754,7 +4403,46 @@ Provide a narrowed Boolean."""
                 pivot_count=progress.pivot_count,
                 block_aggregate=block_aggregate,
                 search_memory_summary=build_search_memory_summary(self._search_memory),
+                checkpoint_mode=checkpoint_mode,
+                market_intel_advisory_context=market_intel_advisory_context,
             )
+            exploitation_overlay = self._apply_exploitation_bias_to_adaptation(
+                adaptation=adaptation,
+                remaining=remaining,
+                block_summary=block_search_intelligence_summary,
+                checkpoint_mode=checkpoint_mode,
+            )
+            if (
+                block_search_intelligence_summary.get("proven_family_keys")
+                or exploitation_overlay["promoted_string_ids"]
+                or exploitation_overlay["demoted_string_ids"]
+            ):
+                payload = {
+                    "block_name": block_name,
+                    "checkpoint_mode": checkpoint_mode,
+                    **block_search_intelligence_summary,
+                    **exploitation_overlay,
+                }
+                log_event(self.log_path, "linkedin_block_exploitation", **payload)
+                self._record_runtime_event(
+                    search_string=None,
+                    event_type="linkedin_block_exploitation",
+                    payload=payload,
+                )
+                if exploitation_overlay["promoted_string_ids"]:
+                    print(
+                        "    [adapt] Exploitation bias promoted: "
+                        + ", ".join(
+                            f"#{string_id}" for string_id in exploitation_overlay["promoted_string_ids"]
+                        )
+                    )
+                if exploitation_overlay["demoted_string_ids"]:
+                    print(
+                        "    [adapt] Exploitation bias demoted: "
+                        + ", ".join(
+                            f"#{string_id}" for string_id in exploitation_overlay["demoted_string_ids"]
+                        )
+                    )
 
             # Apply adaptations
             if adaptation.skip_remaining:
@@ -3785,6 +4473,8 @@ Provide a narrowed Boolean."""
                         family_key=ns.get("family_key", ""),
                         novelty_bucket=ns.get("novelty_bucket", ""),
                         domain_lane=ns.get("domain_lane", ""),
+                        retrieval_recipe=ns.get("retrieval_recipe", {}),
+                        retrieval_hypothesis_ids=list(ns.get("retrieval_hypothesis_ids", [])),
                     )
                     self._hydrate_search_string_metadata(new_ss)
                     progress.strings.insert(insert_idx, new_ss)
@@ -3793,23 +4483,9 @@ Provide a narrowed Boolean."""
                     print(f"    [adapt] Inserted new string #{max_id} (next in queue): {ns['boolean'][:60]}...")
 
             if adaptation.reorder:
+                self._apply_reorder_actions(progress, adaptation.reorder)
                 for ro in adaptation.reorder:
-                    sid = ro["string_id"]
-                    for i, ss in enumerate(progress.strings):
-                        if ss.id == sid and ss.status == "queued":
-                            progress.strings.pop(i)
-                            if ro.get("move_to") == "next":
-                                # Find first queued string and insert before it
-                                for j, ss2 in enumerate(progress.strings):
-                                    if ss2.status == "queued":
-                                        progress.strings.insert(j, ss)
-                                        break
-                                else:
-                                    progress.strings.append(ss)
-                            else:
-                                progress.strings.append(ss)
-                            print(f"    [adapt] Reordered #{sid} to {ro.get('move_to', 'last')}")
-                            break
+                    print(f"    [adapt] Reordered #{ro['string_id']} to {ro.get('move_to', 'last')}")
 
             if adaptation.noise_updates:
                 for nu in adaptation.noise_updates:
@@ -3823,6 +4499,25 @@ Provide a narrowed Boolean."""
                         })
 
             # Architecture pivot handling
+            if adaptation.pivot_to_architecture:
+                if (
+                    checkpoint_mode == "opening_checkpoint"
+                    and not self._opening_checkpoint_all_dead_and_coherent(block_strings)
+                ):
+                    print(
+                        "  [adapt] Opening checkpoint blocked architecture pivot "
+                        f"to {adaptation.pivot_to_architecture}: early block is not uniformly dead/coherent enough."
+                    )
+                    log_event(
+                        self.log_path,
+                        "pivot_blocked",
+                        reason="opening_checkpoint_guard",
+                        recommended=adaptation.pivot_to_architecture,
+                        block=block_name,
+                    )
+                    adaptation.pivot_to_architecture = ""
+                    adaptation.pivot_rationale = ""
+
             if adaptation.pivot_to_architecture:
                 # Titration gets 2 pivots (recon-then-commit is its design), others get 1
                 max_pivots = 2 if (self._execution_plan and
@@ -3943,17 +4638,19 @@ Provide a narrowed Boolean."""
         print("  Preflight V2 complete — pipeline will use structural templates + bias controls")
 
     def _archive_stale_outputs(self) -> None:
-        """Rename existing output JSONL files to timestamped backups before a fresh run."""
+        """Move stale per-run artifacts out of the mutable state_dir before a fresh run."""
         ts = datetime.now().strftime("%Y%m%d-%H%M%S")
+        archive_dir = source_archive_root(
+            "linkedin",
+            self._brief_id,
+            output_root=self.output_dir,
+        ) / "state-resets" / ts
         for path in [self.snippets_path, self.facial_path, self.profiles_path, self.final_path]:
             if path.exists() and path.stat().st_size > 0:
-                backup = path.with_name(f"{path.stem}-{ts}{path.suffix}")
+                archive_dir.mkdir(parents=True, exist_ok=True)
+                backup = archive_dir / path.name
                 path.rename(backup)
-                print(f"  Archived {path.name} → {backup.name}")
-
-        # Prune old archives (keep last 5)
-        for stem in ["snippets", "facial_judgments", "profile_summaries", "final_judgments"]:
-            self._prune_old_archives(stem)
+                print(f"  Archived {path.name} → {backup}")
 
     def _prune_old_archives(self, stem: str, keep: int = 5) -> None:
         """Keep only the N most recent archived versions of a file."""
@@ -4120,6 +4817,7 @@ Provide a narrowed Boolean."""
         candidates_evaluated = self.stats["snippets_extracted"]
         overall_save_rate = self.stats["saved"] / max(candidates_evaluated, 1)
         facial_yes_rate = self.stats["facial_yes"] / max(candidates_evaluated, 1)
+        search_intelligence_summary = self._search_intelligence_aggregate(progress.strings)
 
         string_performance = []
         for s in progress.strings:
@@ -4144,6 +4842,7 @@ Provide a narrowed Boolean."""
                     "family_key": s.family_key,
                     "novelty_bucket": s.novelty_bucket,
                     "domain_lane": s.domain_lane,
+                    "search_intelligence": self._search_intelligence_detail_for_string(s),
                 }
             )
 
@@ -4173,6 +4872,17 @@ Provide a narrowed Boolean."""
                 "rejected": self.stats["rejected"],
                 "overall_save_rate": round(overall_save_rate, 4),
                 "facial_yes_rate": round(facial_yes_rate, 4),
+                "strings_with_precommit_experiments": len(
+                    search_intelligence_summary.get("strings_with_precommit_experiments", [])
+                ),
+                "strings_with_drift_rescue_attempts": len(
+                    search_intelligence_summary.get("strings_with_drift_rescue_attempts", [])
+                ),
+                "strings_rescued_by_drift": len(
+                    search_intelligence_summary.get("strings_rescued_by_drift", [])
+                ),
+                "proven_family_keys": search_intelligence_summary.get("proven_family_keys", []),
+                "proven_domain_lanes": search_intelligence_summary.get("proven_domain_lanes", []),
             },
             "string_performance": string_performance,
             "saved_candidate_summaries": self._load_run_report_decisions(
@@ -4204,6 +4914,7 @@ Rules:
 - Use only evidence available in the snapshot.
 - Cite concrete strings, candidates, and patterns when possible.
 - Keep lists concise and high-signal.
+- string_performance entries may include nested search_intelligence summaries; use them when assessing whether rescues, experiments, and exploitation decisions actually helped.
 - brief_iteration_hints may only suggest mutable brief fields:
   instructions, search_priorities, additional_search_terms, intake_notes, depth_distinction,
   non_fit_patterns, minimum_bar_description, facial_calibration, employer_signal_rules,
@@ -4302,6 +5013,63 @@ Expected inner shapes:
             )
         except Exception as e:
             print(f"  [warn] Report generation failed: {e}")
+
+    def _finalize_run_snapshot(self) -> None:
+        """Freeze the current state_dir into an immutable run_dir snapshot."""
+        if not self._runtime_run_id:
+            return
+        try:
+            from market_intelligence.run_snapshots import finalize_run_snapshot
+
+            run_dir = finalize_run_snapshot(
+                source="linkedin",
+                brief_path=self.brief_path,
+                state_dir=self.state_dir,
+                run_id=int(self._runtime_run_id),
+            )
+            print(f"  Run snapshot saved to:  {run_dir}")
+            log_event(
+                self.log_path,
+                "run_snapshot_finalized",
+                run_id=int(self._runtime_run_id),
+                run_dir=str(run_dir),
+            )
+            try:
+                from market_intelligence.engine import (
+                    resolve_market_intel_artifact_path,
+                    update_market_intel,
+                )
+
+                artifact = update_market_intel(
+                    brief_path=self.brief_path,
+                    run_dir=run_dir,
+                    mode="post_run",
+                )
+                artifact_path = resolve_market_intel_artifact_path(
+                    self.brief_path,
+                    output_dir=run_dir,
+                )
+                print(
+                    f"  Market intel updated: {artifact_path}"
+                )
+                log_event(
+                    self.log_path,
+                    "market_intel_updated",
+                    run_id=int(self._runtime_run_id),
+                    run_dir=str(run_dir),
+                    market_key=artifact.market_identity.market_key,
+                )
+            except Exception as exc:
+                print(f"  [warn] Market intel update failed: {exc}")
+                log_event(
+                    self.log_path,
+                    "market_intel_update_failed",
+                    run_id=int(self._runtime_run_id),
+                    run_dir=str(run_dir),
+                    error=str(exc),
+                )
+        except Exception as exc:
+            print(f"  [warn] Run snapshot finalization failed: {exc}")
 
 
 def _normalize_text_for_report(value: str) -> str:

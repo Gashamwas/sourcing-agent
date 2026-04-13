@@ -11,9 +11,17 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from market_intelligence.engine import resolve_market_intel_artifact_path
 from shared import config
 from shared.brief_loader import load_brief
+from shared.llm_usage import llm_usage_session
 from shared.llm_clients import opus_llm
+from shared.retrieval_design import (
+    derive_legacy_search_views,
+    retrieval_design_from_payload,
+    summarize_retrieval_design,
+    validate_retrieval_design,
+)
 from shared.run_report_schema import StructuredRunReport
 from shared.search_memory import build_search_memory_summary, extract_dominant_anchors
 from shared.storage import read_json, read_jsonl, write_json
@@ -33,6 +41,7 @@ MUTABLE_FIELDS = {
     "calibration_examples",
     "notes",
     "version",
+    "retrieval_design",
 }
 LOCKED_FIELDS = {
     "role_title",
@@ -54,6 +63,12 @@ LIST_LIMITS = {
     "employer_signal_rules": 10,
 }
 CALIBRATION_MAX_DELTA = 0.10
+PROMPT_TEXT_PREVIEW_CHARS = 1200
+PROMPT_ITEM_TEXT_CHARS = 220
+PROMPT_LIST_LIMIT = 8
+PROMPT_TIGHT_TEXT_PREVIEW_CHARS = 700
+PROMPT_TIGHT_ITEM_TEXT_CHARS = 140
+PROMPT_TIGHT_LIST_LIMIT = 5
 
 
 @dataclass
@@ -70,6 +85,13 @@ def _normalize_text(value: Any) -> str:
     return " ".join(str(value or "").split()).strip()
 
 
+def _truncate_text(value: Any, limit: int) -> str:
+    text = _normalize_text(value)
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(0, limit - 1)].rstrip()}…"
+
+
 def _dedupe_strings(values: list[Any], limit: int | None = None) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
@@ -81,6 +103,60 @@ def _dedupe_strings(values: list[Any], limit: int | None = None) -> list[str]:
         if key in seen:
             continue
         seen.add(key)
+        out.append(text)
+        if limit and len(out) >= limit:
+            break
+    return out
+
+
+def _prompt_limits(*, tight: bool) -> dict[str, int]:
+    return {
+        "text": PROMPT_TIGHT_TEXT_PREVIEW_CHARS if tight else PROMPT_TEXT_PREVIEW_CHARS,
+        "item": PROMPT_TIGHT_ITEM_TEXT_CHARS if tight else PROMPT_ITEM_TEXT_CHARS,
+        "list": PROMPT_TIGHT_LIST_LIMIT if tight else PROMPT_LIST_LIMIT,
+    }
+
+
+def _preview_list(values: list[Any], *, item_limit: int, item_chars: int) -> list[str]:
+    return [
+        _truncate_text(item, item_chars)
+        for item in _dedupe_strings(values, limit=item_limit)
+    ]
+
+
+def _raw_has_explicit_retrieval_design(raw: dict) -> bool:
+    payload = raw.get("retrieval_design")
+    if not isinstance(payload, dict) or not payload:
+        return False
+    design = retrieval_design_from_payload(payload)
+    return design.is_explicit()
+
+
+_INTERNAL_MARKET_INTEL_CHANGE_MARKERS = (
+    "lane_intelligence",
+    "market_thesis.external_context",
+    "keep_sections",
+    "draft regression",
+    "section_generation_metadata",
+    "technical appendix",
+    "preserve narrative",
+    "noise_patterns",
+    "talent_pool_intelligence",
+    "brief_recommendations",
+)
+
+
+def _filter_operator_actionable_market_changes(
+    values: list[Any],
+    limit: int | None = None,
+) -> list[str]:
+    out: list[str] = []
+    for text in _dedupe_strings(values):
+        lowered = text.lower()
+        if lowered.startswith("critical:"):
+            continue
+        if any(marker in lowered for marker in _INTERNAL_MARKET_INTEL_CHANGE_MARKERS):
+            continue
         out.append(text)
         if limit and len(out) >= limit:
             break
@@ -300,8 +376,408 @@ def _resolve_optional_paths(
     return output_root, resolved_report, resolved_search_memory, resolved_final
 
 
-def _build_iteration_system() -> str:
-    return """You are revising a sourcing brief after a completed run.
+def _load_market_intel_summary(brief_path: Path, output_root: Path) -> dict | None:
+    artifact_path = resolve_market_intel_artifact_path(
+        brief_path,
+        output_dir=output_root,
+    )
+    if not artifact_path.exists():
+        return None
+    artifact = read_json(artifact_path)
+    if not isinstance(artifact, dict):
+        return None
+    market_thesis = artifact.get("market_thesis", {})
+    talent_pools = artifact.get("talent_pool_intelligence", [])
+    employer_signals = artifact.get("employer_signal_intelligence", [])
+    brief_recommendations = artifact.get("brief_recommendations", [])
+    open_questions = artifact.get("open_questions", [])
+    delta = artifact.get("delta_since_last_run", {})
+    summary = {
+        "market_key": artifact.get("market_identity", {}).get("market_key", ""),
+        "artifact_path": str(artifact_path),
+        "market_thesis_summary": _truncate_text(market_thesis.get("summary"), 1400),
+        "next_run_changes": _filter_operator_actionable_market_changes(
+            delta.get("next_run_changes", []),
+            limit=5,
+        ),
+        "brief_recommendations": [
+            {
+                "target_field": _normalize_text(item.get("target_field")),
+                "proposal": _truncate_text(item.get("proposal"), 320),
+                "reason": _truncate_text(item.get("reason"), 380),
+            }
+            for item in brief_recommendations[:5]
+            if isinstance(item, dict)
+        ],
+        "top_talent_pool_findings": [
+            {
+                "label": _normalize_text(item.get("label")),
+                "evidence_summary": _truncate_text(item.get("evidence_summary"), 260),
+            }
+            for item in talent_pools[:3]
+            if isinstance(item, dict)
+        ],
+        "top_employer_findings": [
+            {
+                "label": _normalize_text(item.get("label")),
+                "evidence_summary": _truncate_text(item.get("evidence_summary"), 260),
+            }
+            for item in employer_signals[:3]
+            if isinstance(item, dict)
+        ],
+        "open_questions": [
+            {
+                "question": _truncate_text(item.get("question"), 260),
+                "priority": _normalize_text(item.get("priority")),
+                "next_step": _truncate_text(item.get("next_step"), 220),
+            }
+            for item in open_questions[:4]
+            if isinstance(item, dict)
+        ],
+        "retrieval_design_summary": artifact.get("retrieval_design_summary", {}),
+    }
+    return summary
+
+
+def _summarize_mutable_fields_for_prompt(
+    current_raw: dict,
+    *,
+    retrieval_design: Any,
+    allow_retrieval_design_edits: bool,
+    tight: bool,
+) -> dict:
+    limits = _prompt_limits(tight=tight)
+    derived_search_priorities: list[str] = []
+    derived_additional_search_terms: list[str] = []
+    if allow_retrieval_design_edits:
+        derived_search_priorities, derived_additional_search_terms = derive_legacy_search_views(
+            retrieval_design
+        )
+    out: dict[str, Any] = {}
+    for field in MUTABLE_FIELDS:
+        if field not in current_raw:
+            continue
+        value = current_raw.get(field)
+        if field in {"instructions", "search_priorities", "additional_search_terms"}:
+            if allow_retrieval_design_edits and field == "search_priorities":
+                value = derived_search_priorities
+            elif allow_retrieval_design_edits and field == "additional_search_terms":
+                value = derived_additional_search_terms
+            field_limit = limits["list"]
+            if field == "additional_search_terms":
+                field_limit = 12 if tight else 20
+            out[field] = _preview_list(value or [], item_limit=field_limit, item_chars=limits["item"])
+        elif field in {"intake_notes", "minimum_bar_description", "notes"}:
+            out[field] = _truncate_text(value, limits["text"])
+        elif field == "depth_distinction" and isinstance(value, dict):
+            out[field] = {
+                key: _truncate_text(value.get(key), 320 if tight else 500)
+                for key in ("builder_definition", "user_definition", "edge_case_guidance")
+            }
+        elif field == "non_fit_patterns" and isinstance(value, list):
+            out[field] = [
+                {
+                    "label": _truncate_text(item.get("label"), 80),
+                    "description": _truncate_text(item.get("description"), 180 if tight else 260),
+                    "why_not": _truncate_text(item.get("why_not"), 180 if tight else 240),
+                }
+                for item in value[: limits["list"]]
+                if isinstance(item, dict)
+            ]
+        elif field == "facial_calibration" and isinstance(value, dict):
+            out[field] = {
+                "expected_yes_rate_low": value.get("expected_yes_rate_low"),
+                "expected_yes_rate_high": value.get("expected_yes_rate_high"),
+                "fast_exit_patterns": _preview_list(value.get("fast_exit_patterns", []), item_limit=limits["list"], item_chars=limits["item"]),
+                "trajectory_yes_patterns": _preview_list(value.get("trajectory_yes_patterns", []), item_limit=limits["list"], item_chars=limits["item"]),
+                "trajectory_ambiguous_patterns": _preview_list(value.get("trajectory_ambiguous_patterns", []), item_limit=limits["list"], item_chars=limits["item"]),
+                "trajectory_no_patterns": _preview_list(value.get("trajectory_no_patterns", []), item_limit=limits["list"], item_chars=limits["item"]),
+            }
+        elif field == "employer_signal_rules" and isinstance(value, list):
+            out[field] = [
+                {
+                    "tier": _truncate_text(item.get("tier"), 80),
+                    "employer_patterns": _preview_list(item.get("employer_patterns", []), item_limit=6 if tight else 10, item_chars=80),
+                    "evidence_required": _truncate_text(item.get("evidence_required"), 180 if tight else 240),
+                    "save_on_employer_alone": bool(item.get("save_on_employer_alone", False)),
+                }
+                for item in value[: limits["list"]]
+                if isinstance(item, dict)
+            ]
+        elif field == "calibration_examples" and isinstance(value, dict):
+            out[field] = {
+                bucket: [
+                    {
+                        "name": _truncate_text(item.get("name"), 80),
+                        "why": _truncate_text(item.get("why"), 180 if tight else 240),
+                    }
+                    for item in (value.get(bucket, []) or [])[: limits["list"]]
+                    if isinstance(item, dict)
+                ]
+                for bucket in ("strong_saves", "incorrect_saves", "borderline_verify")
+            }
+        elif field == "retrieval_design" and allow_retrieval_design_edits:
+            out[field] = summarize_retrieval_design(retrieval_design)
+        else:
+            out[field] = value
+    return out
+
+
+def _summarize_locked_fields_for_prompt(current_raw: dict, *, tight: bool) -> dict:
+    limits = _prompt_limits(tight=tight)
+    out: dict[str, Any] = {}
+    for field in LOCKED_FIELDS:
+        if field not in current_raw:
+            continue
+        value = current_raw.get(field)
+        if isinstance(value, str):
+            out[field] = _truncate_text(value, 320 if tight else 600)
+        elif isinstance(value, list):
+            out[field] = _preview_list(value, item_limit=limits["list"], item_chars=limits["item"])
+        else:
+            out[field] = value
+    return out
+
+
+def _summarize_run_report_for_prompt(
+    report: StructuredRunReport,
+    *,
+    tight: bool,
+) -> dict:
+    limits = _prompt_limits(tight=tight)
+    payload = report.to_dict()
+    run_metadata = payload.get("run_metadata", {}) if isinstance(payload, dict) else {}
+    metrics_summary = payload.get("metrics_summary", {}) if isinstance(payload, dict) else {}
+    saved_patterns = payload.get("saved_candidate_patterns", {}) if isinstance(payload, dict) else {}
+    adaptation = payload.get("adaptation_assessment", {}) if isinstance(payload, dict) else {}
+    recommendations = payload.get("recommendations", {}) if isinstance(payload, dict) else {}
+    hints = payload.get("brief_iteration_hints", {}) if isinstance(payload, dict) else {}
+
+    ranked_string_performance = sorted(
+        [
+            item
+            for item in (payload.get("string_performance", []) or [])
+            if isinstance(item, dict)
+        ],
+        key=lambda item: (
+            1 if _normalize_text(item.get("status")) == "done" else 0,
+            float(item.get("saves", 0) or 0),
+            float(item.get("pages_reviewed", 0) or 0),
+            float(item.get("result_count", 0) or 0),
+            float(item.get("save_rate", 0) or 0),
+        ),
+        reverse=True,
+    )
+    string_items = []
+    for item in ranked_string_performance[: 4 if tight else 6]:
+        if not isinstance(item, dict):
+            continue
+        string_items.append(
+            {
+                "name": _truncate_text(item.get("name"), 90),
+                "status": _normalize_text(item.get("status")),
+                "result_count": item.get("result_count"),
+                "pages_reviewed": item.get("pages_reviewed"),
+                "candidates_count": item.get("candidates_count"),
+                "saves": item.get("saves"),
+                "save_rate": item.get("save_rate"),
+                "family_key": _normalize_text(item.get("family_key")),
+                "novelty_bucket": _normalize_text(item.get("novelty_bucket")),
+                "domain_lane": _normalize_text(item.get("domain_lane")),
+                "notes": _truncate_text(item.get("notes"), 160 if tight else 220),
+            }
+        )
+
+    def _lane_summary(items: list[Any], *, label_key: str) -> list[dict]:
+        rows: list[dict] = []
+        for item in (items or [])[: limits["list"]]:
+            if not isinstance(item, dict):
+                continue
+            rows.append(
+                {
+                    label_key: _truncate_text(item.get(label_key), 110),
+                    "evidence": _truncate_text(item.get("evidence"), 180 if tight else 240),
+                    "why": _truncate_text(
+                        item.get("why_it_worked") or item.get("issue"),
+                        180 if tight else 220,
+                    ),
+                    "recommended_action": _truncate_text(item.get("recommended_action"), 180 if tight else 220),
+                }
+            )
+        return rows
+
+    return {
+        "run_metadata": {
+            "role_title": _normalize_text(run_metadata.get("role_title")),
+            "brief_version": _normalize_text(run_metadata.get("brief_version")),
+            "linkedin_project_id": _normalize_text(run_metadata.get("linkedin_project_id")),
+            "generated_at": _normalize_text(run_metadata.get("generated_at")),
+            "overall_summary": _truncate_text(
+                payload.get("overall_summary") or run_metadata.get("overall_summary"),
+                280 if tight else 420,
+            ),
+        },
+        "metrics_summary": {
+            key: metrics_summary.get(key)
+            for key in (
+                "strings_executed",
+                "strings_skipped",
+                "total_results",
+                "total_pages_reviewed",
+                "candidates_evaluated",
+                "facial_yes",
+                "facial_no",
+                "saved",
+                "rejected",
+                "overall_save_rate",
+                "facial_yes_rate",
+            )
+            if key in metrics_summary
+        },
+        "top_string_performance": string_items,
+        "winning_lanes": _lane_summary(payload.get("winning_lanes", []), label_key="lane"),
+        "underperforming_lanes": _lane_summary(payload.get("underperforming_lanes", []), label_key="lane"),
+        "coverage_gaps": [
+            {
+                "gap": _truncate_text(item.get("gap"), 110),
+                "why_it_matters": _truncate_text(item.get("why_it_matters"), 180 if tight else 240),
+                "suggested_search_strategy": _truncate_text(item.get("suggested_search_strategy"), 180 if tight else 240),
+            }
+            for item in (payload.get("coverage_gaps", []) or [])[: limits["list"]]
+            if isinstance(item, dict)
+        ],
+        "noise_patterns": [
+            {
+                "pattern": _truncate_text(item.get("pattern"), 110),
+                "evidence": _truncate_text(item.get("evidence"), 180 if tight else 240),
+                "mitigation": _truncate_text(item.get("mitigation"), 180 if tight else 240),
+            }
+            for item in (payload.get("noise_patterns", []) or [])[: limits["list"]]
+            if isinstance(item, dict)
+        ],
+        "saved_candidate_patterns": {
+            "standout_candidates": [
+                {
+                    "name": _truncate_text(item.get("name"), 80),
+                    "why": _truncate_text(item.get("why"), 180 if tight else 240),
+                }
+                for item in (saved_patterns.get("standout_candidates", []) or [])[: limits["list"]]
+                if isinstance(item, dict)
+            ],
+            "common_employers": [
+                {
+                    "employer": _truncate_text(item.get("employer"), 80),
+                    "count": item.get("count"),
+                    "note": _truncate_text(item.get("note"), 140 if tight else 200),
+                }
+                for item in (saved_patterns.get("common_employers", []) or [])[: limits["list"]]
+                if isinstance(item, dict)
+            ],
+            "common_titles": [
+                {
+                    "title_family": _truncate_text(item.get("title_family"), 80),
+                    "count": item.get("count"),
+                    "note": _truncate_text(item.get("note"), 140 if tight else 200),
+                }
+                for item in (saved_patterns.get("common_titles", []) or [])[: limits["list"]]
+                if isinstance(item, dict)
+            ],
+            "archetype_distribution": [
+                {
+                    "archetype": _truncate_text(item.get("archetype"), 90),
+                    "count": item.get("count"),
+                    "note": _truncate_text(item.get("note"), 140 if tight else 200),
+                }
+                for item in (saved_patterns.get("archetype_distribution", []) or [])[: limits["list"]]
+                if isinstance(item, dict)
+            ],
+            "seniority_notes": _preview_list(saved_patterns.get("seniority_notes", []), item_limit=limits["list"], item_chars=limits["item"]),
+        },
+        "adaptation_assessment": {
+            "summary": _truncate_text(adaptation.get("summary"), 220 if tight else 320),
+            "effective_refinements": _preview_list(adaptation.get("effective_refinements", []), item_limit=limits["list"], item_chars=limits["item"]),
+            "questionable_or_skipped": _preview_list(adaptation.get("questionable_or_skipped", []), item_limit=limits["list"], item_chars=limits["item"]),
+            "operational_notes": _preview_list(adaptation.get("operational_notes", []), item_limit=limits["list"], item_chars=limits["item"]),
+        },
+        "recommendations": {
+            "try_next": _preview_list(recommendations.get("try_next", []), item_limit=limits["list"], item_chars=limits["item"]),
+            "avoid_next": _preview_list(recommendations.get("avoid_next", []), item_limit=limits["list"], item_chars=limits["item"]),
+            "prioritize_pipeline": _preview_list(recommendations.get("prioritize_pipeline", []), item_limit=limits["list"], item_chars=limits["item"]),
+        },
+        "brief_iteration_hints": {
+            "instructions": _preview_list(hints.get("instructions", []), item_limit=limits["list"], item_chars=limits["item"]),
+            "search_priorities": _preview_list(hints.get("search_priorities", []), item_limit=limits["list"], item_chars=limits["item"]),
+            "additional_search_terms": _preview_list(hints.get("additional_search_terms", []), item_limit=12 if not tight else 8, item_chars=limits["item"]),
+            "intake_notes": _truncate_text(hints.get("intake_notes"), 280 if tight else 420),
+            "depth_distinction": {
+                key: _truncate_text((hints.get("depth_distinction", {}) or {}).get(key), 220 if tight else 320)
+                for key in ("builder_definition", "user_definition", "edge_case_guidance")
+            }
+            if isinstance(hints.get("depth_distinction"), dict)
+            else None,
+            "non_fit_patterns": [
+                {
+                    "label": _truncate_text(item.get("label"), 80),
+                    "description": _truncate_text(item.get("description"), 160 if tight else 220),
+                    "why_not": _truncate_text(item.get("why_not"), 160 if tight else 220),
+                }
+                for item in (hints.get("non_fit_patterns", []) or [])[: limits["list"]]
+                if isinstance(item, dict)
+            ],
+            "minimum_bar_description": _truncate_text(hints.get("minimum_bar_description"), 220 if tight else 320),
+            "facial_calibration": {
+                "expected_yes_rate_low": (hints.get("facial_calibration", {}) or {}).get("expected_yes_rate_low"),
+                "expected_yes_rate_high": (hints.get("facial_calibration", {}) or {}).get("expected_yes_rate_high"),
+                "fast_exit_patterns": _preview_list((hints.get("facial_calibration", {}) or {}).get("fast_exit_patterns", []), item_limit=limits["list"], item_chars=limits["item"]),
+                "trajectory_yes_patterns": _preview_list((hints.get("facial_calibration", {}) or {}).get("trajectory_yes_patterns", []), item_limit=limits["list"], item_chars=limits["item"]),
+                "trajectory_ambiguous_patterns": _preview_list((hints.get("facial_calibration", {}) or {}).get("trajectory_ambiguous_patterns", []), item_limit=limits["list"], item_chars=limits["item"]),
+                "trajectory_no_patterns": _preview_list((hints.get("facial_calibration", {}) or {}).get("trajectory_no_patterns", []), item_limit=limits["list"], item_chars=limits["item"]),
+            }
+            if isinstance(hints.get("facial_calibration"), dict)
+            else None,
+            "employer_signal_rules": [
+                {
+                    "tier": _truncate_text(item.get("tier"), 80),
+                    "employer_patterns": _preview_list(item.get("employer_patterns", []), item_limit=6 if tight else 10, item_chars=80),
+                    "evidence_required": _truncate_text(item.get("evidence_required"), 160 if tight else 220),
+                    "save_on_employer_alone": bool(item.get("save_on_employer_alone", False)),
+                }
+                for item in (hints.get("employer_signal_rules", []) or [])[: limits["list"]]
+                if isinstance(item, dict)
+            ],
+            "calibration_examples": {
+                bucket: [
+                    {
+                        "name": _truncate_text(item.get("name"), 80),
+                        "why": _truncate_text(item.get("why"), 160 if tight else 220),
+                    }
+                    for item in ((hints.get("calibration_examples", {}) or {}).get(bucket, []) or [])[: limits["list"]]
+                    if isinstance(item, dict)
+                ]
+                for bucket in ("strong_saves", "incorrect_saves", "borderline_verify")
+            }
+            if isinstance(hints.get("calibration_examples"), dict)
+            else None,
+            "notes": _truncate_text(hints.get("notes"), 220 if tight else 320),
+            "locked_field_cautions": _preview_list(hints.get("locked_field_cautions", []), item_limit=limits["list"], item_chars=limits["item"]),
+        },
+    }
+
+
+def _build_iteration_system(*, allow_retrieval_design_edits: bool) -> str:
+    retrieval_design_block = """
+    "retrieval_design": {
+      "families": [],
+      "shared_layers": {},
+      "edge_case_hypotheses": []
+    },""" if allow_retrieval_design_edits else ""
+    retrieval_rules = (
+        "- retrieval_design is the canonical search-design surface for this brief. Prefer editing retrieval_design first, then let legacy search_priorities and additional_search_terms be derived from it.\n"
+        "- Do NOT propose standalone search_priorities or additional_search_terms edits that are inconsistent with retrieval_design. If search behavior should change, express it through retrieval_design."
+        if allow_retrieval_design_edits
+        else "- Do NOT introduce a new retrieval_design for this brief. Keep edits on the existing legacy mutable fields only."
+    )
+    template = """You are revising a sourcing brief after a completed run.
 
 Return valid JSON only with this exact shape:
 {
@@ -335,7 +811,7 @@ Return valid JSON only with this exact shape:
       "strong_saves": [{"name": "string", "why": "string"}],
       "incorrect_saves": [{"name": "string", "why": "string"}],
       "borderline_verify": [{"name": "string", "why": "string"}]
-    },
+    },__RETRIEVAL_BLOCK__
     "notes": "string",
     "version": "string"
   },
@@ -356,9 +832,13 @@ Rules:
 - Keep hard gates intact: geography, years, BFSI domain, post-2022 GenAI builder evidence, executive-builder scope.
 - Prefer replacing low-signal items over append-only growth.
 - Keep lists concise and high-signal.
+- __RETRIEVAL_RULES__
 - If you suggest employer signal rules, save_on_employer_alone must stay false.
 - If you suggest facial calibration changes, make them small and evidence-based.
 - If there is not enough evidence to change a field, omit it from proposed_changes."""
+    return template.replace("__RETRIEVAL_BLOCK__", retrieval_design_block).replace(
+        "__RETRIEVAL_RULES__", retrieval_rules
+    )
 
 
 def _build_iteration_user_prompt(
@@ -366,19 +846,41 @@ def _build_iteration_user_prompt(
     report: StructuredRunReport,
     search_memory: dict | None,
     final_judgments_summary: dict | None,
+    market_intel_summary: dict | None,
+    *,
+    allow_retrieval_design_edits: bool,
+    tight: bool = False,
 ) -> str:
-    mutable_snapshot = {field: current_raw.get(field) for field in MUTABLE_FIELDS if field in current_raw}
-    locked_snapshot = {field: current_raw.get(field) for field in LOCKED_FIELDS if field in current_raw}
+    retrieval_design = retrieval_design_from_payload(
+        current_raw.get("retrieval_design"),
+        legacy_search_priorities=current_raw.get("search_priorities", []),
+        legacy_additional_search_terms=current_raw.get("additional_search_terms", []),
+        role_title=current_raw.get("role_title", ""),
+    )
+    mutable_snapshot = _summarize_mutable_fields_for_prompt(
+        current_raw,
+        retrieval_design=retrieval_design,
+        allow_retrieval_design_edits=allow_retrieval_design_edits,
+        tight=tight,
+    )
+    locked_snapshot = _summarize_locked_fields_for_prompt(current_raw, tight=tight)
     context = {
+        "prompt_mode": "tight_retry" if tight else "standard",
+        "note": (
+            "Values below are compact previews of the current brief and supporting artifacts. Preserve their intent and constraints when proposing edits."
+        ),
         "current_mutable_fields": mutable_snapshot,
         "locked_fields": locked_snapshot,
-        "run_report": report.to_dict(),
+        "run_report": _summarize_run_report_for_prompt(report, tight=tight),
         "search_memory_summary": build_search_memory_summary(search_memory) if search_memory else None,
         "final_judgments_summary": final_judgments_summary or None,
+        "market_intel_summary": market_intel_summary or None,
     }
+    if allow_retrieval_design_edits:
+        context["current_retrieval_design_summary"] = summarize_retrieval_design(retrieval_design)
     return (
         "Revise the brief using the run report and optional supporting artifacts.\n"
-        "Only propose bounded edits to mutable fields.\n\n"
+        "Use market-intel recommendations to improve the next sourcing run, but only propose bounded edits to mutable fields.\n\n"
         f"{json.dumps(context, indent=2)}"
     )
 
@@ -480,13 +982,39 @@ def _apply_iteration_proposal(current_raw: dict, proposal: dict, report_path: Pa
     draft = copy.deepcopy(current_raw)
     warnings: list[str] = []
     changes = proposal.get("proposed_changes", {}) if isinstance(proposal, dict) else {}
+    allow_retrieval_design_edits = _raw_has_explicit_retrieval_design(current_raw)
+    current_retrieval_design = retrieval_design_from_payload(
+        current_raw.get("retrieval_design"),
+        legacy_search_priorities=current_raw.get("search_priorities", []),
+        legacy_additional_search_terms=current_raw.get("additional_search_terms", []),
+        role_title=current_raw.get("role_title", ""),
+    )
+
+    explicit_retrieval_edit = "retrieval_design" in changes
+    legacy_search_edits = (
+        "search_priorities" in changes or "additional_search_terms" in changes
+    )
 
     if "instructions" in changes:
         draft["instructions"] = _dedupe_strings(changes["instructions"], limit=LIST_LIMITS["instructions"])
-    if "search_priorities" in changes:
+    if "search_priorities" in changes and not (allow_retrieval_design_edits and not explicit_retrieval_edit):
         draft["search_priorities"] = _dedupe_strings(changes["search_priorities"], limit=LIST_LIMITS["search_priorities"])
-    if "additional_search_terms" in changes:
+    if "additional_search_terms" in changes and not (allow_retrieval_design_edits and not explicit_retrieval_edit):
         draft["additional_search_terms"] = _dedupe_strings(changes["additional_search_terms"], limit=LIST_LIMITS["additional_search_terms"])
+    if "retrieval_design" in changes and allow_retrieval_design_edits:
+        proposed_design = retrieval_design_from_payload(
+            changes.get("retrieval_design"),
+            legacy_search_priorities=draft.get("search_priorities", []),
+            legacy_additional_search_terms=draft.get("additional_search_terms", []),
+            role_title=current_raw.get("role_title", ""),
+        )
+        retrieval_warnings = validate_retrieval_design(proposed_design)
+        warnings.extend(retrieval_warnings)
+        draft["retrieval_design"] = proposed_design.to_dict()
+    elif "retrieval_design" in changes and not allow_retrieval_design_edits:
+        warnings.append(
+            "Ignored retrieval_design proposal because this brief has not explicitly opted into layered retrieval editing."
+        )
     if "intake_notes" in changes:
         draft["intake_notes"] = _normalize_text(changes["intake_notes"])
     if "depth_distinction" in changes:
@@ -516,6 +1044,45 @@ def _apply_iteration_proposal(current_raw: dict, proposal: dict, report_path: Pa
         )
     if "notes" in changes:
         draft["notes"] = _normalize_text(changes["notes"])
+
+    if allow_retrieval_design_edits and not explicit_retrieval_edit:
+        effective_retrieval_design = current_retrieval_design
+        if legacy_search_edits:
+            warnings.append(
+                "Ignored direct search_priorities/additional_search_terms edits because this brief is in explicit retrieval_design mode; edit retrieval_design instead."
+            )
+    elif not explicit_retrieval_edit and legacy_search_edits:
+        effective_retrieval_design = retrieval_design_from_payload(
+            None,
+            legacy_search_priorities=draft.get("search_priorities", []),
+            legacy_additional_search_terms=draft.get("additional_search_terms", []),
+            role_title=current_raw.get("role_title", ""),
+        )
+    else:
+        effective_retrieval_design = retrieval_design_from_payload(
+            draft.get("retrieval_design"),
+            legacy_search_priorities=draft.get("search_priorities", []),
+            legacy_additional_search_terms=draft.get("additional_search_terms", []),
+            role_title=current_raw.get("role_title", ""),
+        )
+    if effective_retrieval_design.is_empty() and not current_retrieval_design.is_empty():
+        effective_retrieval_design = current_retrieval_design
+    if allow_retrieval_design_edits or "retrieval_design" in current_raw:
+        draft["retrieval_design"] = effective_retrieval_design.to_dict()
+    else:
+        draft.pop("retrieval_design", None)
+    if allow_retrieval_design_edits:
+        derived_priorities, derived_terms = derive_legacy_search_views(
+            effective_retrieval_design
+        )
+        draft["search_priorities"] = _dedupe_strings(
+            derived_priorities,
+            limit=LIST_LIMITS["search_priorities"],
+        )
+        draft["additional_search_terms"] = _dedupe_strings(
+            derived_terms,
+            limit=LIST_LIMITS["additional_search_terms"],
+        )
 
     draft["instructions"] = _ensure_hard_gate_instruction(
         draft.get("instructions", current_raw.get("instructions", [])),
@@ -642,16 +1209,56 @@ def iterate_brief_draft(
         raise FileNotFoundError(f"Structured run report not found: {resolved_report}")
 
     current_raw = read_json(brief_path)
+    allow_retrieval_design_edits = _raw_has_explicit_retrieval_design(current_raw)
     report = StructuredRunReport.from_dict(read_json(resolved_report))
     search_memory = read_json(resolved_search_memory) if resolved_search_memory and resolved_search_memory.exists() else None
     final_summary = _summarize_final_judgments(resolved_final) if resolved_final and resolved_final.exists() else None
+    market_intel_summary = _load_market_intel_summary(brief_path, output_root)
+    usage_log_path = output_root / "brief-iteration-token-cost-log.jsonl"
 
-    proposal = opus_llm(
-        _build_iteration_system(),
-        _build_iteration_user_prompt(current_raw, report, search_memory, final_summary),
-        expect_json=True,
-        max_tokens=12000,
-    )
+    with llm_usage_session(
+        usage_log_path,
+        pipeline="brief_iteration",
+        brief_path=str(brief_path),
+        draft_source_version=str(current_raw.get("version", "")),
+    ):
+        system_prompt = _build_iteration_system(
+            allow_retrieval_design_edits=allow_retrieval_design_edits
+        )
+        try:
+            proposal = opus_llm(
+                system_prompt,
+                _build_iteration_user_prompt(
+                    current_raw,
+                    report,
+                    search_memory,
+                    final_summary,
+                    market_intel_summary,
+                    allow_retrieval_design_edits=allow_retrieval_design_edits,
+                    tight=False,
+                ),
+                expect_json=True,
+                max_tokens=12000,
+                usage_context={"stage": "brief_iteration_proposal", "attempt": "initial"},
+            )
+        except RuntimeError as exc:
+            if "stop_reason=max_tokens" not in str(exc):
+                raise
+            proposal = opus_llm(
+                system_prompt,
+                _build_iteration_user_prompt(
+                    current_raw,
+                    report,
+                    search_memory,
+                    final_summary,
+                    market_intel_summary,
+                    allow_retrieval_design_edits=allow_retrieval_design_edits,
+                    tight=True,
+                ),
+                expect_json=True,
+                max_tokens=16000,
+                usage_context={"stage": "brief_iteration_proposal", "attempt": "tight_retry"},
+            )
     if not isinstance(proposal, dict):
         raise ValueError("brief iteration proposal must be a dict")
 

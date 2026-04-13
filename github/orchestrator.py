@@ -38,6 +38,7 @@ from github.governor import (
 from github.query_validator import ExhaustionState
 from github.observability import SessionObserver
 from shared.contact_discovery import merge_profile_contact
+from shared.output_paths import resolve_github_state_dir
 
 from shared.failures import judgment_failure_decision
 from shared.execution import CandidateExecutionEngine
@@ -72,8 +73,14 @@ class GitHubPipeline:
         brief_path: str,
         output_dir: Optional[str] = None,
     ):
+        self.brief_path = str(brief_path)
         self.brief_obj = load_brief(brief_path)
-        self.output_dir = Path(output_dir) if output_dir else gc.GITHUB_OUTPUT_DIR
+        self.state_dir = resolve_github_state_dir(
+            brief_path=self.brief_path,
+            brief=self.brief_obj,
+            state_dir=output_dir,
+        )
+        self.output_dir = self.state_dir
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Initialize judger with the Brief
@@ -271,6 +278,7 @@ class GitHubPipeline:
         bias_summary = None
         self.stats["api_status"] = self._get_api_status()
         self._observer.on_session_end(self.stats, progress or GitHubProgress(brief_name=self.brief_obj.id), bias_summary)
+        self._finalize_run_snapshot()
 
         # Export CSV for Gem/Greenhouse import
         if self.stats["saved"] > 0:
@@ -1340,6 +1348,33 @@ class GitHubPipeline:
     def _save_progress(self):
         self._ensure_services()
         self._work_unit_service.save_progress()
+
+    def _finalize_run_snapshot(self) -> None:
+        """Freeze the current state_dir into an immutable run_dir snapshot."""
+        if not getattr(self, "_runtime_run_id", None):
+            return
+        try:
+            from market_intelligence.run_snapshots import finalize_run_snapshot
+
+            run_dir = finalize_run_snapshot(
+                source="github",
+                brief_path=self.brief_path,
+                state_dir=self.state_dir,
+                run_id=int(self._runtime_run_id),
+            )
+            log_event(
+                self.log_path,
+                "run_snapshot_finalized",
+                run_id=int(self._runtime_run_id),
+                run_dir=str(run_dir),
+            )
+            if self._observer:
+                self._observer.console.emit_info(f"Run snapshot: {run_dir}")
+        except Exception as exc:
+            if self._observer:
+                self._observer.console.emit_warn(f"Run snapshot finalization failed: {exc}")
+            else:
+                print(f"[warn] Run snapshot finalization failed: {exc}")
 
     def _build_batch_report(self, batch_stats: list[dict]) -> GitHubBatchReport:
         report = GitHubBatchReport(

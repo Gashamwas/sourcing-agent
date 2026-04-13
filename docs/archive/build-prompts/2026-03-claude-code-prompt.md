@@ -1,4 +1,6 @@
-# Task: Build the multi-model LinkedIn Recruiter sourcing pipeline
+# Archived Build Prompt — Multi-Model LinkedIn Recruiter Sourcing Pipeline (March 2026)
+
+Historical build-session prompt preserved for context. This is not a living reference for the current `sourcing-agent` repo.
 
 You are building a Python pipeline that replaces a single-model AI sourcing agent (OpenClaw + Claude Opus) with a cost-efficient two-model architecture. A cheap model (GPT-4o-mini or Gemini Flash) handles all browser automation and DOM extraction. Opus handles only candidate evaluation. The goal is to cut Opus token usage by ~90%.
 

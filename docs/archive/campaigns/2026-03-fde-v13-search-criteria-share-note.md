@@ -1,4 +1,6 @@
-# How We Found the v13 FDE Pool
+# How We Found the v13 FDE Pool (March 2026 Campaign Snapshot)
+
+Historical campaign artifact preserved for context.
 
 ## Why this run focused on edge cases first
 

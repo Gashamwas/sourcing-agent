@@ -1,4 +1,6 @@
-# Forward Deployed Engineer (IC) Demo
+# Forward Deployed Engineer (IC) Demo — Share Note (March 2026 Campaign Snapshot)
+
+Historical campaign artifact preserved for context.
 
 ## Share Note
 

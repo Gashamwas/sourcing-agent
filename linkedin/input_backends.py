@@ -8,9 +8,12 @@ import ctypes.util
 import math
 import random
 import sys
+import time
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from decoy.actions._utils import human_scroll
+from shared import config
 from shared.human_timing import human_delay_correlated
 
 if TYPE_CHECKING:
@@ -32,6 +35,189 @@ def normalize_input_mode(mode: str | None) -> str:
     if raw not in aliases:
         raise ValueError(f"Unsupported input mode: {mode}")
     return aliases[raw]
+
+
+@dataclass(frozen=True)
+class TypingStep:
+    kind: str
+    value: str = ""
+    delay_seconds: float = 0.0
+    source_index: int | None = None
+    is_correction: bool = False
+
+
+@dataclass(frozen=True)
+class TypingPlan:
+    steps: list[TypingStep]
+    typo_positions: tuple[int, ...] = field(default_factory=tuple)
+
+    @property
+    def typo_count(self) -> int:
+        return len(self.typo_positions)
+
+    @property
+    def used_correction(self) -> bool:
+        return bool(self.typo_positions)
+
+
+@dataclass(frozen=True)
+class TypingResult:
+    transport: str
+    duration_ms: int
+    typo_count: int
+    used_correction: bool
+    fallback_char_count: int = 0
+
+
+_BOOLEAN_OPERATORS = {"AND", "OR", "NOT"}
+_THINKING_PAUSE_MIN_INDEX = 18
+
+
+def _random_alpha_replacement(ch: str, rng: random.Random) -> str:
+    alphabet = "abcdefghijklmnopqrstuvwxyz"
+    if ch.isupper():
+        alphabet = alphabet.upper()
+    candidates = [candidate for candidate in alphabet if candidate != ch]
+    return rng.choice(candidates)
+
+
+def _char_delay(rng: random.Random) -> float:
+    return rng.uniform(
+        config.LINKEDIN_SEARCH_TYPING_CHAR_MIN_SECONDS,
+        config.LINKEDIN_SEARCH_TYPING_CHAR_MAX_SECONDS,
+    )
+
+
+def build_boolean_typing_plan(text: str, *, rng: random.Random | None = None) -> TypingPlan:
+    rng = rng or random.Random()
+    eligible_positions: list[int] = []
+    operator_pause_after: set[int] = set()
+    closing_pause_after: set[int] = set()
+
+    token_start = 0
+    while token_start < len(text):
+        if text[token_start].isalpha():
+            token_end = token_start
+            while token_end < len(text) and text[token_end].isalpha():
+                token_end += 1
+            token = text[token_start:token_end]
+            if len(token) >= 5 and token.upper() not in _BOOLEAN_OPERATORS:
+                eligible_positions.extend(range(token_start, token_end))
+            if token.upper() in _BOOLEAN_OPERATORS:
+                operator_pause_after.add(token_end - 1)
+            token_start = token_end
+            continue
+        token_start += 1
+
+    for idx, ch in enumerate(text):
+        if ch not in (")", '"', "'"):
+            continue
+        next_ch = text[idx + 1] if idx + 1 < len(text) else ""
+        if not next_ch or next_ch.isspace() or next_ch in ")(":
+            closing_pause_after.add(idx)
+
+    typo_positions: list[int] = []
+    if len(text) >= 25 and eligible_positions:
+        if len(text) < 60:
+            if rng.random() < config.LINKEDIN_SEARCH_TYPING_MEDIUM_TYPO_PROBABILITY:
+                typo_positions.append(rng.choice(eligible_positions))
+        else:
+            if rng.random() < config.LINKEDIN_SEARCH_TYPING_LONG_TYPO_PROBABILITY:
+                first = rng.choice(eligible_positions)
+                typo_positions.append(first)
+                if (
+                    rng.random() < config.LINKEDIN_SEARCH_TYPING_SECOND_TYPO_PROBABILITY
+                    and len(typo_positions) < config.LINKEDIN_SEARCH_TYPING_MAX_TYPOS
+                ):
+                    candidates = [
+                        idx for idx in eligible_positions if abs(idx - first) >= 20
+                    ]
+                    if candidates:
+                        typo_positions.append(rng.choice(candidates))
+
+    typo_positions = sorted(typo_positions[: config.LINKEDIN_SEARCH_TYPING_MAX_TYPOS])
+
+    thought_pause_after: int | None = None
+    if len(text) >= 45 and rng.random() < 0.6:
+        candidates = [
+            idx
+            for idx, ch in enumerate(text)
+            if ch.isspace()
+            and _THINKING_PAUSE_MIN_INDEX <= idx <= max(_THINKING_PAUSE_MIN_INDEX, len(text) - 10)
+        ]
+        if candidates:
+            thought_pause_after = rng.choice(candidates)
+
+    typo_position_set = set(typo_positions)
+    slowdown_remaining = 0
+    steps: list[TypingStep] = []
+
+    for idx, ch in enumerate(text):
+        if idx in typo_position_set:
+            wrong_char = _random_alpha_replacement(ch, rng)
+            steps.append(
+                TypingStep(
+                    kind="char",
+                    value=wrong_char,
+                    delay_seconds=_char_delay(rng),
+                    source_index=idx,
+                )
+            )
+            steps.append(
+                TypingStep(
+                    kind="backspace",
+                    delay_seconds=_char_delay(rng),
+                    source_index=idx,
+                )
+            )
+            steps.append(
+                TypingStep(
+                    kind="char",
+                    value=ch,
+                    delay_seconds=_char_delay(rng),
+                    source_index=idx,
+                    is_correction=True,
+                )
+            )
+            slowdown_remaining = 4
+        else:
+            delay = _char_delay(rng)
+            if slowdown_remaining > 0:
+                delay += rng.uniform(0.02, 0.04)
+                slowdown_remaining -= 1
+            steps.append(
+                TypingStep(
+                    kind="char",
+                    value=ch,
+                    delay_seconds=delay,
+                    source_index=idx,
+                )
+            )
+
+        if idx in operator_pause_after or idx in closing_pause_after:
+            steps.append(
+                TypingStep(
+                    kind="pause",
+                    delay_seconds=rng.uniform(
+                        config.LINKEDIN_SEARCH_TYPING_OPERATOR_PAUSE_MIN_SECONDS,
+                        config.LINKEDIN_SEARCH_TYPING_OPERATOR_PAUSE_MAX_SECONDS,
+                    ),
+                    source_index=idx,
+                )
+            )
+        if thought_pause_after is not None and idx == thought_pause_after:
+            steps.append(
+                TypingStep(
+                    kind="pause",
+                    delay_seconds=rng.uniform(
+                        config.LINKEDIN_SEARCH_TYPING_THOUGHT_PAUSE_MIN_SECONDS,
+                        config.LINKEDIN_SEARCH_TYPING_THOUGHT_PAUSE_MAX_SECONDS,
+                    ),
+                    source_index=idx,
+                )
+            )
+
+    return TypingPlan(steps=steps, typo_positions=tuple(typo_positions))
 
 
 class InputBackend:
@@ -59,6 +245,19 @@ class InputBackend:
         raise NotImplementedError
 
     async def press_key(self, page: "Page", key: str) -> bool:
+        raise NotImplementedError
+
+    async def press_combo(self, page: "Page", combo: str) -> bool:
+        raise NotImplementedError
+
+    async def type_text(
+        self,
+        page: "Page",
+        locator: "Locator",
+        text: str,
+        *,
+        plan: TypingPlan,
+    ) -> TypingResult:
         raise NotImplementedError
 
 
@@ -116,6 +315,42 @@ class ConcurrentInputBackend(InputBackend):
     async def press_key(self, page: "Page", key: str) -> bool:
         await page.keyboard.press(key)
         return True
+
+    async def press_combo(self, page: "Page", combo: str) -> bool:
+        await page.keyboard.press(combo)
+        return True
+
+    async def type_text(
+        self,
+        page: "Page",
+        locator: "Locator",
+        text: str,
+        *,
+        plan: TypingPlan,
+    ) -> TypingResult:
+        start = time.perf_counter()
+        fallback_char_count = 0
+        for step in plan.steps:
+            if step.kind == "pause":
+                await asyncio.sleep(step.delay_seconds)
+                continue
+            if step.kind == "backspace":
+                await page.keyboard.press("Backspace")
+            elif step.kind == "char":
+                try:
+                    await page.keyboard.type(step.value, delay=0)
+                except Exception:
+                    await page.keyboard.insert_text(step.value)
+                    fallback_char_count += 1
+            if step.delay_seconds > 0:
+                await asyncio.sleep(step.delay_seconds)
+        return TypingResult(
+            transport="playwright_keyboard",
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            typo_count=plan.typo_count,
+            used_correction=plan.used_correction,
+            fallback_char_count=fallback_char_count,
+        )
 
 
 class _CGPoint(ctypes.Structure):
@@ -244,6 +479,65 @@ class AwayInputBackend(InputBackend):
         "Escape": 53,
         "Tab": 48,
         "Space": 49,
+        "Backspace": 51,
+        "Meta": 55,
+        "Shift": 56,
+    }
+    CHAR_KEY_CODES = {
+        "a": (0, False),
+        "s": (1, False),
+        "d": (2, False),
+        "f": (3, False),
+        "h": (4, False),
+        "g": (5, False),
+        "z": (6, False),
+        "x": (7, False),
+        "c": (8, False),
+        "v": (9, False),
+        "b": (11, False),
+        "q": (12, False),
+        "w": (13, False),
+        "e": (14, False),
+        "r": (15, False),
+        "y": (16, False),
+        "t": (17, False),
+        "1": (18, False),
+        "2": (19, False),
+        "3": (20, False),
+        "4": (21, False),
+        "6": (22, False),
+        "5": (23, False),
+        "=": (24, False),
+        "9": (25, False),
+        "7": (26, False),
+        "-": (27, False),
+        "8": (28, False),
+        "0": (29, False),
+        "]": (30, False),
+        "o": (31, False),
+        "u": (32, False),
+        "[": (33, False),
+        "i": (34, False),
+        "p": (35, False),
+        "l": (37, False),
+        "j": (38, False),
+        "'": (39, False),
+        "k": (40, False),
+        ";": (41, False),
+        "\\": (42, False),
+        ",": (43, False),
+        "/": (44, False),
+        "n": (45, False),
+        "m": (46, False),
+        ".": (47, False),
+        " ": (49, False),
+        "`": (50, False),
+        '"': (39, True),
+        "(": (25, True),
+        ")": (29, True),
+        ":": (41, True),
+        "+": (24, True),
+        "&": (26, True),
     }
 
     def __init__(self):
@@ -305,6 +599,65 @@ class AwayInputBackend(InputBackend):
         )
         self._cg.post_key(key_code, False)
         return True
+
+    async def press_combo(self, page: "Page", combo: str) -> bool:
+        parts = [part.strip() for part in combo.split("+") if part.strip()]
+        if not parts:
+            return False
+        modifiers: list[int] = []
+        main_key_code: int | None = None
+        for part in parts:
+            lowered = part.lower()
+            if lowered in {"meta", "command", "cmd"}:
+                modifiers.append(self.KEY_CODES["Meta"])
+                continue
+            if lowered == "shift":
+                modifiers.append(self.KEY_CODES["Shift"])
+                continue
+            if len(part) == 1 and part.isalpha():
+                char_spec = self.CHAR_KEY_CODES.get(part.lower())
+                if char_spec is None:
+                    return False
+                main_key_code = char_spec[0]
+                continue
+            key_code = self.KEY_CODES.get(part)
+            if key_code is None:
+                return False
+            main_key_code = key_code
+        if main_key_code is None:
+            return False
+        self._press_with_modifiers(main_key_code, modifiers)
+        return True
+
+    async def type_text(
+        self,
+        page: "Page",
+        locator: "Locator",
+        text: str,
+        *,
+        plan: TypingPlan,
+    ) -> TypingResult:
+        start = time.perf_counter()
+        fallback_char_count = 0
+        for step in plan.steps:
+            if step.kind == "pause":
+                await asyncio.sleep(step.delay_seconds)
+                continue
+            if step.kind == "backspace":
+                self._post_key_tap(self.KEY_CODES["Backspace"])
+            elif step.kind == "char":
+                if not self._type_char(step.value):
+                    await page.keyboard.insert_text(step.value)
+                    fallback_char_count += 1
+            if step.delay_seconds > 0:
+                await asyncio.sleep(step.delay_seconds)
+        return TypingResult(
+            transport="coregraphics_keyboard",
+            duration_ms=int((time.perf_counter() - start) * 1000),
+            typo_count=plan.typo_count,
+            used_correction=plan.used_correction,
+            fallback_char_count=fallback_char_count,
+        )
 
     async def _locator_screen_point(
         self,
@@ -374,6 +727,37 @@ class AwayInputBackend(InputBackend):
                     channel=f"{channel}_micro",
                 )
             )
+
+    def _post_key_tap(self, key_code: int) -> None:
+        self._cg.post_key(key_code, True)
+        self._cg.post_key(key_code, False)
+
+    def _press_with_modifiers(self, key_code: int, modifiers: list[int]) -> None:
+        for modifier in modifiers:
+            self._cg.post_key(modifier, True)
+        self._cg.post_key(key_code, True)
+        self._cg.post_key(key_code, False)
+        for modifier in reversed(modifiers):
+            self._cg.post_key(modifier, False)
+
+    def _type_char(self, ch: str) -> bool:
+        if len(ch) != 1:
+            return False
+        if ch.isalpha():
+            spec = self.CHAR_KEY_CODES.get(ch.lower())
+            if spec is None:
+                return False
+            key_code, _ = spec
+            modifiers = [self.KEY_CODES["Shift"]] if ch.isupper() else []
+            self._press_with_modifiers(key_code, modifiers)
+            return True
+        spec = self.CHAR_KEY_CODES.get(ch)
+        if spec is None:
+            return False
+        key_code, needs_shift = spec
+        modifiers = [self.KEY_CODES["Shift"]] if needs_shift else []
+        self._press_with_modifiers(key_code, modifiers)
+        return True
 
 
 def create_input_backend(mode: str | None) -> InputBackend:

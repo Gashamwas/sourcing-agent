@@ -31,9 +31,9 @@ python3 github/session_orchestrator.py --brief config/brief-fdl-colombia-v3.json
 python3 github/session_orchestrator.py --brief config/brief-fdl-colombia-v3.json --single-session
 ```
 
-**Custom output directory:**
+**Custom mutable state directory:**
 ```bash
-python3 run_github.py --brief config/brief-fdl-colombia-v3.json --output-dir output/github-colombia
+python3 run_github.py --brief config/brief-fdl-colombia-v3.json --state-dir output/state/github/fdl_colombia
 ```
 
 ---
@@ -83,9 +83,13 @@ Shows: sessions used today, sessions remaining, and whether you're clear to run.
 
 ---
 
-## Output
+## Output Contract
 
-All output lands in `output/github/` (or your `--output-dir`):
+Live GitHub runs write into `output/state/github/<brief-id>/`.
+Completed runs are snapshotted into `output/runs/github/<brief-id>/<run-stamp>__run-<id>/`.
+CSV exports land in `output/exports/github/<brief-id>/`.
+
+Common live-state files:
 
 | File | Contents |
 |------|----------|
@@ -93,16 +97,16 @@ All output lands in `output/github/` (or your `--output-dir`):
 | `final_judgments.jsonl` | Opus evaluation decisions (SAVE / REJECT / INFERENTIAL_SAVE) |
 | `outreach.jsonl` | Generated outreach copy for saved candidates |
 | `progress.json` | Session state — search channels, page positions, queues |
-| `gem_export.csv` | CSV formatted for Gem/Greenhouse import |
+| `saved_candidates.csv` | Exported CSV in `output/exports/github/<brief-id>/` |
 
 **Export to CSV manually (if auto-export didn't run):**
 ```bash
-python3 -c "from github.export import export_csv; export_csv('output/github/')"
+python3 -c "from github.export import export_saved_candidates_csv; export_saved_candidates_csv('output/state/github/<brief-id>', csv_path='output/exports/github/<brief-id>/saved_candidates.csv')"
 ```
 
 **View saved candidates:**
 ```bash
-cat output/github/final_judgments.jsonl | python3 -c "
+cat output/state/github/<brief-id>/final_judgments.jsonl | python3 -c "
 import sys, json
 for line in sys.stdin:
     j = json.loads(line)
@@ -113,7 +117,7 @@ for line in sys.stdin:
 
 **Count saves vs rejects:**
 ```bash
-cat output/github/final_judgments.jsonl | python3 -c "
+cat output/state/github/<brief-id>/final_judgments.jsonl | python3 -c "
 import sys, json, collections
 c = collections.Counter()
 for line in sys.stdin:
@@ -231,7 +235,7 @@ If `remaining` is 0, you've hit the hourly limit. The agent should auto-wait, bu
 
 **Want to start fresh (discard all progress):**
 ```bash
-rm -rf output/github/
+rm -rf output/state/github/<brief-id> output/runs/github/<brief-id> output/exports/github/<brief-id>
 python3 run_github.py --brief config/brief-fdl-colombia-v3.json
 ```
 

@@ -19,6 +19,8 @@ import signal
 import sys
 import time
 
+from shared.output_paths import resolve_github_state_dir
+
 from github.governor import (
     GitHubGovernor,
     GitHubGovernorLimitReached,
@@ -162,7 +164,12 @@ async def run_day_cycle(
 def main():
     parser = argparse.ArgumentParser(description="GitHub Session Orchestrator")
     parser.add_argument("--brief", help="Path to sourcing brief JSON")
-    parser.add_argument("--output-dir", default=None, help="Output directory")
+    parser.add_argument(
+        "--state-dir",
+        default=None,
+        help="Mutable brief-scoped state directory (default: output/state/github/<brief-id>/)",
+    )
+    parser.add_argument("--output-dir", default=None, help="Deprecated alias for --state-dir")
     parser.add_argument("--single-session", action="store_true", help="Run one session only")
     parser.add_argument("--resume", action="store_true", help="Resume from existing progress")
     parser.add_argument("--status", action="store_true", help="Print current stats")
@@ -176,9 +183,18 @@ def main():
     if not args.brief:
         parser.error("--brief is required (or use --status)")
 
+    state_dir = None
+    if args.brief:
+        state_dir = str(
+            resolve_github_state_dir(
+                brief_path=args.brief,
+                state_dir=args.state_dir or args.output_dir,
+            )
+        )
+
     asyncio.run(run_day_cycle(
         brief_path=args.brief,
-        output_dir=args.output_dir,
+        output_dir=state_dir,
         single_session=args.single_session,
         resume=args.resume,
     ))

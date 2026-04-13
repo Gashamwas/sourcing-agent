@@ -275,6 +275,9 @@ def test_sync_progress_roundtrips_pending_drift_and_family_metrics(tmp_path):
     )
     state.record_variant_metrics(page_num=1, result_count=1800, page_stats={"candidates": 4, "facial_yes": 2, "saves": 1}, page_insights=page)
     state.record_family_page_metrics(page_num=1, result_count=1800, page_stats={"candidates": 4, "facial_yes": 2, "saves": 1}, page_insights=page)
+    state.precommit_recovery_attempts_used = 2
+    state.committed_pages_reviewed = 1
+    state.committed_zero_signal_streak = 0
     drift_variant = LinkedInSearchVariant(
         variant_id="drift-1",
         parent_variant_id="root",
@@ -302,8 +305,12 @@ def test_sync_progress_roundtrips_pending_drift_and_family_metrics(tmp_path):
     assert loaded_states[1].pending_drift_variant_id == "drift-1"
     assert loaded_states[1].pending_drift_parent_variant_id == "root"
     assert loaded_states[1].drift_attempt_count == 1
+    assert loaded_states[1].precommit_recovery_attempts_used == 2
+    assert loaded_states[1].committed_pages_reviewed == 1
+    assert loaded_states[1].committed_zero_signal_streak == 0
     assert metrics["experiment_summary"]["family_pages_reviewed_total"] == 1
     assert metrics["experiment_summary"]["active_variant_pages_reviewed"] == 0
+    assert metrics["experiment_summary"]["precommit_recovery_attempts_used"] == 2
     assert metrics["experiment_summary"]["drift_rescue_summary"]["decision"] == "refine_committed"
 
 

@@ -273,6 +273,15 @@ def _slugify(value: str) -> str:
     return re.sub(r"_+", "_", text) or "unlabeled_family"
 
 
+def _stringify_list(value: list[object]) -> list[str]:
+    out: list[str] = []
+    for item in value or []:
+        text = str(item or "").strip()
+        if text:
+            out.append(text)
+    return out
+
+
 def normalize_family_key(
     family_key: str | None,
     boolean: str = "",
@@ -385,6 +394,42 @@ def build_search_memory_summary(memory: dict | None, limit: int = 8) -> dict:
             family["save_rate"],
         )
     )
+    layer_items = memory.get("layer_items", {})
+    layer_item_summary = sorted(
+        (
+            {
+                "layer_item_id": item.get("layer_item_id", ""),
+                "layer_name": item.get("layer_name", ""),
+                "label": item.get("label", ""),
+                "family_keys": item.get("family_keys", [])[:3],
+                "saves": item.get("saves", 0),
+                "strings_seen": item.get("strings_seen", 0),
+                "noise_rate": round(item.get("noise_rate", 0.0), 4),
+                "duplicate_rate": round(item.get("duplicate_rate", 0.0), 4),
+            }
+            for item in layer_items.values()
+            if isinstance(item, dict)
+        ),
+        key=lambda item: (item["saves"], item["strings_seen"]),
+        reverse=True,
+    )
+    hypotheses = memory.get("hypotheses", {})
+    hypothesis_summary = sorted(
+        (
+            {
+                "hypothesis_id": item.get("hypothesis_id", ""),
+                "status": item.get("status", "hypothesis"),
+                "source": item.get("source", ""),
+                "saves": item.get("saves", 0),
+                "strings_seen": item.get("strings_seen", 0),
+                "confidence": round(item.get("confidence", 0.0), 4),
+            }
+            for item in hypotheses.values()
+            if isinstance(item, dict)
+        ),
+        key=lambda item: (item["saves"], item["strings_seen"]),
+        reverse=True,
+    )
 
     total_candidates = overall.get("candidates_seen", 0)
     total_duplicates = overall.get("duplicates", 0)
@@ -403,6 +448,8 @@ def build_search_memory_summary(memory: dict | None, limit: int = 8) -> dict:
             },
         },
         "families": summary_families[:limit],
+        "layer_items": layer_item_summary[:limit],
+        "hypotheses": hypothesis_summary[:limit],
     }
 
 
@@ -441,6 +488,14 @@ def format_search_memory_summary(memory: dict | None, limit: int = 8) -> str:
 
     if not summary["families"]:
         lines.append("- No family history available yet.")
+        if summary.get("layer_items"):
+            lines.append("- Layer items observed:")
+            for item in summary["layer_items"][:limit]:
+                lines.append(
+                    "  "
+                    f"* {item['layer_name']}::{item['label']} saves={item['saves']} "
+                    f"strings={item['strings_seen']} noise_rate={item['noise_rate']:.1%}"
+                )
         return "\n".join(lines)
 
     lines.append("- Family status:")
@@ -454,6 +509,22 @@ def format_search_memory_summary(memory: dict | None, limit: int = 8) -> str:
         )
         if family["status_reason"]:
             lines.append(f"    reason: {family['status_reason']}")
+    if summary.get("layer_items"):
+        lines.append("- High-signal retrieval layer items:")
+        for item in summary["layer_items"][:5]:
+            lines.append(
+                "  "
+                f"* {item['layer_name']}::{item['label']} saves={item['saves']} "
+                f"strings={item['strings_seen']} duplicate_rate={item['duplicate_rate']:.1%}"
+            )
+    if summary.get("hypotheses"):
+        lines.append("- Edge-case hypothesis status:")
+        for item in summary["hypotheses"][:5]:
+            lines.append(
+                "  "
+                f"* {item['hypothesis_id']} status={item['status']} "
+                f"saves={item['saves']} strings={item['strings_seen']}"
+            )
 
     return "\n".join(lines)
 
@@ -475,6 +546,9 @@ def update_search_memory(
     overall.setdefault("saves", 0)
     overall.setdefault("edge_case_saves", 0)
     overall.setdefault("canonical_saves", 0)
+    layer_items = dict(memory.get("layer_items", {}))
+    layer_combinations = dict(memory.get("layer_combinations", {}))
+    hypotheses = dict(memory.get("hypotheses", {}))
 
     for string in strings:
         family_key = normalize_family_key(
@@ -566,9 +640,86 @@ def update_search_memory(
         else:
             overall["canonical_saves"] += saves
 
+        retrieval_recipe = getattr(string, "retrieval_recipe", {}) or {}
+        used_layer_items = retrieval_recipe.get("used_layer_item_ids", {})
+        if isinstance(used_layer_items, dict):
+            for layer_name, item_ids in used_layer_items.items():
+                for item_id in _stringify_list(item_ids):
+                    layer_entry = dict(layer_items.get(item_id, {}))
+                    layer_entry.setdefault("layer_item_id", item_id)
+                    layer_entry.setdefault("layer_name", layer_name)
+                    layer_entry.setdefault("label", item_id.replace("_", " "))
+                    layer_entry.setdefault("family_keys", [])
+                    layer_entry.setdefault("strings_seen", 0)
+                    layer_entry.setdefault("saves", 0)
+                    layer_entry.setdefault("duplicates", 0)
+                    layer_entry.setdefault("candidates_seen", 0)
+                    layer_entry["strings_seen"] += 1
+                    layer_entry["saves"] += saves
+                    layer_entry["duplicates"] += duplicates
+                    layer_entry["candidates_seen"] += candidates_seen
+                    if family_key not in layer_entry["family_keys"]:
+                        layer_entry["family_keys"] = list(layer_entry["family_keys"]) + [family_key]
+                    total_seen = layer_entry["candidates_seen"] + layer_entry["duplicates"]
+                    layer_entry["duplicate_rate"] = round(
+                        layer_entry["duplicates"] / max(total_seen, 1), 4
+                    )
+                    layer_entry["noise_rate"] = round(
+                        max(layer_entry["candidates_seen"] - layer_entry["saves"], 0)
+                        / max(layer_entry["candidates_seen"], 1),
+                        4,
+                    )
+                    layer_items[item_id] = layer_entry
+
+            combo_key = "|".join(
+                sorted(
+                    item_id
+                    for values in used_layer_items.values()
+                    for item_id in _stringify_list(values)
+                )
+            )
+            if combo_key:
+                combo_entry = dict(layer_combinations.get(combo_key, {}))
+                combo_entry.setdefault("combo_key", combo_key)
+                combo_entry.setdefault("strings_seen", 0)
+                combo_entry.setdefault("saves", 0)
+                combo_entry.setdefault("duplicates", 0)
+                combo_entry.setdefault("candidate_count", 0)
+                combo_entry["strings_seen"] += 1
+                combo_entry["saves"] += saves
+                combo_entry["duplicates"] += duplicates
+                combo_entry["candidate_count"] += candidates_seen
+                layer_combinations[combo_key] = combo_entry
+
+        for hypothesis_id in _stringify_list(
+            getattr(string, "retrieval_hypothesis_ids", [])
+            or retrieval_recipe.get("applied_hypothesis_ids", [])
+        ):
+            hypothesis_entry = dict(hypotheses.get(hypothesis_id, {}))
+            hypothesis_entry.setdefault("hypothesis_id", hypothesis_id)
+            hypothesis_entry.setdefault("status", "hypothesis")
+            hypothesis_entry.setdefault("source", "run")
+            hypothesis_entry.setdefault("strings_seen", 0)
+            hypothesis_entry.setdefault("saves", 0)
+            hypothesis_entry.setdefault("duplicates", 0)
+            hypothesis_entry.setdefault("candidate_count", 0)
+            hypothesis_entry["strings_seen"] += 1
+            hypothesis_entry["saves"] += saves
+            hypothesis_entry["duplicates"] += duplicates
+            hypothesis_entry["candidate_count"] += candidates_seen
+            if hypothesis_entry["strings_seen"] >= 2 and hypothesis_entry["saves"] >= 2:
+                hypothesis_entry["status"] = "validated"
+                hypothesis_entry["confidence"] = 0.7
+            else:
+                hypothesis_entry["confidence"] = 0.35 if hypothesis_entry["saves"] else 0.15
+            hypotheses[hypothesis_id] = hypothesis_entry
+
     memory["version"] = 1
     memory["project_id"] = project_id
     memory["updated_at"] = datetime.now(timezone.utc).isoformat()
     memory["overall"] = overall
     memory["families"] = families
+    memory["layer_items"] = layer_items
+    memory["layer_combinations"] = layer_combinations
+    memory["hypotheses"] = hypotheses
     return memory

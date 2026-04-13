@@ -1,4 +1,6 @@
-# Forward Deployed Engineer (IC) Sourcing Demo
+# Forward Deployed Engineer (IC) Sourcing Demo — Unified Memo (March 2026 Campaign Snapshot)
+
+Historical campaign artifact preserved for context.
 
 ## Unified Synthesis Memo for Recruiting Lead
 

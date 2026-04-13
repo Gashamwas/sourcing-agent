@@ -35,6 +35,7 @@ class ExecutionPlan:
     strategy_rationale: str
     noise_predictions: list[dict] = field(default_factory=list)
     generated_strings: list[dict] = field(default_factory=list)
+    retrieval_families: list[dict] = field(default_factory=list)
     coverage_gaps: list[dict] = field(default_factory=list)
     # Search architecture
     architecture: str = ""  # sniper|dragnet|titration|negative_space|company_first|title_first
@@ -55,6 +56,7 @@ class ExecutionPlan:
             strategy_rationale=d.get("strategy_rationale", ""),
             noise_predictions=d.get("noise_predictions", []),
             generated_strings=d.get("generated_strings", []),
+            retrieval_families=d.get("retrieval_families", []),
             coverage_gaps=d.get("coverage_gaps", []),
             architecture=d.get("architecture", ""),
             architecture_rationale=d.get("architecture_rationale", ""),
@@ -80,6 +82,7 @@ class BlockReport:
     noise_patterns_observed: list[dict] = field(default_factory=list)
     new_signals: list[str] = field(default_factory=list)
     string_details: list[dict] = field(default_factory=list)
+    search_intelligence_summary: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -104,6 +107,33 @@ class BlockReport:
             lines.append(f"- Noise patterns observed: {noise}")
         if self.new_signals:
             lines.append(f"- New signal observed: {', '.join(self.new_signals)}")
+        if self.search_intelligence_summary:
+            summary = self.search_intelligence_summary
+            if summary.get("strings_with_precommit_experiments"):
+                lines.append(
+                    "- Pre-commit experiments: "
+                    + ", ".join(f"#{sid}" for sid in summary["strings_with_precommit_experiments"])
+                )
+            if summary.get("strings_rescued_by_drift"):
+                lines.append(
+                    "- Drift rescues that recovered signal: "
+                    + ", ".join(f"#{sid}" for sid in summary["strings_rescued_by_drift"])
+                )
+            if summary.get("proven_family_keys"):
+                lines.append(
+                    "- Proven families worth exploiting: "
+                    + ", ".join(summary["proven_family_keys"])
+                )
+            if summary.get("proven_domain_lanes"):
+                lines.append(
+                    "- Proven lanes worth exploiting: "
+                    + ", ".join(summary["proven_domain_lanes"])
+                )
+            if summary.get("dead_family_keys"):
+                lines.append(
+                    "- Dead families to demote: "
+                    + ", ".join(summary["dead_family_keys"])
+                )
         if self.string_details:
             lines.append("- Per-string breakdown:")
             for sd in self.string_details:
@@ -133,6 +163,35 @@ class BlockReport:
                         for p in sd['saved_profiles'][:3]
                     )
                     lines.append(f"    Save profiles: {saved_profiles}")
+                search_intelligence = sd.get("search_intelligence") or {}
+                if search_intelligence:
+                    clauses: list[str] = []
+                    if search_intelligence.get("precommit_recovery_attempts_used"):
+                        clauses.append(
+                            f"precommit_recovery={search_intelligence['precommit_recovery_attempts_used']}"
+                        )
+                    if search_intelligence.get("drift_attempt_count"):
+                        clauses.append(
+                            f"drift_attempts={search_intelligence['drift_attempt_count']}"
+                        )
+                    if search_intelligence.get("family_signal_total") is not None:
+                        clauses.append(
+                            f"family_signal={search_intelligence.get('family_signal_total', 0)}"
+                        )
+                    if search_intelligence.get("family_saves_total") is not None:
+                        clauses.append(
+                            f"family_saves={search_intelligence.get('family_saves_total', 0)}"
+                        )
+                    best_variant = search_intelligence.get("best_variant") or {}
+                    if best_variant.get("variant_id"):
+                        clauses.append(
+                            f"best_variant={best_variant.get('variant_kind', 'variant')}:{best_variant['variant_id']}"
+                        )
+                    drift_summary = search_intelligence.get("drift_rescue_summary") or {}
+                    if drift_summary.get("outcome"):
+                        clauses.append(f"drift_outcome={drift_summary['outcome']}")
+                    if clauses:
+                        lines.append(f"    Search intelligence: {', '.join(clauses)}")
         return "\n".join(lines)
 
 
@@ -143,6 +202,8 @@ class BlockReport:
 @dataclass
 class AdaptationResponse:
     new_strings: list[dict] = field(default_factory=list)
+    new_retrieval_families: list[dict] = field(default_factory=list)
+    hypothesis_updates: list[dict] = field(default_factory=list)
     skip_remaining: list[dict] = field(default_factory=list)
     reorder: list[dict] = field(default_factory=list)
     noise_updates: list[dict] = field(default_factory=list)
@@ -157,6 +218,8 @@ class AdaptationResponse:
     def from_dict(cls, d: dict) -> AdaptationResponse:
         return cls(
             new_strings=d.get("new_strings", []),
+            new_retrieval_families=d.get("new_retrieval_families", []),
+            hypothesis_updates=d.get("hypothesis_updates", []),
             skip_remaining=d.get("skip_remaining", []),
             reorder=d.get("reorder", []),
             noise_updates=d.get("noise_updates", []),
@@ -320,6 +383,8 @@ class SearchString:
     family_key: str = ""
     novelty_bucket: str = ""
     domain_lane: str = ""
+    retrieval_recipe: dict = field(default_factory=dict)
+    retrieval_hypothesis_ids: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return asdict(self)

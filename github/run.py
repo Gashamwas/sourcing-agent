@@ -13,11 +13,18 @@ import argparse
 import asyncio
 import sys
 
+from shared.output_paths import resolve_github_state_dir
+
 
 def main():
     parser = argparse.ArgumentParser(description="GitHub Sourcing Pipeline")
     parser.add_argument("--brief", help="Path to sourcing brief JSON")
-    parser.add_argument("--output-dir", default=None, help="Output directory")
+    parser.add_argument(
+        "--state-dir",
+        default=None,
+        help="Mutable brief-scoped state directory (default: output/state/github/<brief-id>/)",
+    )
+    parser.add_argument("--output-dir", default=None, help="Deprecated alias for --state-dir")
     parser.add_argument("--resume", action="store_true", help="Resume from existing progress")
     parser.add_argument("--status", action="store_true", help="Print current session stats")
 
@@ -33,9 +40,13 @@ def main():
 
     from github.orchestrator import GitHubPipeline
 
+    state_dir = resolve_github_state_dir(
+        brief_path=args.brief,
+        state_dir=args.state_dir or args.output_dir,
+    )
     pipeline = GitHubPipeline(
         brief_path=args.brief,
-        output_dir=args.output_dir,
+        output_dir=str(state_dir),
     )
 
     stats = asyncio.run(pipeline.run(resume=args.resume))

@@ -1,4 +1,6 @@
-# LinkedIn Search Agent: Search Construction & Adaptation Audit
+# LinkedIn Search Agent: Search Construction & Adaptation Audit (April 2026 Snapshot)
+
+Historical audit preserved for context. Code line references in this file are point-in-time and may drift as implementation evolves.
 
 ## A. Search String Construction
 

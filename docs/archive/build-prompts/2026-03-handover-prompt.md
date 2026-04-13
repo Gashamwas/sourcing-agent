@@ -1,4 +1,6 @@
-# Task: Remove pre-Opus hard filters + Implement autonomous search evolution
+# Archived Handover Prompt — Hard-Filter Removal + Autonomous Search Evolution (March 2026)
+
+Historical build-session prompt preserved for context. This is not a living reference for the current `sourcing-agent` repo.
 
 You are modifying an existing Python pipeline at `~/multi-model-pipeline/`. The pipeline connects to a Chrome browser via CDP, reads LinkedIn Recruiter search results, extracts candidate data with a cheap model (GPT-4o-mini), and sends structured snippets to Claude Opus for evaluation. It is working end-to-end — tests pass, live browser test completed successfully.
 

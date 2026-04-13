@@ -1,28 +1,28 @@
 {
   "brief_id": "head-applied-ai-lab-nyc",
-  "brief_version": "1.0",
+  "brief_version": "1.1",
   "role_title": "Head of Applied AI Lab",
   "internal_title": "Head of AI Technology",
   "company": "Turing",
   "location": "New York City Metropolitan Area",
   "location_non_negotiable": true,
 
-  "role_summary": "Mini-CTO of Turing's enterprise GenAI practice. Runs the technical side of an applied AI consulting/delivery operation serving Fortune 500 clients with a specific vertical focus on BFSI (Goldman Sachs, Apollo-tier). Equally comfortable whiteboarding architecture with engineers and briefing a CIO. Not a research role — applied GenAI delivery at enterprise scale.",
+  "role_summary": "Mini-CTO of Turing's enterprise GenAI practice. Runs the technical side of an applied AI consulting and delivery operation serving Fortune 500 clients with a specific vertical focus on BFSI, especially capital markets and adjacent institutional-finance workflows. The clearest bank-side target is Executive Director at a major bank, with equivalent seniority allowed at tech companies, market-infrastructure firms, and other relevant BFSI organizations. Equally comfortable whiteboarding architecture with engineers and briefing a CIO. Not a research role — applied GenAI delivery at enterprise scale.",
 
   "minimum_bar": {
     "years_experience": 15,
     "experience_note": "Must hit the ground running. 15yr floor is hard — no exceptions.",
-    "title_floor": "Director, Senior Director, Head of, Principal Engineer/Architect, VP (context-dependent)",
-    "title_ceiling_note": "SVP at large org, MD, EVP, CDAO, CXO at large org, CTO at 100+ person engineering org, Partner at Big4 = likely too senior and too expensive. Exception: CTO/CEO at scrappy startup (<150 employees) — apply Jon Dorando principle.",
+    "title_floor": "Executive Director at a major bank, or Director/Senior Director/Head of/Principal Engineer/Architect/VP (context-dependent) at equivalent-scope tech or BFSI organizations",
+    "title_ceiling_note": "Major-bank MD, global head, SVP at large org, EVP, CDAO, CXO at large org, CTO at 100+ person engineering org, Partner at Big4 = likely too senior and too expensive. Exception: CTO/CEO at scrappy startup (<150 employees) — apply Jon Dorando principle.",
     "technical_depth": "Must show direct, personal involvement in BUILDING AI systems. Not managing a team that builds, not selling it, not developing product strategy around it.",
-    "bfsi_domain": "At least one BFSI employer or BFSI-domain project: Goldman, Morgan Stanley, Citi, JPMorgan, BofA, BlackRock, Vanguard, Apollo, Tradeweb, Bloomberg, fintech at scale, insurance/actuarial AI, credit/risk/trading systems.",
+    "bfsi_domain": "At least one BFSI employer or BFSI-domain project, with highest priority on capital markets and adjacent institutional-finance workflows: Goldman, Morgan Stanley, Citi, JPMorgan, BofA, BlackRock, Vanguard, Apollo, Tradeweb, Bloomberg, market infrastructure, asset management, investment banking, post-trade, research, credit/risk/trading systems. Payments, mortgage, treasury, and insurance are supportive but lower-priority domains.",
     "genai_fluency": "Post-2022 GenAI work required. Must show evidence of: LLM deployment, RAG system design, agentic architectures, evaluation frameworks, or fine-tuning. GenAI strategy without implementation evidence is insufficient.",
     "location": "Current location must be NYC metro (NYC, NJ, CT commuter zone). Remote or other cities = skip."
   },
 
   "sweet_spot": {
     "years": "15-20",
-    "titles": ["Director", "Senior Director", "Head of", "Principal Engineer", "Principal Architect", "VP"],
+    "titles": ["Executive Director", "Director", "Senior Director", "Head of", "Principal Engineer", "Principal Architect", "VP"],
     "archetypes": [
       "Spent 10+ years building fixed income/credit trading systems at Tradeweb/Goldman/BofA, then pivoted to leading GenAI strategy at an enterprise AI company",
       "VP ML/Data Science at Goldman building credit scoring and AI analytics, then led R&D at a startup, now leads AI Labs at a major hedge fund",
@@ -34,7 +34,7 @@
   "preview_scan_criteria": {
     "rule": "Before opening any profile, triage from preview using these four signals. If two or more are failing, skip without opening.",
     "signals": [
-      "TITLE — Must be Director, Senior Director, Head of, Principal, VP, or startup CTO. SVP/MD/EVP/CXO/Partner = skip. IC titles (Senior Engineer, Staff Engineer) = skip unless at a frontier BFSI firm.",
+      "TITLE — At major banks, Executive Director is the cleanest target. Equivalent Director, Senior Director, Head of, Principal, VP, or startup CTO titles can fit outside banking if the scope is right. SVP/MD/EVP/CXO/Partner = skip. IC titles (Senior Engineer, Staff Engineer) = skip unless at a frontier BFSI firm.",
       "COMPANY — Must show BFSI employer (Goldman, JPMorgan, Citi, BofA, Morgan Stanley, BlackRock, Vanguard, Tradeweb, Bloomberg, Freddie Mac, Fannie Mae, TIAA, Prudential, fintech at scale) OR consulting firm serving BFSI (Deloitte, Accenture, McKinsey) OR BFSI-focused startup/fintech.",
       "YEARS — Must show 15+ years visible. If LinkedIn shows <15yr total career, skip.",
       "HEADER KEYWORDS — Look for GenAI/AI builder language in the headline: LLM, RAG, agentic, LangGraph, orchestration, GenAI, applied AI, ML engineering. Red flags that justify skip without opening: Solutions Architect, AI Products, AI Transformation, AI Strategy, Customer Success, Pre-Sales, Product Manager."
@@ -114,7 +114,7 @@
     {
       "gate": 2,
       "name": "Seniority calibration",
-      "rule": "See title_floor and title_ceiling_note. Apply Jon Dorando principle for startup CTOs (<150 employees). Apply Robert Babinski rule for large-org CTOs (400+ person org)."
+      "rule": "See title_floor and title_ceiling_note. Major-bank Executive Director is the anchor target. Bank VP is often below scope unless unusually broad. Major-bank MD or global-head profiles are usually above scope. Apply Jon Dorando principle for startup CTOs (<150 employees). Apply Robert Babinski rule for large-org CTOs (400+ person org)."
     },
     {
       "gate": 3,
@@ -138,7 +138,7 @@
     {
       "gate": 4,
       "name": "BFSI domain",
-      "rule": "At least one BFSI employer or BFSI-domain project. Banking, financial services, capital markets, insurance, asset management. Not healthcare, retail, or tech-adjacent."
+      "rule": "At least one BFSI employer or BFSI-domain project. Highest weight goes to capital markets, asset management, investment banking, post-trade, market infrastructure, and adjacent institutional-finance workflows. Payments, mortgage, treasury, and insurance are valid but lower-priority. Not healthcare, retail, or tech-adjacent."
     },
     {
       "gate": 5,
@@ -230,6 +230,7 @@
   "execution_notes": [
     "BFSI filtering happens at evaluation time, not search time — kit strings are GenAI-agnostic",
     "Expect high noise on broad Recall strings — diversity + 15yr floor + BFSI + Gate 3 are the precision levers",
+    "When choosing among BFSI slices, overweight capital markets, asset management, investment banking, post-trade, and market infrastructure. Payments, mortgage, treasury, and insurance are secondary lanes.",
     "Never click Similar Profiles",
     "Minimum 5 pages per string before marking complete",
     "Checkpoint after every completed string",

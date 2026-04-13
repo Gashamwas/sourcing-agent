@@ -29,6 +29,7 @@ os.environ.setdefault("AGENT_KEY_PREFIX", "LINKEDIN")
 from shared import config
 from shared import cooldown
 from shared.console_tee import enable_console_tee
+from shared.output_paths import resolve_linkedin_state_dir
 from shared.governor import (
     SessionGovernor,
     SessionExpired,
@@ -80,12 +81,15 @@ def _classify_session_exception(exc: BaseException) -> str:
     return f"error: {type(exc).__name__}"
 
 
-def _resume_has_pending_work(output_dir: str | None) -> bool:
+def _resume_has_pending_work(brief_path: str, output_dir: str | None = None) -> bool:
     """Return True when progress.json still has queued or in-progress work.
 
     If the file is missing or unreadable, err on the side of attempting resume.
     """
-    progress_dir = Path(output_dir) if output_dir else config.OUTPUT_DIR
+    progress_dir = resolve_linkedin_state_dir(
+        brief_path=brief_path,
+        state_dir=output_dir,
+    )
     progress_path = progress_dir / "progress.json"
     if not progress_path.exists():
         return True
@@ -136,6 +140,8 @@ async def _run_sourcing_session(
     session_duration: float,
     restart_string_id: int | None = None,
     restart_string_ids: list[int] | None = None,
+    shared_browser=None,
+    shared_context=None,
 ) -> dict:
     """Run one sourcing session with governor limits and decoy interleaving.
 
@@ -150,6 +156,11 @@ async def _run_sourcing_session(
         input_mode=input_mode,
     )
     pipeline._governor = governor
+    if shared_browser is not None:
+        pipeline.browser.attach_existing_connection(
+            shared_browser,
+            context=shared_context,
+        )
 
     await pipeline.browser.connect()
 
@@ -321,14 +332,36 @@ async def run_day_cycle(
     signal.signal(signal.SIGINT, _signal_handler)
     signal.signal(signal.SIGTERM, _signal_handler)
 
-    if resume and not _resume_has_pending_work(output_dir):
+    if resume and not _resume_has_pending_work(brief_path, output_dir):
         _print_governor("No queued sourcing work remains in progress.json. Nothing to resume.")
         return
 
     # Connect to browser for decoy agent
     from rebrowser_playwright.async_api import async_playwright
     pw = await async_playwright().start()
-    browser = await pw.chromium.connect_over_cdp(config.CDP_URL)
+    browser = None
+    last_connect_error = None
+    for attempt in range(3):
+        try:
+            browser = await pw.chromium.connect_over_cdp(config.CDP_URL)
+            break
+        except Exception as exc:
+            last_connect_error = exc
+            if attempt < 2:
+                _print_governor(
+                    f"CDP attach attempt {attempt + 1}/3 failed: {exc}. "
+                    "Waiting briefly before retrying..."
+                )
+                await asyncio.sleep(3)
+    if browser is None:
+        _print_governor(
+            "Could not attach to Chrome over CDP. "
+            "Relaunch Chrome with ./launch-chrome.sh --force, open linkedin.com/talent, "
+            "wait a few seconds, then retry."
+        )
+        if last_connect_error:
+            raise last_connect_error
+        return
     contexts = browser.contexts
     if not contexts:
         _print_governor("No browser contexts found. Is Chrome open?")
@@ -341,7 +374,7 @@ async def run_day_cycle(
     # resume is passed in from CLI; subsequent sessions always resume
 
     while not stop_event.is_set():
-        if resume and not _resume_has_pending_work(output_dir):
+        if resume and not _resume_has_pending_work(brief_path, output_dir):
             _print_governor("No queued sourcing work remains in progress.json. Stopping day cycle.")
             break
 
@@ -383,6 +416,8 @@ async def run_day_cycle(
                 session_duration=session_duration,
                 restart_string_id=restart_string_id,
                 restart_string_ids=restart_string_ids,
+                shared_browser=browser,
+                shared_context=contexts[0],
             )
         except KeyboardInterrupt as e:
             result = {"shutdown_reason": _classify_session_exception(e), "stats": {}}
@@ -411,7 +446,7 @@ async def run_day_cycle(
         if single_session or stop_event.is_set():
             break
 
-        if not _resume_has_pending_work(output_dir):
+        if not _resume_has_pending_work(brief_path, output_dir):
             _print_governor("No queued sourcing work remains in progress.json. Day cycle complete.")
             break
 
@@ -481,7 +516,12 @@ def main():
     )
     parser.add_argument("--brief", help="Path to sourcing brief JSON")
     parser.add_argument("--search-config", default=None, help="Path to search config JSON")
-    parser.add_argument("--output-dir", default=None, help="Output directory")
+    parser.add_argument(
+        "--state-dir",
+        default=None,
+        help="Mutable brief-scoped state directory (default: output/state/linkedin/<brief-id>/)",
+    )
+    parser.add_argument("--output-dir", default=None, help="Deprecated alias for --state-dir")
     parser.add_argument("--single-session", action="store_true", help="Run one session only (no cycling)")
     parser.add_argument("--decoy-only", action="store_true", help="Run decoy agent only (no sourcing)")
     parser.add_argument("--status", action="store_true", help="Print current 24h stats")
@@ -505,8 +545,6 @@ def main():
         cooldown.print_status()
         return
 
-    enable_console_tee(Path(args.output_dir) if args.output_dir else config.OUTPUT_DIR)
-
     if args.decoy_only:
         asyncio.run(run_decoy_only())
         return
@@ -517,6 +555,14 @@ def main():
     if not Path(args.brief).exists():
         print(f"Error: Brief file not found: {args.brief}")
         sys.exit(1)
+
+    state_dir = str(
+        resolve_linkedin_state_dir(
+            brief_path=args.brief,
+            state_dir=args.state_dir or args.output_dir,
+        )
+    )
+    enable_console_tee(Path(state_dir))
 
     try:
         restart_string_ids = _parse_restart_strings_arg(args.restart_strings)
@@ -533,7 +579,7 @@ def main():
     asyncio.run(run_day_cycle(
         brief_path=args.brief,
         search_config=args.search_config,
-        output_dir=args.output_dir,
+        output_dir=state_dir,
         input_mode=args.input_mode,
         single_session=args.single_session,
         resume=args.resume,

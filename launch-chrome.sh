@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 PORT=9222
 PROFILE="$HOME/.chrome-cdp"
 FORCE_RELAUNCH=0
+CHROME_APP="Google Chrome"
 
 if [ "$1" = "--force" ]; then
     FORCE_RELAUNCH=1
@@ -28,6 +29,19 @@ PY
     [ "$version_ok" -eq 1 ] && [ "$list_ok" -eq 1 ]
 }
 
+clear_singleton_state() {
+    rm -f "$PROFILE/SingletonLock" 2>/dev/null
+    rm -f "$PROFILE/SingletonCookie" 2>/dev/null
+    rm -f "$PROFILE/SingletonSocket" 2>/dev/null
+    rm -f "$HOME/Library/Application Support/Google/Chrome/SingletonLock" 2>/dev/null
+}
+
+clear_session_restore_state() {
+    find "$PROFILE" -type f \
+        \( -path '*/Sessions/*' -o -name 'Current Session' -o -name 'Current Tabs' -o -name 'Last Session' -o -name 'Last Tabs' \) \
+        -delete 2>/dev/null
+}
+
 # Check if already running and healthy
 if [ "$FORCE_RELAUNCH" -eq 0 ] && cdp_healthy; then
     echo "Chrome already running on CDP port $PORT."
@@ -42,14 +56,21 @@ fi
 
 pkill -9 -f "Google Chrome" 2>/dev/null
 sleep 2
-rm -f "$PROFILE/SingletonLock" 2>/dev/null
-rm -f "$HOME/Library/Application Support/Google/Chrome/SingletonLock" 2>/dev/null
 mkdir -p "$PROFILE"
+clear_singleton_state
+if [ "$FORCE_RELAUNCH" -eq 1 ]; then
+    clear_session_restore_state
+fi
 
-/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome \
+# Launch via macOS `open` instead of invoking the app binary directly.
+# This has proven more reliable after force-killing a prior CDP session.
+open -na "$CHROME_APP" --args \
     --remote-debugging-port="$PORT" \
     --user-data-dir="$PROFILE" \
-    >/dev/null 2>&1 &
+    --disable-session-crashed-bubble \
+    --no-first-run \
+    about:blank \
+    >/dev/null 2>&1
 
 for i in $(seq 1 20); do
     if curl -s "http://127.0.0.1:$PORT/json/version" >/dev/null 2>&1; then

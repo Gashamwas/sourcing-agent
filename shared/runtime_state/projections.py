@@ -23,41 +23,65 @@ def write_github_progress_projection(store: RuntimeStateStore, run_id: int, path
     return progress
 
 
-def project_github_snippets(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+def project_github_snippets(
+    store: RuntimeStateStore,
+    *,
+    brief_id: str,
+    run_id: int | None = None,
+) -> list[dict]:
     return _project_attempt_payloads(
         store,
         source="github",
         brief_id=brief_id,
+        run_id=run_id,
         stage="facial",
         payload_key="snippet",
     )
 
 
-def project_github_facial_judgments(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+def project_github_facial_judgments(
+    store: RuntimeStateStore,
+    *,
+    brief_id: str,
+    run_id: int | None = None,
+) -> list[dict]:
     return _project_attempt_payloads(
         store,
         source="github",
         brief_id=brief_id,
+        run_id=run_id,
         stage="facial",
         payload_key="facial_decision",
     )
 
 
-def project_github_profile_summaries(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+def project_github_profile_summaries(
+    store: RuntimeStateStore,
+    *,
+    brief_id: str,
+    run_id: int | None = None,
+) -> list[dict]:
     return _project_attempt_payloads(
         store,
         source="github",
         brief_id=brief_id,
+        run_id=run_id,
         stage="full",
         payload_key="profile_summary",
     )
 
 
-def project_github_final_judgments(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+def project_github_final_judgments(
+    store: RuntimeStateStore,
+    *,
+    brief_id: str,
+    run_id: int | None = None,
+) -> list[dict]:
     return _project_attempt_payloads(
         store,
         source="github",
         brief_id=brief_id,
+        run_id=run_id,
         stage="full",
         payload_key="full_decision",
     )
@@ -68,12 +92,13 @@ def write_github_stage_projections(
     *,
     brief_id: str,
     output_dir: str | Path,
+    run_id: int | None = None,
 ) -> None:
     output_dir = Path(output_dir)
-    _write_jsonl_atomic(output_dir / "snippets.jsonl", project_github_snippets(store, brief_id=brief_id))
-    _write_jsonl_atomic(output_dir / "facial_judgments.jsonl", project_github_facial_judgments(store, brief_id=brief_id))
-    _write_jsonl_atomic(output_dir / "profile_summaries.jsonl", project_github_profile_summaries(store, brief_id=brief_id))
-    _write_jsonl_atomic(output_dir / "final_judgments.jsonl", project_github_final_judgments(store, brief_id=brief_id))
+    _write_jsonl_atomic(output_dir / "snippets.jsonl", project_github_snippets(store, brief_id=brief_id, run_id=run_id))
+    _write_jsonl_atomic(output_dir / "facial_judgments.jsonl", project_github_facial_judgments(store, brief_id=brief_id, run_id=run_id))
+    _write_jsonl_atomic(output_dir / "profile_summaries.jsonl", project_github_profile_summaries(store, brief_id=brief_id, run_id=run_id))
+    _write_jsonl_atomic(output_dir / "final_judgments.jsonl", project_github_final_judgments(store, brief_id=brief_id, run_id=run_id))
 
 
 def project_linkedin_progress(store: RuntimeStateStore, run_id: int) -> Progress:
@@ -87,8 +112,17 @@ def project_linkedin_progress(store: RuntimeStateStore, run_id: int) -> Progress
         payload = _json_loads(row["payload_json"])
         metrics = _json_loads(row["metrics_json"] if "metrics_json" in row.keys() else None)
         checkpoint = _json_loads(row["checkpoint_json"])
+        string_id = _coerce_projection_int(
+            payload.get("id"),
+            fallback=_coerce_projection_int(row["source_unit_id"]),
+        )
+        string_name = str(
+            payload.get("name") or row["display_name"] or f"string-{string_id}"
+        ).strip()
         payload.update(
             {
+                "id": string_id,
+                "name": string_name,
                 "status": row["status"],
                 "result_count": row["result_count"],
                 "pages_reviewed": metrics.get("pages_reviewed", checkpoint.get("pages_reviewed", payload.get("pages_reviewed", 0))),
@@ -161,29 +195,43 @@ def write_linkedin_candidate_history_projection(
     return history
 
 
-def project_linkedin_search_memory(store: RuntimeStateStore, *, brief_id: str) -> dict:
+def project_linkedin_search_memory(
+    store: RuntimeStateStore,
+    *,
+    brief_id: str,
+    run_id: int | None = None,
+) -> dict:
     memory: dict = {}
     with store.connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT payload_json, checkpoint_json, family_key, novelty_bucket, domain_lane, result_count,
+        sql = """
+            SELECT source_unit_id, display_name, payload_json, checkpoint_json, family_key, novelty_bucket, domain_lane, result_count,
                    candidates_discovered, facial_yes_count, facial_no_count, saves_count, notes, metrics_json
             FROM work_units
             WHERE source = 'linkedin' AND brief_id = ? AND kind = ? AND status = 'done'
-            ORDER BY ordering_index ASC, id ASC
-            """,
-            (brief_id, LINKEDIN_STRING_KIND),
-        ).fetchall()
+        """
+        params: list[Any] = [brief_id, LINKEDIN_STRING_KIND]
+        if run_id is not None:
+            sql += " AND run_id = ?"
+            params.append(run_id)
+        sql += " ORDER BY ordering_index ASC, id ASC"
+        rows = conn.execute(sql, tuple(params)).fetchall()
     strings = []
     for row in rows:
         payload = _json_loads(row["payload_json"])
         checkpoint = _json_loads(row["checkpoint_json"])
         metrics = _json_loads(row["metrics_json"] if "metrics_json" in row.keys() else None)
+        string_id = _coerce_projection_int(
+            payload.get("id"),
+            fallback=_coerce_projection_int(row["source_unit_id"]),
+        )
+        string_name = str(
+            payload.get("name") or row["display_name"] or f"string-{string_id}"
+        ).strip()
         strings.append(
             SearchString.from_dict(
                 {
-                    "id": payload.get("id"),
-                    "name": payload.get("name", ""),
+                    "id": string_id,
+                    "name": string_name,
                     "boolean": payload.get("boolean", ""),
                     "status": "done",
                     "result_count": row["result_count"],
@@ -203,6 +251,8 @@ def project_linkedin_search_memory(store: RuntimeStateStore, *, brief_id: str) -
                     "family_key": row["family_key"],
                     "novelty_bucket": row["novelty_bucket"],
                     "domain_lane": row["domain_lane"],
+                    "retrieval_recipe": payload.get("retrieval_recipe", {}),
+                    "retrieval_hypothesis_ids": payload.get("retrieval_hypothesis_ids", []),
                 }
             )
         )
@@ -216,47 +266,72 @@ def write_linkedin_search_memory_projection(
     *,
     brief_id: str,
     path: str | Path,
+    run_id: int | None = None,
 ) -> dict:
-    memory = project_linkedin_search_memory(store, brief_id=brief_id)
+    memory = project_linkedin_search_memory(store, brief_id=brief_id, run_id=run_id)
     _write_json_atomic(path, memory)
     return memory
 
 
-def project_linkedin_snippets(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+def project_linkedin_snippets(
+    store: RuntimeStateStore,
+    *,
+    brief_id: str,
+    run_id: int | None = None,
+) -> list[dict]:
     return _project_attempt_payloads(
         store,
         source="linkedin",
         brief_id=brief_id,
+        run_id=run_id,
         stage="snippet",
         payload_key="snippet",
     )
 
 
-def project_linkedin_facial_judgments(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+def project_linkedin_facial_judgments(
+    store: RuntimeStateStore,
+    *,
+    brief_id: str,
+    run_id: int | None = None,
+) -> list[dict]:
     return _project_attempt_payloads(
         store,
         source="linkedin",
         brief_id=brief_id,
+        run_id=run_id,
         stage="facial",
         payload_key="facial_decision",
     )
 
 
-def project_linkedin_profile_summaries(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+def project_linkedin_profile_summaries(
+    store: RuntimeStateStore,
+    *,
+    brief_id: str,
+    run_id: int | None = None,
+) -> list[dict]:
     return _project_attempt_payloads(
         store,
         source="linkedin",
         brief_id=brief_id,
+        run_id=run_id,
         stage="full",
         payload_key="profile_summary",
     )
 
 
-def project_linkedin_final_judgments(store: RuntimeStateStore, *, brief_id: str) -> list[dict]:
+def project_linkedin_final_judgments(
+    store: RuntimeStateStore,
+    *,
+    brief_id: str,
+    run_id: int | None = None,
+) -> list[dict]:
     return _project_attempt_payloads(
         store,
         source="linkedin",
         brief_id=brief_id,
+        run_id=run_id,
         stage="full",
         payload_key="final_decision",
     )
@@ -267,12 +342,13 @@ def write_linkedin_stage_projections(
     *,
     brief_id: str,
     output_dir: str | Path,
+    run_id: int | None = None,
 ) -> None:
     output_dir = Path(output_dir)
-    _write_jsonl_atomic(output_dir / "snippets.jsonl", project_linkedin_snippets(store, brief_id=brief_id))
-    _write_jsonl_atomic(output_dir / "facial_judgments.jsonl", project_linkedin_facial_judgments(store, brief_id=brief_id))
-    _write_jsonl_atomic(output_dir / "profile_summaries.jsonl", project_linkedin_profile_summaries(store, brief_id=brief_id))
-    _write_jsonl_atomic(output_dir / "final_judgments.jsonl", project_linkedin_final_judgments(store, brief_id=brief_id))
+    _write_jsonl_atomic(output_dir / "snippets.jsonl", project_linkedin_snippets(store, brief_id=brief_id, run_id=run_id))
+    _write_jsonl_atomic(output_dir / "facial_judgments.jsonl", project_linkedin_facial_judgments(store, brief_id=brief_id, run_id=run_id))
+    _write_jsonl_atomic(output_dir / "profile_summaries.jsonl", project_linkedin_profile_summaries(store, brief_id=brief_id, run_id=run_id))
+    _write_jsonl_atomic(output_dir / "final_judgments.jsonl", project_linkedin_final_judgments(store, brief_id=brief_id, run_id=run_id))
 
 
 def _write_json_atomic(path: str | Path, data: Any) -> None:
@@ -299,25 +375,35 @@ def _json_loads(raw: str | None) -> Any:
     return json.loads(raw)
 
 
+def _coerce_projection_int(value: Any, fallback: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
 def _project_attempt_payloads(
     store: RuntimeStateStore,
     *,
     source: str,
     brief_id: str,
+    run_id: int | None,
     stage: str,
     payload_key: str,
 ) -> list[dict]:
     with store.connect() as conn:
-        rows = conn.execute(
-            """
+        sql = """
             SELECT ca.payload_json
             FROM candidate_attempts ca
             JOIN candidates c ON c.id = ca.candidate_id
             WHERE c.source = ? AND c.brief_id = ? AND ca.stage = ?
-            ORDER BY ca.started_at ASC, ca.id ASC
-            """,
-            (source, brief_id, stage),
-        ).fetchall()
+        """
+        params: list[Any] = [source, brief_id, stage]
+        if run_id is not None:
+            sql += " AND ca.run_id = ?"
+            params.append(run_id)
+        sql += " ORDER BY ca.started_at ASC, ca.id ASC"
+        rows = conn.execute(sql, tuple(params)).fetchall()
     projected: list[dict] = []
     for row in rows:
         payload = _json_loads(row["payload_json"])

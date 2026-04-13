@@ -22,6 +22,8 @@ Normal runs now work like this:
 - stage JSONLs, candidate history, and search memory are projected artifacts
 - direct side-effect artifacts such as `run_log.jsonl`, `saves.jsonl`, and
   `outreach.jsonl` remain direct writes, but they do not control candidate truth
+- the runtime-state admin CLI still uses `--output-dir`, but that path should
+  now be the mutable `state_dir` under `output/state/<source>/<brief-id>/`
 
 ## Resume
 
@@ -46,7 +48,7 @@ Rebuild projected artifacts from runtime-state:
 
 ```bash
 python3 tools/runtime_state_admin.py \
-  --output-dir output/<run-dir> \
+  --output-dir output/state/linkedin/<brief-id> \
   --source linkedin \
   --brief-id <brief-id> \
   rebuild-projections
@@ -61,7 +63,7 @@ Restart one LinkedIn string through runtime-state:
 
 ```bash
 python3 tools/runtime_state_admin.py \
-  --output-dir output/<run-dir> \
+  --output-dir output/state/linkedin/<brief-id> \
   --source linkedin \
   --brief-id <brief-id> \
   restart-linkedin-string \
@@ -78,7 +80,7 @@ Inspect persisted run stop reasons:
 
 ```bash
 python3 tools/runtime_state_admin.py \
-  --output-dir output/<run-dir> \
+  --output-dir output/state/github/<brief-id> \
   --source github \
   --brief-id <brief-id> \
   inspect-stop-reasons
@@ -102,7 +104,7 @@ Inspect orphaned candidate attempts:
 
 ```bash
 python3 tools/runtime_state_admin.py \
-  --output-dir output/<run-dir> \
+  --output-dir output/state/linkedin/<brief-id> \
   --source linkedin \
   --brief-id <brief-id> \
   inspect-orphans
@@ -117,7 +119,7 @@ Inspect candidate-scoped side effects:
 
 ```bash
 python3 tools/runtime_state_admin.py \
-  --output-dir output/<run-dir> \
+  --output-dir output/state/github/<brief-id> \
   --source github \
   --brief-id <brief-id> \
   inspect-side-effects
@@ -128,7 +130,7 @@ ledger row:
 
 ```bash
 python3 tools/runtime_state_admin.py \
-  --output-dir output/<run-dir> \
+  --output-dir output/state/github/<brief-id> \
   --source github \
   --brief-id <brief-id> \
   replay-side-effect \

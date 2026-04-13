@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from linkedin.browser import SearchEntryResult
 from linkedin.search_intelligence import (
     LinkedInPageInsights,
     LinkedInSearchVariant,
@@ -14,7 +16,9 @@ from linkedin.search_intelligence import (
     result_window_for_count,
 )
 from linkedin.search_mutation import LinkedInSearchMutationExecutor
+from linkedin.input_backends import TypingResult
 from shared.schemas import SearchString
+from shared.storage import read_jsonl
 
 
 def _make_pipeline(output_dir: str):
@@ -90,7 +94,18 @@ def test_search_mutation_executor_rejects_non_empty_experimental_filters(tmp_pat
 def test_search_mutation_executor_applies_keyword_variant(tmp_path):
     pipeline = _make_pipeline(str(tmp_path))
     pipeline.browser.go_back_to_results = AsyncMock()
-    pipeline.browser.enter_search_string = AsyncMock()
+    pipeline.browser.enter_search_string = AsyncMock(
+        return_value=SearchEntryResult(
+            typing_result=TypingResult(
+                transport="playwright_keyboard",
+                duration_ms=2100,
+                typo_count=1,
+                used_correction=True,
+                fallback_char_count=0,
+            ),
+            results_wait_ms=1350,
+        )
+    )
     pipeline.browser.get_results_count_text = AsyncMock(return_value="220")
     pipeline.browser.get_results_count = AsyncMock(return_value=220)
     pipeline.browser.get_card_snapshot = AsyncMock(return_value={"name": "Ada", "url": "/talent/profile/ada"})
@@ -122,6 +137,15 @@ def test_search_mutation_executor_applies_keyword_variant(tmp_path):
     assert state.active_variant_id == "precision-1"
     assert pipeline._search_mutation_budget_used == 1
     pipeline.browser.enter_search_string.assert_awaited_once_with("foo AND bar")
+    events = read_jsonl(pipeline.log_path)
+    applied_event = next(event for event in reversed(events) if event["event"] == "linkedin_search_mutation_applied")
+    assert applied_event["input_mode"] == "concurrent"
+    assert applied_event["typing_transport"] == "playwright_keyboard"
+    assert applied_event["typing_duration_ms"] == 2100
+    assert applied_event["typo_count"] == 1
+    assert applied_event["used_correction"] is True
+    assert applied_event["fallback_char_count"] == 0
+    assert applied_event["results_wait_ms"] == 1350
 
 
 def test_experiment_state_tracks_family_totals_and_drift_snapshots():
@@ -192,3 +216,244 @@ def test_search_mutation_executor_blocks_second_drift_attempt(tmp_path):
 
     assert result.applied is False
     assert result.blocked_reason == "drift_attempt_limit"
+
+
+def _assess_recon(
+    *,
+    result_count: int,
+    page_stats: dict[str, int],
+    page_insights: LinkedInPageInsights,
+    precommit_recovery_attempts_used: int = 0,
+):
+    with tempfile.TemporaryDirectory() as td:
+        pipeline = _make_pipeline(td)
+        search_string = SearchString(id=17, name="builders", boolean="foo")
+        state = bootstrap_experiment_state(search_string)
+        state.mode = "recon"
+        state.precommit_recovery_attempts_used = precommit_recovery_attempts_used
+
+        assessment = asyncio.run(
+            pipeline._assess_string_state(
+                search_string=search_string,
+                experiment_state=state,
+                page_num=1,
+                result_count=result_count,
+                string_stats=dict(page_stats),
+                page_stats=page_stats,
+                page_insights=page_insights,
+                remaining_queued_strings=4,
+            )
+        )
+        events = read_jsonl(pipeline.log_path)
+        return assessment, events[-1]
+
+
+def test_assess_recon_experiments_on_large_noisy_mixed_signal():
+    assessment, event = _assess_recon(
+        result_count=6000,
+        page_stats={"facial_yes": 1, "facial_no": 10, "saves": 0, "rejects": 0},
+        page_insights=LinkedInPageInsights(
+            page=1,
+            result_count=6000,
+            result_window="200-1200",
+            signal_anchors=["Applied scientist at frontier lab"],
+            noise_anchors=["Product manager", "Program manager", "Eng manager"],
+            dominant_non_fit_patterns=["manager-heavy page dominates"],
+            glance_action="reformulate",
+        ),
+    )
+
+    assert assessment["decision"] == "experiment"
+    assert assessment["scout_gate_bucket"] == "precommit_weak_signal_recovery"
+    assert assessment["noise_dominant"] is True
+    assert assessment["strong_scout_signal"] is False
+    assert event["event"] == "linkedin_search_assess"
+    assert event["decision"] == "experiment"
+    assert event["page_signal"] == 1
+    assert event["facial_no"] == 10
+    assert event["noise_dominant"] is True
+    assert event["scout_gate_bucket"] == "precommit_weak_signal_recovery"
+
+
+def test_assess_recon_experiments_on_large_real_signal_noisy_pool():
+    assessment, event = _assess_recon(
+        result_count=6000,
+        page_stats={"facial_yes": 2, "facial_no": 10, "saves": 0, "rejects": 0},
+        page_insights=LinkedInPageInsights(
+            page=1,
+            result_count=6000,
+            result_window="200-1200",
+            signal_anchors=["Applied scientist at frontier lab", "Research engineer at market infra firm"],
+            noise_anchors=["Product manager", "Program manager", "Eng manager"],
+            dominant_non_fit_patterns=["manager-heavy page dominates"],
+            glance_action="reformulate",
+        ),
+    )
+
+    assert assessment["decision"] == "experiment"
+    assert assessment["real_signal"] is True
+    assert assessment["noise_dominant"] is True
+    assert assessment["scout_gate_bucket"] == "precommit_real_signal_noisy_recovery"
+    assert event["event"] == "linkedin_search_assess"
+    assert event["decision"] == "experiment"
+    assert event["real_signal"] is True
+    assert event["strong_scout_signal"] is True
+    assert event["scout_gate_bucket"] == "precommit_real_signal_noisy_recovery"
+
+
+def test_assess_recon_commits_large_clean_strong_signal():
+    assessment, _ = _assess_recon(
+        result_count=6000,
+        page_stats={"saves": 1, "facial_yes": 1, "facial_no": 2, "rejects": 0},
+        page_insights=LinkedInPageInsights(
+            page=1,
+            result_count=6000,
+            result_window="200-1200",
+            signal_anchors=["Staff ML engineer at OpenAI", "Principal engineer at Anthropic"],
+            noise_anchors=["Software engineer at generic SaaS"],
+        ),
+    )
+
+    assert assessment["decision"] == "commit"
+    assert assessment["scout_gate_bucket"] == "root_real_signal_commit"
+    assert assessment["strong_scout_signal"] is True
+    assert assessment["noise_dominant"] is False
+
+
+def test_assess_recon_commits_large_noisy_real_signal_when_budget_is_exhausted():
+    assessment, _ = _assess_recon(
+        result_count=6000,
+        page_stats={"facial_yes": 2, "facial_no": 10, "saves": 0, "rejects": 0},
+        page_insights=LinkedInPageInsights(
+            page=1,
+            result_count=6000,
+            result_window="200-1200",
+            signal_anchors=["Applied scientist at frontier lab", "Research engineer at market infra firm"],
+            noise_anchors=["Product manager", "Program manager", "Eng manager"],
+            dominant_non_fit_patterns=["manager-heavy page dominates"],
+            glance_action="reformulate",
+        ),
+        precommit_recovery_attempts_used=2,
+    )
+
+    assert assessment["decision"] == "commit"
+    assert assessment["real_signal"] is True
+    assert assessment["noise_dominant"] is True
+    assert assessment["scout_gate_bucket"] == "precommit_real_signal_budget_exhausted_commit"
+
+
+def test_assess_recon_experiments_large_dead_noisy_pool():
+    assessment, _ = _assess_recon(
+        result_count=6000,
+        page_stats={"facial_no": 10, "saves": 0, "facial_yes": 0, "rejects": 0},
+        page_insights=LinkedInPageInsights(
+            page=1,
+            result_count=6000,
+            result_window="200-1200",
+            noise_anchors=["Product manager", "Program manager", "Operations lead"],
+            dominant_non_fit_patterns=["non-technical leadership dominates"],
+            glance_action="reformulate",
+        ),
+    )
+
+    assert assessment["decision"] == "experiment"
+    assert assessment["scout_gate_bucket"] == "precommit_dead_noisy_recovery"
+    assert assessment["page_signal"] == 0
+
+
+def test_assess_recon_commits_mid_sized_weak_signal_pool():
+    assessment, _ = _assess_recon(
+        result_count=3200,
+        page_stats={"facial_yes": 1, "facial_no": 10, "saves": 0, "rejects": 0},
+        page_insights=LinkedInPageInsights(
+            page=1,
+            result_count=3200,
+            result_window="150-800",
+            signal_anchors=["Applied scientist"],
+            noise_anchors=["Product manager", "Program manager", "Director"],
+            dominant_non_fit_patterns=["manager-heavy page dominates"],
+            glance_action="reformulate",
+        ),
+    )
+
+    assert assessment["decision"] == "commit"
+    assert assessment["real_signal"] is False
+    assert assessment["scout_gate_bucket"] == "mid_pool_signal_commit"
+    assert assessment["page_signal"] == 1
+
+
+def test_assess_recon_stops_small_dead_noisy_pool_directly():
+    assessment, _ = _assess_recon(
+        result_count=400,
+        page_stats={"facial_no": 8, "saves": 0, "facial_yes": 0, "rejects": 0},
+        page_insights=LinkedInPageInsights(
+            page=1,
+            result_count=400,
+            result_window="direct_paginate",
+            noise_anchors=["Product manager", "Program manager"],
+            dominant_non_fit_patterns=["manager-heavy page dominates"],
+            glance_action="reformulate",
+        ),
+    )
+
+    assert assessment["decision"] == "stop"
+    assert assessment["scout_gate_bucket"] == "small_pool_dead_stop"
+
+
+def test_assess_recon_stops_large_weak_signal_after_recovery_budget_is_exhausted():
+    assessment, _ = _assess_recon(
+        result_count=6000,
+        page_stats={"facial_yes": 1, "facial_no": 10, "saves": 0, "rejects": 0},
+        page_insights=LinkedInPageInsights(
+            page=1,
+            result_count=6000,
+            result_window="200-1200",
+            signal_anchors=["Applied scientist at frontier lab"],
+            noise_anchors=["Product manager", "Program manager", "Eng manager"],
+            dominant_non_fit_patterns=["manager-heavy page dominates"],
+            glance_action="reformulate",
+        ),
+        precommit_recovery_attempts_used=2,
+    )
+
+    assert assessment["decision"] == "stop"
+    assert assessment["real_signal"] is False
+    assert assessment["scout_gate_bucket"] == "precommit_recovery_exhausted_stop"
+
+
+def test_assess_recon_stops_after_recovery_budget_is_exhausted():
+    assessment, _ = _assess_recon(
+        result_count=6000,
+        page_stats={"facial_no": 10, "saves": 0, "facial_yes": 0, "rejects": 0},
+        page_insights=LinkedInPageInsights(
+            page=1,
+            result_count=6000,
+            result_window="200-1200",
+            noise_anchors=["Product manager", "Program manager", "Operations lead"],
+            dominant_non_fit_patterns=["non-technical leadership dominates"],
+            glance_action="reformulate",
+        ),
+        precommit_recovery_attempts_used=2,
+    )
+
+    assert assessment["decision"] == "stop"
+    assert assessment["scout_gate_bucket"] == "precommit_recovery_exhausted_stop"
+
+
+def test_variant_has_earned_commit_on_target_window_fit_plus_signal():
+    with tempfile.TemporaryDirectory() as td:
+        pipeline = _make_pipeline(td)
+        variant = LinkedInSearchVariant(
+            variant_id="precision-1",
+            parent_variant_id="root",
+            root_string_id=1,
+            boolean="foo",
+            variant_kind="precision",
+            target_result_min=75,
+            target_result_max=400,
+            result_count=220,
+            facial_yes=1,
+            facial_no=0,
+        )
+
+        assert pipeline._variant_has_earned_commit(variant) is True
