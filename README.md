@@ -1,45 +1,182 @@
 # Sourcing Agent
 
-Sourcing Agent is a role-driven sourcing system for LinkedIn Recruiter and GitHub. It takes a structured brief, plans searches, evaluates candidates, adapts as it learns from results, and writes resumable run state so work can continue across sessions.
+Sourcing Agent is a role-driven sourcing platform for LinkedIn Recruiter and GitHub. It turns a structured hiring brief into search strategy, staged candidate evaluation, runtime-backed execution, end-of-run artifacts, market intelligence, and draft brief iteration.
 
-The repo started as an autonomous search agent, but the current system is broader than that. It now includes the search adapters themselves, a shared runtime layer, operator tooling, end-of-run reporting, market-intelligence generation, and a workflow for turning run learnings back into the next version of a brief.
+The repo started as an autonomous search agent. The current system is broader than that: it includes source adapters, a shared execution/runtime layer, operator tooling, market-level synthesis, and a workflow for turning run evidence back into the next version of a brief.
 
-## What the brief does
+## What The System Is
 
-The brief is the center of the system. It is where the role-specific judgment lives: what kind of work the team actually needs, where the yes/no boundary sits, which lookalike profiles usually waste time, how the search should open, and what kinds of evidence should matter on LinkedIn and GitHub.
+The brief is the center of the system. It captures the role-specific judgment that is usually scattered across intake notes, recruiter memory, search strings, and ad hoc evaluation habits:
 
-That design choice is deliberate. Recruiting judgment is usually scattered across
-intake notes, recruiter memory, search strings, and ad hoc evaluation habits.
-Here it is captured in one place and made executable. The result is a role
-definition the team can reuse, inspect, and apply consistently across runs.
+- what kind of work the team actually needs
+- where the yes/no boundary sits
+- which lookalike profiles usually waste time
+- how search should open
+- what kinds of evidence matter on LinkedIn and GitHub
 
-The loader supports older brief formats as well as the newer structured schema. Newer briefs can also carry an explicit `retrieval_design`, which lets the search open from layered intent instead of a flat list of terms.
+That judgment is made executable. The result is a reusable role definition that can drive planning, evaluation, adaptation, reporting, and post-run iteration.
 
-## Current system
+The loader supports older brief formats as well as the newer structured schema. Newer briefs can also carry an explicit `retrieval_design`, which lets the search open from layered intent rather than a flat list of terms.
 
-### LinkedIn
+## How A Run Works
 
-The LinkedIn side of the system connects to a live Chrome session over CDP, works inside LinkedIn Recruiter, generates search strings from the brief, and evaluates candidates in two stages: a lightweight snippet pass followed by a deeper profile review when the snippet looks promising.
+1. Load a brief and normalize its judgment, search priorities, and permanent filters.
+2. Derive retrieval/search strategy for the source being run.
+3. Execute the source adapter:
+   - LinkedIn via browser automation inside Recruiter
+   - GitHub via API-driven search and enrichment
+4. Discover and evaluate candidates in stages:
+   - lightweight snippet pass
+   - deeper profile review for promising candidates
+5. Persist canonical candidate/work-unit/runtime state in `runtime_state.sqlite3`.
+6. Rebuild compatibility artifacts and finalize immutable run snapshots.
+7. Update market intelligence from finalized run evidence, optionally with external research.
+8. Optionally draft the next version of the brief from what the run learned.
 
-The search loop has moved beyond a simple narrow-or-broaden cycle. The current implementation tracks root queries, sibling variants, rescue attempts, and drift over time, then persists that search state in runtime storage. The session orchestrator also manages pacing, resumability, session budgets, and optional decoy activity for safer long-running Recruiter sessions.
+```mermaid
+flowchart LR
+    A["Brief"] --> B["Planner / Retrieval Design"]
+    B --> C["LinkedIn Adapter"]
+    B --> D["GitHub Adapter"]
+    C --> E["Shared Execution + runtime_state.sqlite3"]
+    D --> E
+    E --> F["Run Snapshots"]
+    F --> G["Market Intelligence"]
+    G --> H["Brief Iteration"]
+```
 
-### GitHub
+## Architecture
 
-The GitHub side uses API-driven search rather than browser automation. It works across several channels, including user search, code search, topic search, repository mining, stargazer mining, and graph expansion from strong candidates. It enriches candidates with repository, contribution, profile, and contact data before running the same kind of structured judgment flow used on LinkedIn.
+The system has six major layers:
 
-For saved candidates, the GitHub flow can generate outreach copy and export a CSV for operator use. It also feeds strong candidates back into graph expansion so the search can move outward from real signal instead of staying trapped in the initial query set.
+- **Brief and policy layer**
+  - structured role judgment, search guidance, save criteria, non-fit patterns
+- **Planning layer**
+  - retrieval design, search formation, adaptation, query evolution
+- **Source adapters**
+  - LinkedIn Recruiter browser workflow
+  - GitHub API search, enrichment, graph expansion, outreach/export side effects
+- **Shared execution/runtime layer**
+  - canonical candidate lifecycle, attempt tracking, side-effect ledgers, resume state
+- **Run artifact layer**
+  - compatibility projections, run snapshots, structured reports
+- **Market intelligence and brief iteration**
+  - per-market synthesis, optional research, draft brief updates from real run evidence
 
-### Shared runtime and reporting
+Two docs go deeper on the execution/runtime model:
 
-Both adapters now sit on top of a shared execution model. `runtime_state.sqlite3`
-is the authoritative record of candidate lifecycle, work-unit status, side
-effects, and resume state. Files such as `progress.json` and the stage JSONLs
-are still written because they are useful operationally, but they exist as
-compatibility and visibility artifacts rather than control-state inputs.
+- [Runtime-State Operator Runbook](docs/runtime-state-operator-runbook.md)
+- [Shared Candidate Execution Engine](docs/shared-candidate-execution-engine.md)
 
-That runtime layer is what makes the rest of the repo possible. It supports resumable runs, projection rebuilds, targeted restarts, run snapshots, structured debriefs, market-intelligence artifacts, and draft brief iteration based on what the search actually learned.
+For refactor history and what remains as product work rather than architecture debt, see [Sourcing-Agent-2nd-Gen-Roadmap.md](Sourcing-Agent-2nd-Gen-Roadmap.md).
 
-## Repository layout
+## LinkedIn Capabilities
+
+The LinkedIn adapter connects to a live Chrome session over CDP and works inside LinkedIn Recruiter. It is not just a static string runner.
+
+Current LinkedIn capabilities include:
+
+- two-stage snippet-to-profile evaluation
+- role-driven search string generation from the brief
+- root query families with sibling variants
+- pre-commit experimentation before locking onto a pagination path
+- mid-string drift rescue when a once-productive query decays
+- runtime-backed search memory and candidate history
+- mutation budgeting so search changes stay bounded and auditable
+- session orchestration, pacing, budgets, resume/restart support, and optional decoy activity
+
+The important architectural point is that LinkedIn search intelligence is more than “narrow or broaden.” It now tracks search families, experiments within them, and persists that search state in the runtime layer.
+
+## GitHub Capabilities
+
+The GitHub adapter uses API-driven search rather than browser automation. It works across multiple acquisition channels, including:
+
+- user search
+- code search
+- topic and repository mining
+- stargazer and graph expansion from strong candidates
+
+It enriches candidates with repository, contribution, profile, and contact data before running the same kind of structured judgment flow used on LinkedIn.
+
+For saved candidates, the GitHub side can generate outreach copy and export operator-facing CSVs. Strong candidates can also feed graph expansion so the search moves outward from actual signal rather than staying trapped in the original query set.
+
+## Runtime State And Output Model
+
+The shared runtime model is the core of the current architecture.
+
+`runtime_state.sqlite3` is the authoritative record of:
+
+- candidate lifecycle
+- work-unit status
+- attempt history
+- side effects
+- resume state
+
+The four storage layers are:
+
+1. **Live project state** in `output/state/...`
+   - mutable, project-scoped working state
+   - canonical `runtime_state.sqlite3`
+
+2. **Compatibility projections**
+   - `progress.json`
+   - stage JSONLs
+   - `candidate_history-*.jsonl`
+   - `search_memory-*.json`
+   - useful operational artifacts, but not control-state inputs
+
+3. **Finalized run snapshots** in `output/runs/...`
+   - immutable per-run archives
+   - used for reporting, replay, and post-run synthesis
+
+4. **Market artifacts** in `output/market_intelligence/...`
+   - canonical per-market synthesis
+   - separate from per-project LinkedIn or GitHub run state
+
+In practice:
+
+- LinkedIn live state is scoped to the LinkedIn project / brief state key
+- GitHub live state is scoped to the GitHub brief ID
+- market intelligence is scoped to a derived market key
+- projections are rebuildable from runtime state when needed
+
+That distinction matters: live project state, run snapshots, and market artifacts are different layers with different jobs.
+
+## Operating Modes And Safety
+
+On LinkedIn, the system operates through a CDP-connected Chrome session and supports two input modes:
+
+- `concurrent`
+  - synthetic mouse/input path that is safer while you keep using the computer
+- `away`
+  - real mouse/keyboard takeover mode for unattended sessions
+
+The operational model also includes:
+
+- humanized pacing and cadence rather than bursty automation
+- bounded search mutation rather than constant query rewriting
+- runtime-state-first resume and recovery
+- optional decoy activity for safer long-running Recruiter sessions
+
+This repo is not structured around fragile file-edit recovery. When runtime state exists, the canonical recovery/admin surface is `tools/runtime_state_admin.py`.
+
+## Post-Run Learning Loop
+
+Market intelligence is a first-class subsystem, not just report generation.
+
+It consumes finalized run evidence, produces canonical per-market artifacts, can optionally run external research, maintains its own market-keyed artifact/state layer, and feeds both operator strategy and brief iteration.
+
+The post-run loop looks like this:
+
+- finalize a run snapshot
+- synthesize what the run actually learned
+- update canonical market artifacts
+- optionally enrich that synthesis with external research
+- draft the next version of the brief from run evidence plus market intel
+
+That is how the system gets continuity across runs instead of treating each session as an isolated sourcing episode.
+
+## Repository Layout
 
 ```text
 sourcing-agent/
@@ -64,7 +201,7 @@ cp config.example.env .env
 
 Fill in the keys you need in `.env`.
 
-- `ANTHROPIC_API_KEY` is required for the higher-judgment steps.
+- `ANTHROPIC_API_KEY` is required for higher-judgment steps.
 - `OPENAI_API_KEY` or `GOOGLE_API_KEY` is used for lower-cost extraction and synthesis work.
 - `GITHUB_TOKEN` is required for GitHub sourcing.
 - `PERPLEXITY_API_KEY` is optional and only matters if you want external research during market-intelligence updates.
@@ -75,7 +212,7 @@ If you plan to run LinkedIn, start Chrome through the helper script and keep you
 ./launch-chrome.sh
 ```
 
-## Common commands
+## Common Commands
 
 These examples use two current briefs that already exist in the repo:
 
@@ -149,7 +286,7 @@ python3 -m tools.iterate_brief \
 
 ### Runtime administration
 
-If a run already has `runtime_state.sqlite3`, use the admin surface instead of editing `progress.json` or JSONL files by hand.
+If a run already has `runtime_state.sqlite3`, use the admin surface instead of editing `progress.json` or JSONL files by hand:
 
 ```bash
 python3 tools/runtime_state_admin.py \
@@ -161,20 +298,6 @@ python3 tools/runtime_state_admin.py \
 
 Other supported admin operations include inspecting orphaned attempts, inspecting stop reasons, replaying side effects, requeueing work units, and restarting a specific LinkedIn string.
 
-## Output model
-
-Live work happens under `output/state/`. Completed runs are copied into immutable snapshots under `output/runs/`. Market-level synthesis lives under `output/market_intelligence/`, and operator-facing exports land under `output/exports/`.
-
-In practice, the layout looks like this:
-
-- `output/state/linkedin/<brief-id>/` for live LinkedIn state
-- `output/state/github/<brief-id>/` for live GitHub state
-- `output/runs/<source>/<brief-id>/<run-stamp>__run-<id>/` for finalized snapshots
-- `output/market_intelligence/<market-key>/` for canonical market-intel artifacts
-- `output/exports/<source>/<brief-id>/` for CSVs and other operator-facing outputs
-
-The important implementation detail is that the SQLite runtime store is canonical. Compatibility artifacts are rebuilt from it when needed.
-
 ## Testing
 
 The repo has a broad test suite around runtime state, search intelligence, adapter services, market intelligence, brief iteration, and the shared execution layer.
@@ -185,11 +308,7 @@ python3 -m pytest
 
 ## Notes
 
-This is an internal project. The system is intentionally opinionated because it
-is designed to preserve sourcing judgment alongside automation. The newer parts
-of the repo reflect that direction: better runtime discipline, clearer operator
-tooling, stronger post-run analysis, and a tighter loop between what the search
-learns and how the brief evolves.
+This is an internal project. The system is intentionally opinionated because it is designed to preserve sourcing judgment alongside automation. The newer parts of the repo reflect that direction: stronger runtime discipline, clearer operator tooling, richer market-level synthesis, and a tighter loop between what the search learns and how the brief evolves.
 
 ## License
 
