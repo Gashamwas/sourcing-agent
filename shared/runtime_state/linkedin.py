@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -13,38 +12,23 @@ from linkedin.search_intelligence import (
     bootstrap_experiment_state,
     reset_experiment_state,
 )
-from shared.runtime_state.admin import rebuild_compat_projections
+from shared.runtime_state.linkedin_artifacts import (
+    load_linkedin_history,
+    load_linkedin_progress,
+    load_linkedin_search_memory,
+    rebuild_linkedin_artifacts,
+)
 from shared.runtime_state.linkedin_experiment_state import load_linkedin_experiment_states
+from shared.runtime_state.linkedin_legacy_import import (
+    LinkedInLegacyImportContext,
+    import_linkedin_legacy_state,
+)
 from shared.runtime_state.linkedin_progress_sync import sync_linkedin_progress
 from shared.runtime_state.linkedin_run_start import start_or_resume_linkedin_run
-from shared.runtime_state.projections import (
-    project_linkedin_candidate_history,
-    project_linkedin_progress,
-    project_linkedin_search_memory,
-)
 from shared.runtime_state.store import LINKEDIN_STRING_KIND, RuntimeStateStore
-from shared.schemas import CandidateProfileSummary, CandidateSnippet, OpusDecision, Progress, SearchString
-from shared.storage import read_jsonl
+from shared.schemas import CandidateSnippet, OpusDecision, Progress, SearchString
 
 SAVE_DECISIONS = {"SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE", "SIGNAL_SAVE"}
-
-
-@dataclass(frozen=True)
-class LinkedInResumeState:
-    brief_name: str
-    current_string_id: int | None = None
-    current_page: int = 0
-    pending_block_name: str = ""
-    pending_block_string_ids: list[int] | None = None
-    pending_block_ready: bool = False
-    candidates_saved: int = 0
-    candidates_rejected: int = 0
-    pivot_count: int = 0
-
-    def to_dict(self) -> dict[str, Any]:
-        payload = asdict(self)
-        payload["pending_block_string_ids"] = list(self.pending_block_string_ids or [])
-        return payload
 
 
 class LinkedInRuntimeStateBridge:
@@ -126,7 +110,7 @@ class LinkedInRuntimeStateBridge:
         )
 
     def load_progress(self, run_id: int) -> Progress:
-        return project_linkedin_progress(self.store, run_id)
+        return load_linkedin_progress(self.store, run_id)
 
     def load_experiment_states(
         self,
@@ -141,20 +125,14 @@ class LinkedInRuntimeStateBridge:
         )
 
     def load_search_memory(self) -> dict:
-        return project_linkedin_search_memory(self.store, brief_id=self.brief_id)
+        return load_linkedin_search_memory(self.store, brief_id=self.brief_id)
 
     def load_history(self) -> tuple[set[str], dict[str, str], set[str]]:
-        blocked_urls = set(self.store.list_terminal_identity_keys(source="linkedin", brief_id=self.brief_id))
-        prior_outcomes: dict[str, str] = {}
-        saved_urls: set[str] = set()
-        for record in project_linkedin_candidate_history(self.store, brief_id=self.brief_id):
-            url = record.get("profile_url", "")
-            outcome = record.get("outcome", "")
-            if url:
-                prior_outcomes[url] = outcome
-                if outcome in SAVE_DECISIONS:
-                    saved_urls.add(url)
-        return blocked_urls, prior_outcomes, saved_urls
+        return load_linkedin_history(
+            self.store,
+            brief_id=self.brief_id,
+            save_decisions=SAVE_DECISIONS,
+        )
 
     def record_missing_identity(
         self,
@@ -426,7 +404,7 @@ class LinkedInRuntimeStateBridge:
         )
 
     def rebuild_artifacts(self, run_id: int) -> None:
-        rebuild_compat_projections(
+        rebuild_linkedin_artifacts(
             self.store,
             run_id=run_id,
             output_dir=self.output_dir,
@@ -448,225 +426,27 @@ class LinkedInRuntimeStateBridge:
         )
 
     def import_legacy_state(self, run_id: int) -> None:
-        with self.store.connect() as conn:
-            imported = conn.execute(
-                """
-                SELECT 1
-                FROM events
-                WHERE run_id = ? AND event_type = 'linkedin_legacy_import_complete'
-                LIMIT 1
-                """,
-                (run_id,),
-            ).fetchone()
-            if imported:
-                return
-
-        progress = self._read_legacy_progress()
-        if progress:
-            self.sync_progress(run_id, progress)
-
-        snippets_by_url: dict[str, list[dict]] = {}
-        facial_by_url: dict[str, dict] = {}
-        profiles_by_url: dict[str, dict] = {}
-        finals_by_url: dict[str, dict] = {}
-
-        if self.snippets_path.exists():
-            for record in read_jsonl(self.snippets_path):
-                url = record.get("profile_url", "")
-                if not url:
-                    continue
-                snippets_by_url.setdefault(url, []).append(record)
-
-        if self.facial_path.exists():
-            for record in read_jsonl(self.facial_path):
-                url = record.get("profile_url", "")
-                if url:
-                    facial_by_url[url] = record
-
-        if self.profiles_path.exists():
-            for record in read_jsonl(self.profiles_path):
-                url = record.get("profile_url", "")
-                if url:
-                    profiles_by_url[url] = record
-
-        if self.final_path.exists():
-            for record in read_jsonl(self.final_path):
-                url = record.get("profile_url", "")
-                if url:
-                    finals_by_url[url] = record
-
-        for url, snippet_records in snippets_by_url.items():
-            for record in snippet_records:
-                snippet = CandidateSnippet.from_dict(record)
-                self.record_snippet_extracted(
-                    run_id=run_id,
-                    search_string=self._search_string_for_id(progress, snippet.source_string_id) if progress else SearchString(id=snippet.source_string_id, name=snippet.source_string_name, boolean=""),
-                    snippet=snippet,
-                )
-
-            facial_record = facial_by_url.get(url)
-            if facial_record:
-                snippet = CandidateSnippet.from_dict(snippet_records[-1])
-                search_string = self._search_string_for_id(progress, snippet.source_string_id) if progress else SearchString(id=snippet.source_string_id, name=snippet.source_string_name, boolean="")
-                attempt_id = self.start_stage_attempt(
-                    run_id=run_id,
-                    search_string=search_string,
-                    snippet=snippet,
-                    stage="facial",
-                )
-                decision = OpusDecision.from_dict(facial_record)
-                if decision.decision in {"PARSE_FAILURE", "JUDGMENT_FAILURE"}:
-                    self.finish_failure_decision(
-                        run_id=run_id,
-                        attempt_id=attempt_id,
-                        snippet=snippet,
-                        decision=decision,
-                    )
-                else:
-                    self.finish_stage_success(
-                        run_id=run_id,
-                        attempt_id=attempt_id,
-                        stage="facial",
-                        snippet=snippet,
-                        decision=decision,
-                    )
-
-            final_record = finals_by_url.get(url)
-            if final_record:
-                snippet = CandidateSnippet.from_dict(snippet_records[-1])
-                search_string = self._search_string_for_id(progress, snippet.source_string_id) if progress else SearchString(id=snippet.source_string_id, name=snippet.source_string_name, boolean="")
-                profile_summary = None
-                if url in profiles_by_url:
-                    profile_summary = CandidateProfileSummary.from_dict(profiles_by_url[url])
-                candidate = self.store.get_candidate(
-                    source="linkedin",
-                    brief_id=self.brief_id,
-                    identity_key=url,
-                )
-                if candidate and candidate["current_lifecycle_state"] not in {"facial_terminal", "full_started", "full_terminal"}:
-                    self.store.set_candidate_state(
-                        run_id=run_id,
-                        source="linkedin",
-                        brief_id=self.brief_id,
-                        identity_key=url,
-                        new_state="facial_terminal",
-                        terminal_decision="FACIAL_YES",
-                        terminal_payload={"source_string_id": snippet.source_string_id},
-                    )
-                attempt_id = self.start_stage_attempt(
-                    run_id=run_id,
-                    search_string=search_string,
-                    snippet=snippet,
-                    stage="full",
-                    payload={"profile_summary": profile_summary.to_dict() if profile_summary else {}},
-                )
-                decision = OpusDecision.from_dict(final_record)
-                if decision.decision in {"PARSE_FAILURE", "JUDGMENT_FAILURE"}:
-                    self.finish_failure_decision(
-                        run_id=run_id,
-                        attempt_id=attempt_id,
-                        snippet=snippet,
-                        decision=decision,
-                        payload={"profile_summary": profile_summary.to_dict() if profile_summary else {}},
-                    )
-                else:
-                    self.finish_stage_success(
-                        run_id=run_id,
-                        attempt_id=attempt_id,
-                        stage="full",
-                        snippet=snippet,
-                        decision=decision,
-                        profile_summary=profile_summary,
-                    )
-
-        if self.history_path.exists():
-            for record in read_jsonl(self.history_path):
-                url = record.get("profile_url", "")
-                outcome = record.get("outcome", "")
-                if not url or not outcome:
-                    continue
-                if not self.store.get_candidate(source="linkedin", brief_id=self.brief_id, identity_key=url):
-                    self.store.record_candidate_discovery(
-                        run_id=run_id,
-                        work_unit_id=None,
-                        source="linkedin",
-                        brief_id=self.brief_id,
-                        identity_key=url,
-                        display_name=record.get("candidate_name", ""),
-                        profile_url=url,
-                        payload={"legacy_import": True},
-                    )
-                candidate = self.store.get_candidate(
-                    source="linkedin",
-                    brief_id=self.brief_id,
-                    identity_key=url,
-                )
-                current_state = candidate["current_lifecycle_state"] if candidate else "discovered"
-                if current_state == "discovered":
-                    self.store.set_candidate_state(
-                        run_id=run_id,
-                        source="linkedin",
-                        brief_id=self.brief_id,
-                        identity_key=url,
-                        new_state="snippet_extracted",
-                    )
-                    current_state = "snippet_extracted"
-                if current_state == "snippet_extracted":
-                    self.store.set_candidate_state(
-                        run_id=run_id,
-                        source="linkedin",
-                        brief_id=self.brief_id,
-                        identity_key=url,
-                        new_state="facial_started",
-                    )
-                    current_state = "facial_started"
-                if outcome in SAVE_DECISIONS or outcome == "REJECT":
-                    if current_state == "facial_started":
-                        self.store.set_candidate_state(
-                            run_id=run_id,
-                            source="linkedin",
-                            brief_id=self.brief_id,
-                            identity_key=url,
-                            new_state="facial_terminal",
-                            terminal_decision="FACIAL_YES",
-                            terminal_payload={
-                                "legacy_import": True,
-                                "source_string_id": record.get("source_string_id"),
-                            },
-                        )
-                        current_state = "facial_terminal"
-                    if current_state == "facial_terminal":
-                        self.store.set_candidate_state(
-                            run_id=run_id,
-                            source="linkedin",
-                            brief_id=self.brief_id,
-                            identity_key=url,
-                            new_state="full_started",
-                        )
-                    state = "full_terminal"
-                else:
-                    state = "facial_terminal"
-                self.store.set_candidate_state(
-                    run_id=run_id,
-                    source="linkedin",
-                    brief_id=self.brief_id,
-                    identity_key=url,
-                    new_state=state,
-                    terminal_decision=outcome,
-                    terminal_payload={
-                        "confidence": record.get("confidence", 0.0),
-                        "source_string_id": record.get("source_string_id"),
-                        "timestamp": record.get("timestamp"),
-                    },
-                )
-        self.store.record_event(
-            run_id=run_id,
-            event_type="linkedin_legacy_import_complete",
-            payload={
-                "progress_exists": self.progress_path.exists(),
-                "history_exists": self.history_path.exists(),
-                "search_memory_exists": self.search_memory_path.exists(),
-            },
+        import_linkedin_legacy_state(
+            LinkedInLegacyImportContext(
+                store=self.store,
+                run_id=run_id,
+                brief_id=self.brief_id,
+                progress_path=self.progress_path,
+                history_path=self.history_path,
+                search_memory_path=self.search_memory_path,
+                snippets_path=self.snippets_path,
+                facial_path=self.facial_path,
+                profiles_path=self.profiles_path,
+                final_path=self.final_path,
+                read_legacy_progress=self._read_legacy_progress,
+                sync_progress=self.sync_progress,
+                search_string_for_id=self._search_string_for_id,
+                record_snippet_extracted=self.record_snippet_extracted,
+                start_stage_attempt=self.start_stage_attempt,
+                finish_failure_decision=self.finish_failure_decision,
+                finish_stage_success=self.finish_stage_success,
+                save_decisions=SAVE_DECISIONS,
+            )
         )
 
     def restart_string(self, *, run_id: int, progress: Progress, string_id: int) -> None:

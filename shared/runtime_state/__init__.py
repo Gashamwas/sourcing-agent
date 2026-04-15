@@ -26,7 +26,7 @@ from .projections import (
     project_linkedin_search_memory,
     project_linkedin_snippets,
 )
-from .linkedin import LinkedInResumeState, LinkedInRuntimeStateBridge
+from .linkedin import LinkedInRuntimeStateBridge
 from .store import (
     GITHUB_GRAPH_SEED_KIND,
     GITHUB_QUERY_KIND,
@@ -41,7 +41,6 @@ __all__ = [
     "RuntimeStateLock",
     "RuntimeStateStore",
     "GitHubRuntimeStateBridge",
-    "LinkedInResumeState",
     "LinkedInRuntimeStateBridge",
     "RuntimeStateBridge",
     "ArtifactContract",
