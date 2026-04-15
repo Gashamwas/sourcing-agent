@@ -569,3 +569,357 @@ def test_restart_string_clears_pending_drift_state(tmp_path):
     assert reloaded_states[1].pending_drift_variant_id is None
     assert reloaded_states[1].pending_drift_parent_variant_id is None
     assert reloaded_states[1].drift_attempt_count == 0
+
+
+def test_sync_progress_delete_missing_work_units_when_progress_subset(tmp_path):
+    """Subset progress.strings removes other linkedin_string work_units for the same run_id."""
+    store = RuntimeStateStore(tmp_path / "runtime_state.sqlite3")
+    bridge = LinkedInRuntimeStateBridge(
+        store=store,
+        output_dir=tmp_path,
+        brief_id="test-project",
+        brief_name="test",
+    )
+    run_id = store.start_run(
+        source="linkedin",
+        brief_id="test-project",
+        output_dir=str(tmp_path),
+        mode="fresh",
+        resume_state={"brief_name": "test"},
+    )
+    two = Progress(
+        brief_name="test",
+        strings=[
+            SearchString(id=1, name="one", boolean="a", status="queued"),
+            SearchString(id=2, name="two", boolean="b", status="queued"),
+        ],
+    )
+    bridge.sync_progress(run_id, two)
+    rows = store.list_work_units(run_id, kind="linkedin_string")
+    assert {row["source_unit_id"] for row in rows} == {"1", "2"}
+
+    one_only = Progress(
+        brief_name="test",
+        strings=[SearchString(id=1, name="one", boolean="a", status="in_progress")],
+        current_string_id=1,
+    )
+    bridge.sync_progress(run_id, one_only)
+    rows_after = store.list_work_units(run_id, kind="linkedin_string")
+    assert len(rows_after) == 1
+    assert rows_after[0]["source_unit_id"] == "1"
+
+
+def test_start_or_resume_run_reconciles_open_attempt_and_pending_side_effect(tmp_path):
+    """Bridge entry reconciles orphaned LinkedIn attempts and pending side effects."""
+    store = RuntimeStateStore(tmp_path / "runtime_state.sqlite3")
+    bridge = LinkedInRuntimeStateBridge(
+        store=store,
+        output_dir=tmp_path,
+        brief_id="test-project",
+        brief_name="test",
+    )
+    run_id = store.start_run(
+        source="linkedin",
+        brief_id="test-project",
+        output_dir=str(tmp_path),
+        mode="fresh",
+        resume_state={"brief_name": "test"},
+    )
+    progress = Progress(
+        brief_name="test",
+        strings=[SearchString(id=1, name="s", boolean="x", status="in_progress")],
+        current_string_id=1,
+    )
+    bridge.sync_progress(run_id, progress)
+    work_unit_id = store.get_work_unit_id(run_id, kind="linkedin_string", source_unit_id="1")
+    assert work_unit_id is not None
+
+    url = "/talent/profile/reconcile-me"
+    store.record_candidate_discovery(
+        run_id=run_id,
+        work_unit_id=work_unit_id,
+        source="linkedin",
+        brief_id="test-project",
+        identity_key=url,
+        display_name="Test",
+        profile_url=url,
+        payload={},
+    )
+    attempt_id = store.start_attempt(
+        run_id=run_id,
+        source="linkedin",
+        brief_id="test-project",
+        identity_key=url,
+        stage="facial",
+        work_unit_id=work_unit_id,
+        payload={},
+        source_cursor={},
+        display_name="Test",
+        profile_url=url,
+    )
+    started = store.begin_candidate_side_effect(
+        run_id=run_id,
+        source="linkedin",
+        brief_id="test-project",
+        identity_key=url,
+        attempt_id=None,
+        effect_type="linkedin_save",
+        idempotency_key="save-1",
+        payload={"search_string_id": 1},
+    )
+    side_effect_id = int(started["side_effect"]["id"])
+
+    new_run_id, _progress = bridge.start_or_resume_run(resume=True)
+    assert new_run_id != run_id
+
+    with store.connect() as conn:
+        attempt = conn.execute(
+            "SELECT status, failure_kind FROM candidate_attempts WHERE id = ?",
+            (attempt_id,),
+        ).fetchone()
+        assert attempt["status"] == "reconciled"
+        assert attempt["failure_kind"] == "orphaned_attempt"
+
+        side_effect = conn.execute(
+            "SELECT status FROM side_effects WHERE id = ?",
+            (side_effect_id,),
+        ).fetchone()
+        assert side_effect["status"] == "failed"
+
+
+def test_load_experiment_states_bootstraps_from_payload_when_progress_lookup_misses(tmp_path):
+    """When progress lookup misses and checkpoint state is absent, load from payload and bootstrap."""
+    store = RuntimeStateStore(tmp_path / "runtime_state.sqlite3")
+    bridge = LinkedInRuntimeStateBridge(
+        store=store,
+        output_dir=tmp_path,
+        brief_id="test-project",
+        brief_name="test",
+    )
+    run_id = store.start_run(
+        source="linkedin",
+        brief_id="test-project",
+        output_dir=str(tmp_path),
+        mode="fresh",
+        resume_state={"brief_name": "test"},
+    )
+    progress = Progress(
+        brief_name="test",
+        strings=[SearchString(id=1, name="builders", boolean="foo", status="in_progress")],
+        current_string_id=1,
+        current_page=1,
+    )
+    bridge.sync_progress(run_id, progress)
+
+    with store.connect() as conn:
+        conn.execute(
+            """
+            UPDATE work_units
+            SET checkpoint_json = '{}'
+            WHERE run_id = ? AND kind = ? AND source_unit_id = ?
+            """,
+            (run_id, "linkedin_string", "1"),
+        )
+
+    loaded_states = bridge.load_experiment_states(
+        run_id,
+        progress=Progress(
+            brief_name="test",
+            strings=[SearchString(id=99, name="other", boolean="bar")],
+        ),
+    )
+
+    assert list(loaded_states) == [1]
+    state = loaded_states[1]
+    assert state.intent.root_boolean == "foo"
+    assert state.active_variant_id == "root"
+    assert state.committed_variant_id is None
+    assert state.active_variant.boolean == "foo"
+
+
+def test_run_full_resume_uses_db_page_cursor_instead_of_stale_progress_file(tmp_path):
+    """resume=True should hand _process_string the DB-backed page cursor and pages_reviewed."""
+    pipeline = _make_pipeline(str(tmp_path))
+    initial_progress = Progress(
+        brief_name="test",
+        strings=[
+            SearchString(
+                id=7,
+                name="resume me",
+                boolean="foo",
+                status="in_progress",
+                pages_reviewed=3,
+            )
+        ],
+        current_string_id=7,
+        current_page=3,
+    )
+    pipeline._runtime_run_id, _ = pipeline._runtime_bridge.start_or_resume_run(
+        resume=False,
+        initial_progress=initial_progress,
+    )
+
+    stale_progress = {
+        "brief_name": "test",
+        "current_string_id": 999,
+        "current_page": 99,
+        "strings": [
+            {
+                "id": 7,
+                "name": "stale",
+                "boolean": "stale",
+                "status": "queued",
+                "pages_reviewed": 99,
+            }
+        ],
+    }
+    (tmp_path / "progress.json").write_text(json.dumps(stale_progress))
+
+    pipeline.browser.connect = AsyncMock()
+    pipeline.browser.disconnect = AsyncMock()
+    pipeline.browser.page = MagicMock(url="https://www.linkedin.com/talent/search")
+    pipeline._print_session_summary = MagicMock()
+    pipeline._print_summary = MagicMock()
+    pipeline._generate_run_report = MagicMock()
+    pipeline._session_expired = MagicMock()
+
+    observed: dict[str, int] = {}
+
+    async def fake_process(search_string, progress):
+        observed["string_id"] = search_string.id
+        observed["pages_reviewed"] = search_string.pages_reviewed
+        observed["current_string_id"] = progress.current_string_id
+        observed["current_page"] = progress.current_page
+
+    pipeline._process_string = fake_process
+
+    asyncio.run(pipeline.run_full(resume=True))
+
+    assert observed == {
+        "string_id": 7,
+        "pages_reviewed": 3,
+        "current_string_id": 7,
+        "current_page": 3,
+    }
+
+
+def test_resume_clone_keeps_candidate_linked_to_old_run_until_retouched(tmp_path):
+    """Cloned work units get a new run_id, but candidate linkage stays on the prior run until updated."""
+    store = RuntimeStateStore(tmp_path / "runtime_state.sqlite3")
+    bridge = LinkedInRuntimeStateBridge(
+        store=store,
+        output_dir=tmp_path,
+        brief_id="test-project",
+        brief_name="test",
+    )
+    initial_progress = Progress(
+        brief_name="test",
+        strings=[SearchString(id=1, name="builders", boolean="foo", status="in_progress")],
+        current_string_id=1,
+        current_page=1,
+    )
+    run_id_1, _ = bridge.start_or_resume_run(resume=False, initial_progress=initial_progress)
+    work_unit_id_1 = store.get_work_unit_id(run_id_1, kind="linkedin_string", source_unit_id="1")
+    assert work_unit_id_1 is not None
+
+    url = "/talent/profile/cloned-linkage"
+    store.record_candidate_discovery(
+        run_id=run_id_1,
+        work_unit_id=work_unit_id_1,
+        source="linkedin",
+        brief_id="test-project",
+        identity_key=url,
+        display_name="Test",
+        profile_url=url,
+        payload={"source_string_id": 1},
+    )
+    attempt_id_1 = store.start_attempt(
+        run_id=run_id_1,
+        source="linkedin",
+        brief_id="test-project",
+        identity_key=url,
+        stage="facial",
+        work_unit_id=work_unit_id_1,
+        payload={"source_string_id": 1},
+        source_cursor={"source_string_id": 1},
+        display_name="Test",
+        profile_url=url,
+    )
+    store.finish_attempt_failure(
+        attempt_id=attempt_id_1,
+        failure_kind="interrupted_test",
+        failure_reason="test retryable failure",
+        retryable=True,
+        payload={"source_string_id": 1},
+        run_id=run_id_1,
+    )
+
+    run_id_2, _ = bridge.start_or_resume_run(resume=True)
+    assert run_id_2 != run_id_1
+    work_unit_id_2 = store.get_work_unit_id(run_id_2, kind="linkedin_string", source_unit_id="1")
+    assert work_unit_id_2 is not None
+    assert work_unit_id_2 != work_unit_id_1
+
+    candidate_before = store.get_candidate(
+        source="linkedin",
+        brief_id="test-project",
+        identity_key=url,
+    )
+    assert candidate_before is not None
+    assert candidate_before["last_work_unit_id"] == work_unit_id_1
+    assert candidate_before["last_attempt_id"] == attempt_id_1
+
+    with store.connect() as conn:
+        work_unit_rows = conn.execute(
+            "SELECT id, run_id FROM work_units WHERE id IN (?, ?) ORDER BY id ASC",
+            (work_unit_id_1, work_unit_id_2),
+        ).fetchall()
+        attempt_row = conn.execute(
+            "SELECT run_id FROM candidate_attempts WHERE id = ?",
+            (attempt_id_1,),
+        ).fetchone()
+
+    assert {row["id"]: row["run_id"] for row in work_unit_rows} == {
+        work_unit_id_1: run_id_1,
+        work_unit_id_2: run_id_2,
+    }
+    assert attempt_row["run_id"] == run_id_1
+
+    store.record_candidate_discovery(
+        run_id=run_id_2,
+        work_unit_id=work_unit_id_2,
+        source="linkedin",
+        brief_id="test-project",
+        identity_key=url,
+        display_name="Test",
+        profile_url=url,
+        payload={"source_string_id": 1},
+    )
+    attempt_id_2 = store.start_attempt(
+        run_id=run_id_2,
+        source="linkedin",
+        brief_id="test-project",
+        identity_key=url,
+        stage="facial",
+        work_unit_id=work_unit_id_2,
+        payload={"source_string_id": 1},
+        source_cursor={"source_string_id": 1},
+        display_name="Test",
+        profile_url=url,
+    )
+
+    candidate_after = store.get_candidate(
+        source="linkedin",
+        brief_id="test-project",
+        identity_key=url,
+    )
+    assert candidate_after is not None
+    assert candidate_after["last_work_unit_id"] == work_unit_id_2
+    assert candidate_after["last_attempt_id"] == attempt_id_2
+
+    with store.connect() as conn:
+        attempt_row_2 = conn.execute(
+            "SELECT run_id FROM candidate_attempts WHERE id = ?",
+            (attempt_id_2,),
+        ).fetchone()
+    assert attempt_row_2["run_id"] == run_id_2
