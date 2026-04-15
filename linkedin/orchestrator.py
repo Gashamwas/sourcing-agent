@@ -59,6 +59,17 @@ from shared.search_memory import (
     normalize_novelty_bucket,
     update_search_memory,
 )
+from shared.identity_resolution import (
+    classify_recruiter_activity_pressure,
+    infer_reachout_status,
+)
+from shared.reconciliation_schemas import RecruiterActivitySnapshot
+from shared.strict_seniority import (
+    classify_search_string_seniority,
+    is_strict_seniority_brief,
+    profile_reads_above_band,
+    recommended_yoe_window,
+)
 from shared.run_report_schema import (
     RunDebriefAnalysis,
     StructuredRunReport,
@@ -204,6 +215,9 @@ class Pipeline:
             "saved": 0,
             "save_attempts": 0,
             "rejected": 0,
+            "high_pressure_candidates_seen": 0,
+            "activity_saturated_preview_skips": 0,
+            "high_fit_low_novelty_saves": 0,
         }
 
         # Progress ref for Ctrl+C handler
@@ -343,6 +357,17 @@ class Pipeline:
                 for hypothesis_id in retrieval_recipe.get("applied_hypothesis_ids", [])
                 if str(hypothesis_id).strip()
             ]
+        risk = classify_search_string_seniority(
+            search_string.boolean,
+            search_string.name,
+            domain_lane=search_string.domain_lane,
+        )
+        if not search_string.seniority_risk:
+            search_string.seniority_risk = risk["seniority_risk"]
+        if not search_string.title_bucket_risk:
+            search_string.title_bucket_risk = risk["title_bucket_risk"]
+        if search_string.opening_eligible is None:
+            search_string.opening_eligible = bool(risk["opening_eligible"])
 
     def _checkpoint_progress(
         self,
@@ -575,6 +600,14 @@ class Pipeline:
         self._prior_outcomes = {}
         self._load_candidate_history()
         self._load_search_memory()
+        if is_strict_seniority_brief(self.brief_obj):
+            yoe_min, yoe_max = recommended_yoe_window(self.brief_obj)
+            print(
+                f"  [operator] Strict-seniority brief: set LinkedIn YOE to {yoe_min}-{yoe_max} before launch."
+            )
+            print(
+                "  [operator] If the prior run was contaminated by seniority drift, start from the quarantined clean state dir rather than resuming mixed state."
+            )
 
         # Ctrl+C handler — only install if not running under session_orchestrator
         def _sigint_handler(sig, frame):
@@ -1622,8 +1655,14 @@ class Pipeline:
             self._record_runtime_snippet(search_string, snippet)
             self.stats["snippets_extracted"] += 1
             string_stats["candidates"] += 1
+            self._record_snippet_activity(snippet, string_stats)
 
-            decision = await self._evaluate_snippet(snippet, page_report, search_string)
+            decision = await self._evaluate_snippet(
+                snippet,
+                page_report,
+                search_string,
+                string_stats=string_stats,
+            )
 
             if decision and hasattr(decision, "rationale") and "[API error" in (decision.rationale or ""):
                 consecutive_api_errors += 1
@@ -1865,6 +1904,7 @@ class Pipeline:
             self._record_runtime_snippet(search_string, snippet)
             self.stats["snippets_extracted"] += 1
             string_stats["candidates"] += 1
+            self._record_snippet_activity(snippet, string_stats)
             eligible_snippets.append(snippet)
 
             # Glance assessment
@@ -1973,7 +2013,16 @@ class Pipeline:
                 # FACIAL_YES
                 print(f"    [FACIAL_YES] {snippet.name}: {facial.rationale}")
                 self.stats["facial_yes"] += 1
-                facial_yes_snippets.append(snippet)
+                if self._should_skip_full_eval_for_activity(snippet, facial):
+                    self._mark_activity_saturated_preview_skip(
+                        snippet=snippet,
+                        page_report=page_report,
+                        search_string=search_string,
+                        facial_decision=facial,
+                        string_stats=string_stats,
+                    )
+                else:
+                    facial_yes_snippets.append(snippet)
                 all_candidates.append({
                     "name": snippet.name, "title": snippet.current_title,
                     "company": snippet.current_company, "headline": snippet.headline,
@@ -2084,11 +2133,24 @@ class Pipeline:
             "facial_no": 0,
             "saves": 0,
             "rejects": 0,
+            "high_pressure_candidates_seen": 0,
+            "activity_saturated_preview_skips": 0,
+            "high_fit_low_novelty_saves": 0,
         }
 
     @staticmethod
     def _page_stat_delta(before: dict[str, int], after: dict[str, int]) -> dict[str, int]:
-        keys = ("candidates", "duplicates", "facial_yes", "facial_no", "saves", "rejects")
+        keys = (
+            "candidates",
+            "duplicates",
+            "facial_yes",
+            "facial_no",
+            "saves",
+            "rejects",
+            "high_pressure_candidates_seen",
+            "activity_saturated_preview_skips",
+            "high_fit_low_novelty_saves",
+        )
         return {key: max(0, int(after.get(key, 0)) - int(before.get(key, 0))) for key in keys}
 
     @staticmethod
@@ -2105,6 +2167,149 @@ class Pipeline:
     @staticmethod
     def _page_candidates(all_candidates: list[dict], page_num: int) -> list[dict]:
         return [candidate for candidate in all_candidates if candidate.get("page") == page_num]
+
+    @staticmethod
+    def _activity_snapshot_from_sources(
+        snippet: CandidateSnippet,
+        profile_status_summary: dict | None = None,
+    ) -> RecruiterActivitySnapshot | None:
+        if isinstance(profile_status_summary, dict) and profile_status_summary:
+            return RecruiterActivitySnapshot.from_dict(profile_status_summary)
+        return snippet.recruiter_activity
+
+    @staticmethod
+    def _activity_summary_text(activity: RecruiterActivitySnapshot | None) -> str:
+        if not activity:
+            return ""
+        parts: list[str] = []
+        if activity.message_count:
+            parts.append(f"{activity.message_count} messages")
+        if activity.project_count:
+            parts.append(f"{activity.project_count} projects")
+        if activity.view_count:
+            parts.append(f"{activity.view_count} views")
+        if activity.last_outbound_contact:
+            parts.append(f"last outbound {activity.last_outbound_contact}")
+        if activity.saved_by:
+            parts.append(f"saved by {activity.saved_by}")
+        return ", ".join(parts)
+
+    @staticmethod
+    def _snippet_is_clearly_compelling(snippet: CandidateSnippet) -> bool:
+        """Conservative heuristic for candidates worth opening despite high saturation."""
+        text = " ".join(
+            part
+            for part in [
+                snippet.current_title,
+                snippet.headline,
+                " ".join(snippet.experience_entries[:3]),
+            ]
+            if part
+        ).lower()
+        if not text:
+            return False
+
+        exact_signals = (
+            "head of ai",
+            "head of ml",
+            "head of machine learning",
+            "head of applied ai",
+            "head of ai platform",
+            "head of ai platforms",
+            "head of ai engineering",
+            "head of ai research",
+            "executive director",
+            "chief architect",
+            "principal architect",
+            "chief ai architect",
+            "technology fellow",
+            "distinguished engineer",
+            "principal scientist",
+            "research director",
+            "research manager",
+            "applied science",
+            "applied scientist",
+        )
+        if any(signal in text for signal in exact_signals):
+            return True
+
+        ai_terms = (" ai", "ml", "machine learning", "generative", "llm", "applied ai", "data science")
+        leadership_terms = ("head", "chief", "director", "vp", "vice president", "principal", "fellow", "architect")
+        return any(term in text for term in ai_terms) and any(term in text for term in leadership_terms)
+
+    def _record_snippet_activity(
+        self,
+        snippet: CandidateSnippet,
+        string_stats: dict[str, int],
+    ) -> None:
+        pressure = snippet.novelty_pressure or classify_recruiter_activity_pressure(
+            snippet.recruiter_activity
+        )
+        snippet.novelty_pressure = pressure
+        if pressure == "high":
+            self.stats["high_pressure_candidates_seen"] += 1
+            string_stats.setdefault("high_pressure_candidates_seen", 0)
+            string_stats["high_pressure_candidates_seen"] += 1
+
+    def _should_skip_full_eval_for_activity(
+        self,
+        snippet: CandidateSnippet,
+        facial_decision: OpusDecision,
+    ) -> bool:
+        if (snippet.novelty_pressure or "").lower() != "high":
+            return False
+        if (facial_decision.confidence or 0.0) >= 0.85:
+            return False
+        rationale = (facial_decision.rationale or "").lower()
+        if "strong" in rationale or "clear" in rationale:
+            return False
+        return not self._snippet_is_clearly_compelling(snippet)
+
+    def _mark_activity_saturated_preview_skip(
+        self,
+        *,
+        snippet: CandidateSnippet,
+        page_report: "_PageReport | None",
+        search_string: SearchString,
+        facial_decision: OpusDecision,
+        string_stats: dict[str, int] | None = None,
+    ) -> None:
+        activity = self._activity_snapshot_from_sources(snippet)
+        activity_summary = self._activity_summary_text(activity) or "high recruiter activity"
+        facial_decision.novelty_value = "low"
+        facial_decision.value_rationale = f"Low novelty due to recruiter saturation: {activity_summary}"
+        self.stats["activity_saturated_preview_skips"] += 1
+        if string_stats is not None:
+            string_stats.setdefault("activity_saturated_preview_skips", 0)
+            string_stats["activity_saturated_preview_skips"] += 1
+        if page_report:
+            page_report.add_skip_preview(snippet.name, f"activity_saturated: {activity_summary}")
+        log_event(
+            self.log_path,
+            "activity_saturated_preview_skip",
+            string_id=search_string.id,
+            candidate_name=snippet.name,
+            profile_url=snippet.profile_url,
+            novelty_pressure=snippet.novelty_pressure,
+            activity_summary=activity_summary,
+            facial_confidence=facial_decision.confidence,
+        )
+
+    def _derive_novelty_value(
+        self,
+        snippet: CandidateSnippet,
+        *,
+        profile_status_summary: dict | None = None,
+    ) -> tuple[str, str]:
+        activity = self._activity_snapshot_from_sources(snippet, profile_status_summary)
+        pressure = classify_recruiter_activity_pressure(activity)
+        reachout_status = infer_reachout_status(activity)
+        summary = self._activity_summary_text(activity)
+        if pressure == "high":
+            return "low", f"Low novelty due to visible recruiter saturation ({summary or reachout_status or 'high activity'})."
+        if pressure == "medium":
+            return "medium", f"Moderate novelty because the candidate already shows recruiter activity ({summary or reachout_status or 'some activity'})."
+        return "high", "High novelty: limited visible recruiter activity."
 
     def _build_page_insights(
         self,
@@ -3430,6 +3635,7 @@ Provide a narrowed Boolean."""
         snippet: CandidateSnippet,
         page_report: _PageReport | None = None,
         search_string: SearchString | None = None,
+        string_stats: dict[str, int] | None = None,
     ) -> Optional[OpusDecision]:
         """Run snippet through facial judgment -> full profile -> final judgment."""
         runtime_search_string = search_string or SearchString(
@@ -3563,6 +3769,16 @@ Provide a narrowed Boolean."""
         print(f"    [FACIAL_YES] {facial.rationale}")
         self.stats["facial_yes"] += 1
 
+        if self._should_skip_full_eval_for_activity(snippet, facial):
+            self._mark_activity_saturated_preview_skip(
+                snippet=snippet,
+                page_report=page_report,
+                search_string=runtime_search_string,
+                facial_decision=facial,
+                string_stats=string_stats,
+            )
+            return facial
+
         return await self._full_evaluate(snippet, page_report, runtime_search_string)
 
     async def _full_evaluate(
@@ -3614,6 +3830,17 @@ Provide a narrowed Boolean."""
                 source="profile_extraction",
             )
 
+        profile_status_summary: dict = {}
+        try:
+            profile_status_summary = await self.browser.get_profile_status_summary()
+        except Exception as e:
+            log_event(
+                self.log_path,
+                "profile_activity_enrichment_failed",
+                name=snippet.name,
+                error=str(e),
+            )
+
         # --- Final judgment (Opus) ---
         print(f"    Final judgment (Opus)...")
         try:
@@ -3628,6 +3855,13 @@ Provide a narrowed Boolean."""
                 error=e,
                 source="judgment",
             )
+
+        novelty_value, value_rationale = self._derive_novelty_value(
+            snippet,
+            profile_status_summary=profile_status_summary,
+        )
+        final.novelty_value = novelty_value
+        final.value_rationale = value_rationale
 
         # Intercept parse/judgment failures — do NOT persist to cross-session history
         if is_failure_decision(final.decision):
@@ -3702,6 +3936,8 @@ Provide a narrowed Boolean."""
             tag = final.decision if final.decision in ("INFERENTIAL_SAVE", "TRANSFERABLE_SAVE") else "SAVE"
             print(f"    [{tag}] {final.rationale}")
             self.stats["save_attempts"] += 1
+            if final.novelty_value == "low":
+                self.stats["high_fit_low_novelty_saves"] += 1
             await self._side_effects_service.handle_save_decision(
                 snippet=snippet,
                 runtime_search_string=runtime_search_string,
@@ -3790,6 +4026,9 @@ Provide a narrowed Boolean."""
                 family_key=gs.get("family_key", ""),
                 novelty_bucket=gs.get("novelty_bucket", ""),
                 domain_lane=gs.get("domain_lane", ""),
+                seniority_risk=gs.get("seniority_risk", ""),
+                title_bucket_risk=gs.get("title_bucket_risk", ""),
+                opening_eligible=gs.get("opening_eligible"),
                 retrieval_recipe=gs.get("retrieval_recipe", {}),
                 retrieval_hypothesis_ids=list(gs.get("retrieval_hypothesis_ids", [])),
             )
@@ -3814,6 +4053,9 @@ Provide a narrowed Boolean."""
                 family_key=gap.get("family_key", ""),
                 novelty_bucket=gap.get("novelty_bucket", ""),
                 domain_lane=gap.get("domain_lane", ""),
+                seniority_risk=gap.get("seniority_risk", ""),
+                title_bucket_risk=gap.get("title_bucket_risk", ""),
+                opening_eligible=gap.get("opening_eligible"),
                 retrieval_recipe=gap.get("retrieval_recipe", {}),
                 retrieval_hypothesis_ids=list(gap.get("retrieval_hypothesis_ids", [])),
             )
@@ -3903,6 +4145,21 @@ Provide a narrowed Boolean."""
 
         return snapshots
 
+    def _string_has_seniority_contamination(
+        self,
+        search_string: SearchString,
+        profile_index: dict[str, dict] | None = None,
+    ) -> bool:
+        self._hydrate_search_string_metadata(search_string)
+        if search_string.seniority_risk == "high" or search_string.title_bucket_risk == "high":
+            return True
+        if not profile_index or not search_string.saves:
+            return False
+        for profile in self._saved_profile_snapshots(search_string.saves[:5], profile_index):
+            if profile_reads_above_band(profile):
+                return True
+        return False
+
     @staticmethod
     def _checkpoint_mode_for_block(
         block_name: str,
@@ -3950,6 +4207,8 @@ Provide a narrowed Boolean."""
     def _search_intelligence_aggregate(
         self,
         strings: list[SearchString],
+        *,
+        profile_index: dict[str, dict] | None = None,
     ) -> dict[str, Any]:
         family_scores: dict[str, float] = {}
         lane_scores: dict[str, float] = {}
@@ -3958,6 +4217,9 @@ Provide a narrowed Boolean."""
         strings_rescued_by_drift: list[int] = []
         productive_string_ids: list[int] = []
         dead_family_candidates: list[str] = []
+        contaminated_string_ids: list[int] = []
+        contaminated_family_keys: list[str] = []
+        contaminated_domain_lanes: list[str] = []
 
         for search_string in strings:
             detail = self._search_intelligence_detail_for_string(search_string)
@@ -3976,11 +4238,21 @@ Provide a narrowed Boolean."""
 
             drift_summary = detail.get("drift_rescue_summary", {}) or {}
             rescued = drift_summary.get("outcome") in {"rescued", "signal_returned"}
+            contaminated = self._string_has_seniority_contamination(
+                search_string,
+                profile_index=profile_index,
+            )
+            if contaminated:
+                contaminated_string_ids.append(search_string.id)
+                if search_string.family_key and search_string.family_key not in contaminated_family_keys:
+                    contaminated_family_keys.append(search_string.family_key)
+                if search_string.domain_lane and search_string.domain_lane not in contaminated_domain_lanes:
+                    contaminated_domain_lanes.append(search_string.domain_lane)
             if rescued:
                 strings_rescued_by_drift.append(search_string.id)
 
             family_signal_total = int(detail.get("family_signal_total", 0) or 0)
-            proven = bool(search_string.saves) or (rescued and family_signal_total > 0)
+            proven = (bool(search_string.saves) or (rescued and family_signal_total > 0)) and not contaminated
             if proven:
                 productive_string_ids.append(search_string.id)
                 score = float(len(search_string.saves) * 20 + family_signal_total * 2 + (6 if rescued else 0))
@@ -4031,6 +4303,9 @@ Provide a narrowed Boolean."""
             "proven_family_keys": proven_family_keys,
             "proven_domain_lanes": proven_domain_lanes,
             "dead_family_keys": dead_family_keys,
+            "contaminated_string_ids": contaminated_string_ids,
+            "contaminated_family_keys": contaminated_family_keys,
+            "contaminated_domain_lanes": contaminated_domain_lanes,
         }
 
     @staticmethod
@@ -4122,7 +4397,15 @@ Provide a narrowed Boolean."""
         proven_family_keys = set(block_summary.get("proven_family_keys", []))
         proven_domain_lanes = set(block_summary.get("proven_domain_lanes", []))
         dead_family_keys = set(block_summary.get("dead_family_keys", [])) - proven_family_keys
-        if not proven_family_keys and not proven_domain_lanes and not dead_family_keys:
+        contaminated_family_keys = set(block_summary.get("contaminated_family_keys", []))
+        contaminated_domain_lanes = set(block_summary.get("contaminated_domain_lanes", []))
+        if (
+            not proven_family_keys
+            and not proven_domain_lanes
+            and not dead_family_keys
+            and not contaminated_family_keys
+            and not contaminated_domain_lanes
+        ):
             return {
                 "promoted_string_ids": [],
                 "demoted_string_ids": [],
@@ -4151,11 +4434,14 @@ Provide a narrowed Boolean."""
         for search_string in remaining:
             if search_string.id in skip_ids:
                 continue
+            self._hydrate_search_string_metadata(search_string)
 
             if (
                 len(promoted_string_ids) < promotion_limit
                 and search_string.family_key
                 and search_string.family_key in proven_family_keys
+                and search_string.family_key not in contaminated_family_keys
+                and search_string.seniority_risk != "high"
             ):
                 overlay_actions.append(
                     {
@@ -4173,6 +4459,8 @@ Provide a narrowed Boolean."""
                 and search_string.domain_lane
                 and search_string.domain_lane in proven_domain_lanes
                 and search_string.family_key not in dead_family_keys
+                and search_string.domain_lane not in contaminated_domain_lanes
+                and search_string.seniority_risk != "high"
             ):
                 overlay_actions.append(
                     {
@@ -4203,6 +4491,29 @@ Provide a narrowed Boolean."""
                     }
                 )
                 demoted_string_ids.append(search_string.id)
+                continue
+
+            if (
+                len(demoted_string_ids) < demotion_limit
+                and (
+                    search_string.family_key in contaminated_family_keys
+                    or search_string.domain_lane in contaminated_domain_lanes
+                    or search_string.seniority_risk == "high"
+                    or search_string.opening_eligible is False
+                )
+            ):
+                overlay_actions.append(
+                    {
+                        "string_id": search_string.id,
+                        "move_to": "last",
+                        "reason": (
+                            "Demoted because early signal from this family/lane looks contaminated by above-band seniority drift or broad title buckets."
+                        ),
+                        "_priority": 320,
+                    }
+                )
+                demoted_string_ids.append(search_string.id)
+                continue
 
         if checkpoint_mode == "opening_checkpoint" and proven_domain_lanes:
             for search_string in remaining:
@@ -4213,6 +4524,7 @@ Provide a narrowed Boolean."""
                     or search_string.id in promoted_string_ids
                 ):
                     continue
+                self._hydrate_search_string_metadata(search_string)
                 if (
                     search_string.novelty_bucket == "canonical"
                     and search_string.domain_lane
@@ -4226,6 +4538,20 @@ Provide a narrowed Boolean."""
                                 "Demoted because the opening checkpoint already found a productive lane elsewhere and this looks like lower-leverage cleanup."
                             ),
                             "_priority": 120,
+                        }
+                    )
+                    demoted_string_ids.append(search_string.id)
+                    if len(demoted_string_ids) >= demotion_limit:
+                        break
+                elif search_string.opening_eligible is False:
+                    overlay_actions.append(
+                        {
+                            "string_id": search_string.id,
+                            "move_to": "last",
+                            "reason": (
+                                "Demoted because this string is not opening-safe for a strict-seniority brief."
+                            ),
+                            "_priority": 180,
                         }
                     )
                     demoted_string_ids.append(search_string.id)
@@ -4311,7 +4637,10 @@ Provide a narrowed Boolean."""
         profile_index = self._load_profile_index_for_adaptation()
         for search_string in block_strings:
             self._hydrate_search_string_metadata(search_string)
-        block_search_intelligence_summary = self._search_intelligence_aggregate(block_strings)
+        block_search_intelligence_summary = self._search_intelligence_aggregate(
+            block_strings,
+            profile_index=profile_index,
+        )
 
         # Build block report
         strings_with_saves = [s for s in block_strings if s.saves]
@@ -4473,6 +4802,9 @@ Provide a narrowed Boolean."""
                         family_key=ns.get("family_key", ""),
                         novelty_bucket=ns.get("novelty_bucket", ""),
                         domain_lane=ns.get("domain_lane", ""),
+                        seniority_risk=ns.get("seniority_risk", ""),
+                        title_bucket_risk=ns.get("title_bucket_risk", ""),
+                        opening_eligible=ns.get("opening_eligible"),
                         retrieval_recipe=ns.get("retrieval_recipe", {}),
                         retrieval_hypothesis_ids=list(ns.get("retrieval_hypothesis_ids", [])),
                     )
@@ -4731,6 +5063,7 @@ Provide a narrowed Boolean."""
               f"{self.stats['snippets_extracted']} evaluated | "
               f"{self.stats['facial_yes']} facial YES | "
               f"{self.stats['saved']} saves | "
+              f"{self.stats.get('activity_saturated_preview_skips', 0)} activity-sat skips | "
               f"{refined} refined")
 
     def _print_summary(self) -> None:
@@ -4744,6 +5077,9 @@ Provide a narrowed Boolean."""
         if self.stats.get("save_attempts", 0) != self.stats["saved"]:
             print(f"  Save attempts:       {self.stats['save_attempts']}")
         print(f"  REJECTED:            {self.stats['rejected']}")
+        print(f"  High-pressure seen:  {self.stats.get('high_pressure_candidates_seen', 0)}")
+        print(f"  Activity skips:      {self.stats.get('activity_saturated_preview_skips', 0)}")
+        print(f"  Low-novelty saves:   {self.stats.get('high_fit_low_novelty_saves', 0)}")
         if self._bias_monitor:
             summary = self._bias_monitor.session_summary()
             if summary.get("total_decisions", 0) > 0:
@@ -4817,7 +5153,10 @@ Provide a narrowed Boolean."""
         candidates_evaluated = self.stats["snippets_extracted"]
         overall_save_rate = self.stats["saved"] / max(candidates_evaluated, 1)
         facial_yes_rate = self.stats["facial_yes"] / max(candidates_evaluated, 1)
-        search_intelligence_summary = self._search_intelligence_aggregate(progress.strings)
+        search_intelligence_summary = self._search_intelligence_aggregate(
+            progress.strings,
+            profile_index=self._load_profile_index_for_adaptation(),
+        )
 
         string_performance = []
         for s in progress.strings:
@@ -4842,6 +5181,9 @@ Provide a narrowed Boolean."""
                     "family_key": s.family_key,
                     "novelty_bucket": s.novelty_bucket,
                     "domain_lane": s.domain_lane,
+                    "seniority_risk": s.seniority_risk,
+                    "title_bucket_risk": s.title_bucket_risk,
+                    "opening_eligible": s.opening_eligible,
                     "search_intelligence": self._search_intelligence_detail_for_string(s),
                 }
             )
@@ -4870,6 +5212,9 @@ Provide a narrowed Boolean."""
                 "facial_no": self.stats["facial_no"],
                 "saved": self.stats["saved"],
                 "rejected": self.stats["rejected"],
+                "high_pressure_candidates_seen": self.stats.get("high_pressure_candidates_seen", 0),
+                "activity_saturated_preview_skips": self.stats.get("activity_saturated_preview_skips", 0),
+                "high_fit_low_novelty_saves": self.stats.get("high_fit_low_novelty_saves", 0),
                 "overall_save_rate": round(overall_save_rate, 4),
                 "facial_yes_rate": round(facial_yes_rate, 4),
                 "strings_with_precommit_experiments": len(
@@ -5113,13 +5458,19 @@ class _PageReport:
             for snippet, decision in self.saved:
                 print(f"    + {snippet.name} — {snippet.current_title} at {snippet.current_company}")
                 print(f"      Path: {decision.path} | Confidence: {decision.confidence:.2f}")
+                if decision.novelty_value:
+                    print(f"      Novelty: {decision.novelty_value}")
                 print(f"      {decision.rationale}")
+                if decision.value_rationale:
+                    print(f"      {decision.value_rationale}")
 
         if self.skipped_opened:
             print(f"\n  SKIPPED — profiles opened ({len(self.skipped_opened)}):")
             for snippet, decision in self.skipped_opened:
                 print(f"    - {snippet.name} — {snippet.current_title} at {snippet.current_company}")
                 print(f"      {decision.rationale}")
+                if decision.value_rationale:
+                    print(f"      {decision.value_rationale}")
 
         if self.skipped_preview:
             # Group by reason category
@@ -5136,4 +5487,5 @@ class _PageReport:
                     print(f"    {category}: {len(names)} candidates")
 
         print(f"\n  Running totals — Saved: {running_stats['saved']} | "
-              f"Facial YES: {running_stats['facial_yes']}")
+              f"Facial YES: {running_stats['facial_yes']} | "
+              f"Activity skips: {running_stats.get('activity_saturated_preview_skips', 0)}")

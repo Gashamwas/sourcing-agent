@@ -204,10 +204,17 @@ def test_linkedin_acquisition_service_extracts_dom_enriched_snippet():
         pipeline.browser.focus_card_for_review = AsyncMock()
         pipeline.browser.get_card_snapshot = AsyncMock(
             return_value={
-                "innertext": "Select Ada Lovelace\nAda Lovelace\nML Engineer",
+                "innertext": "Select Ada Lovelace\nAda Lovelace\nML Engineer\nActivity 9 messages · In 3 projects · 3 views\nSaved by Sam Vangelos on April 11, 2026",
                 "name": "Ada Lovelace",
                 "url": "/talent/profile/ada",
                 "already_saved": True,
+                "recruiter_activity": {
+                    "message_count": 9,
+                    "project_count": 3,
+                    "view_count": 3,
+                    "saved_by": "Sam Vangelos",
+                    "raw_activity_text": "Activity 9 messages · In 3 projects · 3 views | Saved by Sam Vangelos on April 11, 2026",
+                },
             }
         )
         search_string = SearchString(id=9, name="seq", boolean="(test)")
@@ -231,6 +238,9 @@ def test_linkedin_acquisition_service_extracts_dom_enriched_snippet():
         assert result.snippet.name == "Ada Lovelace"
         assert result.snippet.profile_url == "/talent/profile/ada"
         assert result.snippet.already_saved is True
+        assert result.snippet.recruiter_activity is not None
+        assert result.snippet.recruiter_activity.message_count == 9
+        assert result.snippet.novelty_pressure == "high"
 
 
 def test_linkedin_acquisition_service_records_profile_open_through_governor():

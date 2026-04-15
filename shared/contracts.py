@@ -104,6 +104,7 @@ TARGET_CANDIDATE_LIFECYCLE = (
 
 RUN_LOG_EVENTS = frozenset({
     "adaptation_error",
+    "activity_saturated_preview_skip",
     "architecture_pivot",
     "bias_alert",
     "block_adaptation",
@@ -134,6 +135,7 @@ RUN_LOG_EVENTS = frozenset({
     "pipeline_start",
     "pivot_blocked",
     "profile_browser_disconnect",
+    "profile_activity_enrichment_failed",
     "profile_error",
     "run_report_generated",
     "run_snapshot_finalized",

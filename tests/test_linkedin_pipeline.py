@@ -20,6 +20,7 @@ from shared.schemas import (
     Progress,
     SearchString,
 )
+from shared.reconciliation_schemas import RecruiterActivitySnapshot
 from shared.governor import SessionExpired
 from shared.storage import append_jsonl, read_jsonl
 from linkedin.search_intelligence import LinkedInPageInsights, LinkedInSearchVariant
@@ -254,6 +255,55 @@ def test_judgment_failure_not_terminal():
         # but _prior_outcomes is FACIAL_YES → FACIAL_YES recovery path handles it
         assert url in p._seen_urls
         assert p._prior_outcomes[url] == "FACIAL_YES"
+
+
+def test_activity_saturation_skip_is_conservative_for_weak_high_pressure_snippet():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        snippet = _make_snippet(
+            headline="GenAI builder",
+            recruiter_activity=RecruiterActivitySnapshot(message_count=9, project_count=3, view_count=3),
+            novelty_pressure="high",
+        )
+        facial = OpusDecision(
+            stage="facial",
+            decision="FACIAL_YES",
+            path="direct_experience",
+            confidence=0.62,
+            rationale="Plausible but limited evidence from preview.",
+            candidate_name=snippet.name,
+            profile_url=snippet.profile_url,
+        )
+
+        assert p._should_skip_full_eval_for_activity(snippet, facial) is True
+
+
+def test_build_run_report_snapshot_includes_activity_metrics():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.stats.update(
+            {
+                "snippets_extracted": 10,
+                "facial_yes": 4,
+                "facial_no": 6,
+                "saved": 2,
+                "rejected": 1,
+                "high_pressure_candidates_seen": 3,
+                "activity_saturated_preview_skips": 2,
+                "high_fit_low_novelty_saves": 1,
+            }
+        )
+        progress = Progress(
+            brief_name="test",
+            strings=[SearchString(id=1, name="test", boolean="foo", status="done", pages_reviewed=1)],
+        )
+
+        snapshot = p._build_run_report_snapshot(progress)
+
+        metrics = snapshot["metrics_summary"]
+        assert metrics["high_pressure_candidates_seen"] == 3
+        assert metrics["activity_saturated_preview_skips"] == 2
+        assert metrics["high_fit_low_novelty_saves"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -1450,6 +1500,41 @@ def test_search_intelligence_aggregate_does_not_label_productive_family_as_dead(
         assert summary["dead_family_keys"] == []
 
 
+def test_search_intelligence_aggregate_blocks_family_promotion_when_saved_profiles_are_above_band():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        risky = SearchString(
+            id=21,
+            name="Buy-side broad lane",
+            boolean='("BlackRock" OR "Two Sigma") AND ("GenAI" OR "LLM")',
+            status="done",
+            pages_reviewed=2,
+            saves=["Ada Lovelace"],
+            family_key="buy_side_generic",
+            domain_lane="asset_management",
+            seniority_risk="medium",
+            title_bucket_risk="low",
+            opening_eligible=False,
+        )
+        risky_state = p._experiment_state_for(risky)
+        risky_state.family_signal_total = 3
+
+        summary = p._search_intelligence_aggregate(
+            [risky],
+            profile_index={
+                "ada lovelace": {
+                    "name": "Ada Lovelace",
+                    "headline": "Senior Managing Director, Global Head of AI",
+                    "experiences": [{"title": "Senior Managing Director, Global Head of AI", "company": "BlackRock"}],
+                }
+            },
+        )
+
+        assert summary["proven_family_keys"] == []
+        assert summary["contaminated_family_keys"] == ["buy_side_generic"]
+        assert summary["contaminated_domain_lanes"] == ["asset_management"]
+
+
 def test_exploitation_overlay_never_demotes_proven_families_even_if_summary_is_contaminated():
     with tempfile.TemporaryDirectory() as td:
         p = _make_pipeline(td)
@@ -1512,6 +1597,56 @@ def test_exploitation_overlay_never_demotes_proven_families_even_if_summary_is_c
         )
         assert all(
             action["string_id"] != 12 or action["move_to"] != "last"
+            for action in adaptation.reorder
+        )
+
+
+def test_exploitation_overlay_demotes_contaminated_families_in_strict_seniority_runs():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        adaptation = AdaptationResponse()
+        remaining = [
+            SearchString(
+                id=30,
+                name="Risky buy-side lane",
+                boolean="foo",
+                family_key="buy_side_generic",
+                domain_lane="asset_management",
+                novelty_bucket="edge_case",
+                seniority_risk="medium",
+                title_bucket_risk="low",
+                opening_eligible=False,
+            ),
+            SearchString(
+                id=31,
+                name="Safe capital-markets lane",
+                boolean="bar",
+                family_key="capital_markets_safe",
+                domain_lane="capital_markets",
+                novelty_bucket="edge_case",
+                seniority_risk="low",
+                title_bucket_risk="low",
+                opening_eligible=True,
+            ),
+        ]
+
+        overlay = p._apply_exploitation_bias_to_adaptation(
+            adaptation=adaptation,
+            remaining=remaining,
+            block_summary={
+                "proven_family_keys": [],
+                "proven_domain_lanes": [],
+                "dead_family_keys": [],
+                "contaminated_family_keys": ["buy_side_generic"],
+                "contaminated_domain_lanes": ["asset_management"],
+            },
+            checkpoint_mode="opening_checkpoint",
+        )
+
+        assert overlay["promoted_string_ids"] == []
+        assert overlay["demoted_string_ids"] == [30]
+        assert any(
+            action["string_id"] == 30 and action["move_to"] == "last"
             for action in adaptation.reorder
         )
 

@@ -33,6 +33,8 @@ ARTIFACT_CONTRACTS: tuple[ArtifactContract, ...] = (
     ArtifactContract("saves.jsonl", ArtifactOwnership.DIRECT_SIDE_EFFECT, "Direct save artifact"),
     ArtifactContract("outreach.jsonl", ArtifactOwnership.DIRECT_SIDE_EFFECT, "Direct outreach artifact"),
     ArtifactContract("*.csv", ArtifactOwnership.DIRECT_SIDE_EFFECT, "Direct export artifact"),
+    ArtifactContract("linkedin_reconciliation.jsonl", ArtifactOwnership.DIRECT_SIDE_EFFECT, "Direct GitHub-to-LinkedIn reconciliation artifact"),
+    ArtifactContract("linkedin_reconciliation.csv", ArtifactOwnership.DIRECT_SIDE_EFFECT, "Direct GitHub-to-LinkedIn reconciliation export"),
     ArtifactContract("run-report.json", ArtifactOwnership.DIRECT_SIDE_EFFECT, "Direct structured run report"),
     ArtifactContract("run-report.md", ArtifactOwnership.DIRECT_SIDE_EFFECT, "Direct markdown run report"),
     ArtifactContract("bias_monitor*.json", ArtifactOwnership.DIRECT_SIDE_EFFECT, "Direct bias checkpoint artifact"),

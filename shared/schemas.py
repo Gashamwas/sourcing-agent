@@ -5,6 +5,8 @@ from dataclasses import dataclass, field, asdict
 from typing import Optional
 import json
 
+from shared.reconciliation_schemas import RecruiterActivitySnapshot
+
 
 # ---------------------------------------------------------------------------
 # Kit string (extracted from Search Kit Library)
@@ -134,6 +136,16 @@ class BlockReport:
                     "- Dead families to demote: "
                     + ", ".join(summary["dead_family_keys"])
                 )
+            if summary.get("contaminated_family_keys"):
+                lines.append(
+                    "- Families with seniority contamination: "
+                    + ", ".join(summary["contaminated_family_keys"])
+                )
+            if summary.get("contaminated_domain_lanes"):
+                lines.append(
+                    "- Lanes with seniority contamination: "
+                    + ", ".join(summary["contaminated_domain_lanes"])
+                )
         if self.string_details:
             lines.append("- Per-string breakdown:")
             for sd in self.string_details:
@@ -248,16 +260,25 @@ class CandidateSnippet:
     experience_entries: list[str] = field(default_factory=list)
     card_index: int = -1  # DOM position of <li> in ol.profile-list; -1 = unknown
     already_saved: bool = False  # True if card shows "Change stage" instead of "Save to pipeline"
+    recruiter_activity: RecruiterActivitySnapshot | None = None
+    novelty_pressure: str = ""
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        payload = asdict(self)
+        if self.recruiter_activity is None:
+            payload["recruiter_activity"] = None
+        return payload
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict())
 
     @classmethod
     def from_dict(cls, d: dict) -> CandidateSnippet:
-        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+        payload = {k: v for k, v in d.items() if k in cls.__dataclass_fields__}
+        payload["recruiter_activity"] = RecruiterActivitySnapshot.from_dict(
+            payload.get("recruiter_activity")
+        )
+        return cls(**payload)
 
 
 # ---------------------------------------------------------------------------
@@ -326,6 +347,8 @@ class OpusDecision:
     candidate_name: str
     profile_url: str
     post_save_modifier: str = "NONE"  # V4: which modifier fired, if any
+    novelty_value: str = ""
+    value_rationale: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -383,6 +406,9 @@ class SearchString:
     family_key: str = ""
     novelty_bucket: str = ""
     domain_lane: str = ""
+    seniority_risk: str = ""
+    title_bucket_risk: str = ""
+    opening_eligible: Optional[bool] = None
     retrieval_recipe: dict = field(default_factory=dict)
     retrieval_hypothesis_ids: list[str] = field(default_factory=list)
 

@@ -6,10 +6,12 @@ import asyncio
 import random
 from typing import TYPE_CHECKING
 
+from shared.identity_resolution import classify_recruiter_activity_pressure
 from shared.execution import AcquisitionResult
 from shared.extractors import extract_profile_from_dom, extract_snippet_from_card_innertext
 from shared.governor import GovernorLimitReached
 from shared.human_timing import human_delay_correlated
+from shared.reconciliation_schemas import RecruiterActivitySnapshot
 from shared.storage import log_event
 
 if TYPE_CHECKING:
@@ -96,6 +98,12 @@ class LinkedInAcquisitionService:
             snippet.profile_url = snapshot["url"]
         snippet.card_index = card_index
         snippet.already_saved = bool(snapshot.get("already_saved", False))
+        snippet.recruiter_activity = RecruiterActivitySnapshot.from_dict(
+            snapshot.get("recruiter_activity")
+        )
+        snippet.novelty_pressure = classify_recruiter_activity_pressure(
+            snippet.recruiter_activity
+        )
         return AcquisitionResult(snippet=snippet, metadata={"snapshot": snapshot})
 
     async def extract_profile_summary(self, snippet: "CandidateSnippet") -> AcquisitionResult:

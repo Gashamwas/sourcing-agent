@@ -17,6 +17,11 @@ from dataclasses import dataclass
 from typing import Optional, TYPE_CHECKING
 from shared import config
 from shared.human_timing import human_delay_correlated
+from linkedin.activity_parser import (
+    extract_profile_recent_activity_lines,
+    extract_profile_status_summary,
+    extract_recruiter_activity_from_card_text,
+)
 from linkedin.input_backends import TypingPlan, TypingResult, build_boolean_typing_plan, create_input_backend
 
 if TYPE_CHECKING:
@@ -963,11 +968,14 @@ class LinkedInBrowser:
             except Exception:
                 already_saved = False
 
+            recruiter_activity = extract_recruiter_activity_from_card_text(innertext)
+
             return {
                 "innertext": innertext,
                 "name": name,
                 "url": url,
                 "already_saved": already_saved,
+                "recruiter_activity": recruiter_activity.to_dict(),
             }
 
         return await _retry(_do)
@@ -1400,6 +1408,28 @@ class LinkedInBrowser:
 
             full_text = await container.inner_text(timeout=15000)
             return _trim_profile_text(full_text)
+        return await _retry(_do)
+
+    async def get_profile_recent_recruiting_activity(self) -> list[str]:
+        """Read recruiter-facing recent activity lines from the slide-in profile."""
+
+        async def _do():
+            container = self.page.locator("div.profile-slidein__container").first
+            await container.wait_for(state="visible", timeout=10000)
+            text = await container.inner_text(timeout=15000)
+            return extract_profile_recent_activity_lines(text)
+
+        return await _retry(_do)
+
+    async def get_profile_status_summary(self) -> dict:
+        """Read recruiter-facing status metadata from the slide-in profile."""
+
+        async def _do():
+            container = self.page.locator("div.profile-slidein__container").first
+            await container.wait_for(state="visible", timeout=10000)
+            text = await container.inner_text(timeout=15000)
+            return extract_profile_status_summary(text)
+
         return await _retry(_do)
 
     async def _expand_all_readmore(self, container) -> None:
