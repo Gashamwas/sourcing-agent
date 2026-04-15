@@ -1,0 +1,67 @@
+"""LinkedIn run-start orchestration helpers."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Callable
+
+from linkedin.search_intelligence import LinkedInExperimentState
+from shared.schemas import Progress
+
+from .projections import project_linkedin_progress
+from .store import RuntimeStateStore
+
+
+def start_or_resume_linkedin_run(
+    *,
+    store: RuntimeStateStore,
+    output_dir: str | Path,
+    brief_id: str,
+    brief_name: str,
+    resume: bool,
+    initial_progress: Progress | None,
+    experiment_states: dict[int, LinkedInExperimentState] | None,
+    legacy_state_exists: bool,
+    import_legacy_state: Callable[[int], None],
+    sync_progress: Callable[[int, Progress, dict[int, LinkedInExperimentState] | None], None],
+    rebuild_artifacts: Callable[[int], None],
+) -> tuple[int, Progress]:
+    latest_run = store.get_latest_run(source="linkedin", brief_id=brief_id)
+    had_runtime_before = bool(
+        latest_run or store.has_candidates(source="linkedin", brief_id=brief_id)
+    )
+
+    if resume and latest_run and store.has_work_units(int(latest_run["id"])):
+        run_id = store.start_run(
+            source="linkedin",
+            brief_id=brief_id,
+            output_dir=str(output_dir),
+            mode="resume",
+            resume_state=store.get_run_resume_state(int(latest_run["id"])),
+            resumed_from_run_id=int(latest_run["id"]),
+            clone_work_units_from_run_id=int(latest_run["id"]),
+        )
+        rebuild_artifacts(run_id)
+        return run_id, project_linkedin_progress(store, run_id)
+
+    run_id = store.start_run(
+        source="linkedin",
+        brief_id=brief_id,
+        output_dir=str(output_dir),
+        mode="resume" if resume else "fresh",
+        resume_state={"brief_name": brief_name},
+        resumed_from_run_id=int(latest_run["id"]) if resume and latest_run else None,
+    )
+
+    if resume and not had_runtime_before and legacy_state_exists:
+        import_legacy_state(run_id)
+        rebuild_artifacts(run_id)
+        return run_id, project_linkedin_progress(store, run_id)
+
+    if initial_progress is not None:
+        sync_progress(run_id, initial_progress, experiment_states=experiment_states)
+        return run_id, project_linkedin_progress(store, run_id)
+
+    progress = Progress(brief_name=brief_name)
+    sync_progress(run_id, progress, experiment_states=experiment_states)
+    return run_id, progress

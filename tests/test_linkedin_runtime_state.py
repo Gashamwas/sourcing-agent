@@ -156,6 +156,37 @@ def test_missing_profile_url_never_enters_dedup_state(tmp_path):
     assert store.has_candidates(source="linkedin", brief_id="test-project") is False
 
 
+def test_start_or_resume_run_imports_legacy_progress_when_runtime_absent(tmp_path):
+    output_dir = tmp_path / "linkedin-output"
+    output_dir.mkdir()
+    legacy_progress = Progress(
+        brief_name="test",
+        strings=[SearchString(id=1, name="legacy", boolean="ml", status="done", pages_reviewed=2)],
+        current_string_id=1,
+        current_page=2,
+    )
+    legacy_progress.save(str(output_dir / "progress.json"))
+
+    store = RuntimeStateStore(output_dir / "runtime_state.sqlite3")
+    bridge = LinkedInRuntimeStateBridge(
+        store=store,
+        output_dir=output_dir,
+        brief_id="test-project",
+        brief_name="test",
+    )
+
+    run_id, progress = bridge.start_or_resume_run(resume=True)
+
+    assert progress.current_string_id == 1
+    assert progress.current_page == 2
+    assert [(item.id, item.name, item.status, item.pages_reviewed) for item in progress.strings] == [
+        (1, "legacy", "done", 2)
+    ]
+    rows = store.list_work_units(run_id, kind="linkedin_string")
+    assert len(rows) == 1
+    assert rows[0]["source_unit_id"] == "1"
+
+
 def test_resume_comes_from_db_when_compat_files_are_stale(tmp_path):
     p = _make_pipeline(str(tmp_path))
     progress = Progress(

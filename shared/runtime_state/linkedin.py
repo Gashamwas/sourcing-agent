@@ -16,6 +16,7 @@ from linkedin.search_intelligence import (
 from shared.runtime_state.admin import rebuild_compat_projections
 from shared.runtime_state.linkedin_experiment_state import load_linkedin_experiment_states
 from shared.runtime_state.linkedin_progress_sync import sync_linkedin_progress
+from shared.runtime_state.linkedin_run_start import start_or_resume_linkedin_run
 from shared.runtime_state.projections import (
     project_linkedin_candidate_history,
     project_linkedin_progress,
@@ -93,45 +94,19 @@ class LinkedInRuntimeStateBridge:
     ) -> tuple[int, Progress]:
         self.store.reconcile_open_attempts(source="linkedin", brief_id=self.brief_id)
         self.store.reconcile_pending_side_effects(source="linkedin", brief_id=self.brief_id)
-        latest_run = self.store.get_latest_run(source="linkedin", brief_id=self.brief_id)
-        had_runtime_before = bool(
-            latest_run or self.store.has_candidates(source="linkedin", brief_id=self.brief_id)
-        )
-
-        if resume and latest_run and self.store.has_work_units(int(latest_run["id"])):
-            run_id = self.store.start_run(
-                source="linkedin",
-                brief_id=self.brief_id,
-                output_dir=str(self.output_dir),
-                mode="resume",
-                resume_state=self.store.get_run_resume_state(int(latest_run["id"])),
-                resumed_from_run_id=int(latest_run["id"]),
-                clone_work_units_from_run_id=int(latest_run["id"]),
-            )
-            self.rebuild_artifacts(run_id)
-            return run_id, project_linkedin_progress(self.store, run_id)
-
-        run_id = self.store.start_run(
-            source="linkedin",
+        return start_or_resume_linkedin_run(
+            store=self.store,
+            output_dir=self.output_dir,
             brief_id=self.brief_id,
-            output_dir=str(self.output_dir),
-            mode="resume" if resume else "fresh",
-            resume_state=LinkedInResumeState(brief_name=self.brief_name).to_dict(),
-            resumed_from_run_id=int(latest_run["id"]) if resume and latest_run else None,
+            brief_name=self.brief_name,
+            resume=resume,
+            initial_progress=initial_progress,
+            experiment_states=experiment_states,
+            legacy_state_exists=self._legacy_state_exists(),
+            import_legacy_state=self.import_legacy_state,
+            sync_progress=self.sync_progress,
+            rebuild_artifacts=self.rebuild_artifacts,
         )
-
-        if resume and not had_runtime_before and self._legacy_state_exists():
-            self.import_legacy_state(run_id)
-            self.rebuild_artifacts(run_id)
-            return run_id, project_linkedin_progress(self.store, run_id)
-
-        if initial_progress is not None:
-            self.sync_progress(run_id, initial_progress, experiment_states=experiment_states)
-            return run_id, project_linkedin_progress(self.store, run_id)
-
-        progress = Progress(brief_name=self.brief_name)
-        self.sync_progress(run_id, progress, experiment_states=experiment_states)
-        return run_id, progress
 
     def sync_progress(
         self,
