@@ -1,0 +1,32 @@
+---
+description: Runtime state is canonical; projections are rebuildable
+globs: shared/runtime_state/**,linkedin/runtime_state*.py,tests/test_*runtime*.py,tests/test_runtime_*.py
+alwaysApply: false
+---
+
+# Runtime State Discipline
+
+## Canonical truths
+
+- `runtime_state.sqlite3` is canonical for sourcing runtime state.
+- JSON/JSONL files in live state dirs are **compatibility projections**, not source-of-truth control state.
+- If SQLite and projection files disagree, **trust SQLite**.
+- `output/runs/...` is immutable finalized run output. Do not edit by hand.
+- `output/market_intelligence/...` is market-scoped synthesis, separate from live per-project runtime state.
+
+## Working norms
+
+- Think runtime-state-first. When tracing an issue, distinguish canonical state / projections / snapshots / in-memory working state before proposing fixes.
+- Prefer **targeted edits** over broad cleanup in `shared/runtime_state/store.py` — it is a shared persistence + lifecycle + reconciliation hot spot.
+- `shared/runtime_state/linkedin.py` owns LinkedIn resume/progress bridge semantics. Preserve behavior unless the task explicitly calls for changing it.
+- Rebuild projections/artifacts through code paths or tools — never by hand-editing files.
+
+## Testing expectations
+
+After runtime-state changes, run the narrowest relevant band first:
+
+```bash
+PYTHONPATH=/Users/sam.vangelos/Projects/recruiting-tools/sourcing-agent pytest tests/test_linkedin_runtime_state.py -q
+```
+
+Expand outward only if the change crosses boundaries. Prefer proving behavior with tests **before** "cleanup" refactors.

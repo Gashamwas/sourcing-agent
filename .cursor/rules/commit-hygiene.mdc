@@ -1,0 +1,32 @@
+---
+description: Commit slicing, scope discipline, and change management
+alwaysApply: true
+---
+
+# Commit Hygiene & Scope Discipline
+
+## Scope
+
+- Keep changes **narrow** and commit slices **intentional**.
+- Do not casually mix unrelated concerns in one diff — especially not runtime-state, strategy, reconciliation, and config work together.
+- Prefer **behavior-preserving extraction** over giant rewrites.
+- Cross-cutting changes should be staged deliberately across multiple commits, not landed as one blob.
+
+## Before committing
+
+- Only create commits when explicitly asked.
+- When asked to commit, think about slicing:
+  - Is there more than one logical concern in the diff?
+  - Would a reviewer benefit from seeing these as separate commits?
+  - Can a behavior-preserving refactor be split from a behavior change?
+
+## When implementing
+
+- Do not stop at "implemented" — ensure the work is correct, integrated, and likely to succeed in practice.
+- Run the narrowest relevant test band after changes; expand only if boundaries were crossed.
+- If you notice adjacent issues that are tempting to fix, **surface them** rather than silently expanding scope.
+
+## Surfacing risk
+
+- Proactively flag: hidden risks, tradeoffs, edge cases, failure modes, and places where the requested solution may not be the right abstraction.
+- Better to raise a concern and be wrong than to ship a durable problem.

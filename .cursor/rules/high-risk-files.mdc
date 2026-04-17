@@ -1,0 +1,32 @@
+---
+description: Extra caution for high-risk, policy-heavy files
+globs: linkedin/orchestrator.py,linkedin/browser.py,shared/runtime_state/store.py,shared/runtime_state/linkedin.py,market_intelligence/engine.py
+alwaysApply: false
+---
+
+# High-Risk File Discipline
+
+You are editing a file on the repo's named high-risk list. Treat every change here with elevated care.
+
+## Why these files are high-risk
+
+- `linkedin/orchestrator.py` — large, policy-heavy. Casual broad edits cause regressions across the LinkedIn flow.
+- `linkedin/browser.py` — brittle browser/runtime behavior. Small, targeted changes only.
+- `shared/runtime_state/store.py` — shared persistence + lifecycle + reconciliation hot spot.
+- `shared/runtime_state/linkedin.py` — LinkedIn resume/progress bridge semantics.
+- `market_intelligence/engine.py` — large orchestration surface; refactor carefully.
+
+## Required posture
+
+- **Preserve behavior** unless the task explicitly calls for changing it.
+- Prefer **targeted edits** over broad cleanup, even if cleanup looks tempting.
+- When refactoring, **add or strengthen tests first** when feasible.
+- Keep changes narrow and commit slices intentional.
+- Do not casually mix runtime-state work with unrelated strategy, reconciliation, or config work in the same diff.
+- If you notice adjacent issues, surface them — do not silently expand scope.
+
+## Before proposing a change
+
+1. Identify the smallest safe seam.
+2. State what behavior is preserved vs. changed.
+3. Name the narrowest test band that would catch regressions.

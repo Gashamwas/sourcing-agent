@@ -1,0 +1,6 @@
+output/
+.venv/
+__pycache__/
+.pytest_cache/
+.claude/
+agent-workspace-decoy/

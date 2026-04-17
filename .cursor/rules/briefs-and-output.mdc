@@ -1,0 +1,26 @@
+---
+description: Brief/config and output/ artifact discipline
+globs: config/**,output/**,docs/brief-*.md
+alwaysApply: false
+---
+
+# Briefs, Config, and Output Discipline
+
+## Draft briefs
+
+- **Do not edit draft briefs unless explicitly asked.** Files matching `config/brief-*-draft.json` are scratch/in-flight and often encode in-progress product thinking.
+- Treat brief churn carefully — config files often encode product truth.
+- Do not make scratch briefs look runnable by accident (e.g., filling in required fields, removing TODO markers, normalizing shape to match runnable briefs).
+- If a task seems to require touching a draft brief, stop and confirm.
+
+## Non-draft briefs / config
+
+- Treat `config/brief-*.json` (non-draft) as product-critical. Propose changes rather than silently applying them.
+- Preserve field ordering and structure unless the task explicitly requires reshaping.
+
+## output/ directory
+
+- **Avoid editing `output/` directly.** It is immutable finalized run output and market-scoped synthesis.
+- Rebuild projections or artifacts through code paths or tools — never hand-edit files under `output/`.
+- If a bug looks like it lives in `output/`, the real fix is almost always upstream in the code path that wrote it.
+- Prefer runtime/admin flows over manual file surgery.
