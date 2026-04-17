@@ -16,4 +16,4 @@ run-log--*.md
 .DS_Store
 greenhouse-mcp/
 .claude/
-config/Forward-Deployed-Engineer-NYC/*.bak-*.json
+*.bak-*.json

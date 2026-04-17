@@ -303,8 +303,19 @@ Other supported admin operations include inspecting orphaned attempts, inspectin
 The repo has a broad test suite around runtime state, search intelligence, adapter services, market intelligence, brief iteration, and the shared execution layer.
 
 ```bash
-python3 -m pytest
+make validate
 ```
+
+For the explicit validation profiles:
+
+- `make validate`
+  - repo hygiene checks plus the default green suite
+- `make test-default`
+  - the default green pytest profile
+- `make test-full`
+  - the full pytest surface, including heavier dataset replay coverage
+
+The validation policy is documented in [docs/validation-standard.md](docs/validation-standard.md).
 
 ## Notes
 

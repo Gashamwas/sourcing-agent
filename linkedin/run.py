@@ -16,6 +16,7 @@ import sys
 import urllib.request
 from pathlib import Path
 
+from shared.brief_lifecycle import discover_briefs
 from shared.console_tee import enable_console_tee
 from shared.output_paths import resolve_linkedin_state_dir
 
@@ -37,8 +38,8 @@ def _pick(prompt: str, options: list[str]) -> int:
 
 
 def _discover_briefs() -> list[Path]:
-    """Find all brief JSON files in config/."""
-    return sorted(CONFIG_DIR.glob("brief-*.json"))
+    """Find top-level active brief JSON files in config/."""
+    return discover_briefs(CONFIG_DIR, include=("active",), recursive=False)
 
 
 def _brief_label(path: Path) -> str:
@@ -100,8 +101,8 @@ def interactive():
     # Step 1: Pick a brief
     briefs = _discover_briefs()
     if not briefs:
-        print(f"\nNo brief files found in {CONFIG_DIR}/")
-        print("Add a brief-*.json file and try again.")
+        print(f"\nNo active top-level brief files found in {CONFIG_DIR}/")
+        print("Add a brief-*.json file or pass --brief directly.")
         sys.exit(1)
 
     labels = [_brief_label(b) for b in briefs]

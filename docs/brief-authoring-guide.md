@@ -6,6 +6,17 @@ If you are answering the intake, use `docs/agent-brief-intake-template.md` inste
 
 This guide is for the person drafting the brief. Its job is to help you turn plain-English intake responses into a first-pass brief without overfitting, guessing, or importing too much system language into the drafting process.
 
+## Brief Lifecycle And Naming
+
+Treat brief lifecycle as part of repo hygiene, not just file naming.
+
+- active briefs should be named `brief-*.json`
+- scratch iterations should use `-draft`
+- timestamped backups such as `*.bak-...json` count as draft artifacts, not runnable briefs
+- archived or superseded briefs should live under clearly named `archive/`, `archived/`, or `superseded/` directories
+
+See [config/README.md](../config/README.md) for the current lifecycle rules and launcher behavior.
+
 ## 1. What You Need Before You Start
 
 For a strong first pass, you usually need:

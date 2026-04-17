@@ -13,13 +13,24 @@ FDE_RUN_DIR ?= $(ROOT)/output/runs/linkedin/1990251114/2026-04-12T12-26-33-17837
 FDE_SEARCH_MEMORY ?= $(FDE_RUN_DIR)/search_memory-1990251114.json
 FDE_FINAL_JUDGMENTS ?= $(FDE_RUN_DIR)/final_judgments.jsonl
 
-.PHONY: help head-ai-mi head-ai-brief fde-mi fde-brief
+.PHONY: help validate hygiene test-default test-full head-ai-mi head-ai-brief fde-mi fde-brief
 
 help: ## Show available shortcuts
 	@printf "\nAvailable shortcuts:\n\n"
 	@awk 'BEGIN {FS = ":.*## "}; /^[a-zA-Z0-9_-]+:.*## / {printf "  make %-16s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 	@printf "\nOverride any path if needed, e.g.:\n"
 	@printf "  make head-ai-mi HEAD_AI_RUN_DIR=/abs/path/to/other/run\n\n"
+
+validate: hygiene test-default ## Run hygiene checks plus the default green validation suite
+
+hygiene: ## Check repo hygiene and brief lifecycle inventory
+	$(PYTHON) tools/check_repo_hygiene.py
+
+test-default: ## Run the default green validation suite
+	$(PYTHON) tools/run_validation.py default
+
+test-full: ## Run the full pytest suite, including heavier replay coverage
+	$(PYTHON) tools/run_validation.py full
 
 head-ai-mi: ## Run Head of Applied AI market intel with external research
 	$(PYTHON) tools/update_market_intel.py \
