@@ -1,6 +1,11 @@
 import json
 
-from github.reconciliation_input import load_github_reconciliation_batch, load_saved_github_leads
+from github.reconciliation_input import (
+    build_identity_resolution_experiment_cohort,
+    export_identity_resolution_experiment_cohort,
+    load_github_reconciliation_batch,
+    load_saved_github_leads,
+)
 
 
 def _write_jsonl(path, rows):
@@ -160,3 +165,141 @@ def test_load_github_reconciliation_batch_counts_unmatched_profile_urls(tmp_path
     assert batch.leads == []
     assert batch.stats.skipped_unmatched_profile_url == 1
     assert batch.stats.total_saved_judgments == 1
+
+
+def test_build_identity_resolution_experiment_cohort_excludes_hints_from_primary(tmp_path):
+    candidates = [
+        {
+            "user": {
+                "username": "hinted",
+                "name": "Hinted Person",
+                "profile_url": "https://github.com/hinted",
+                "company": "Anthropic",
+                "location": "New York",
+            },
+            "contact": {"linkedin_url": "https://www.linkedin.com/in/hinted-person/"},
+            "source_query": "q1",
+            "source_strategy": "user_search",
+        },
+        {
+            "user": {
+                "username": "clean",
+                "name": "Ada Lovelace",
+                "profile_url": "https://github.com/clean",
+                "company": "Anthropic",
+                "location": "New York",
+            },
+            "contact": {},
+            "source_query": "q2",
+            "source_strategy": "user_search",
+        },
+    ]
+    judgments = [
+        {
+            "stage": "full",
+            "decision": "SAVE",
+            "candidate_name": "Hinted Person",
+            "profile_url": "https://github.com/hinted",
+            "confidence": 0.95,
+            "rationale": "Hinted fit",
+        },
+        {
+            "stage": "full",
+            "decision": "SAVE",
+            "candidate_name": "Ada Lovelace",
+            "profile_url": "https://github.com/clean",
+            "confidence": 0.92,
+            "rationale": "Clean fit",
+        },
+    ]
+
+    _write_jsonl(tmp_path / "candidates.jsonl", candidates)
+    _write_jsonl(tmp_path / "final_judgments.jsonl", judgments)
+    _write_jsonl(tmp_path / "outreach.jsonl", [])
+
+    cohort = build_identity_resolution_experiment_cohort(tmp_path, primary_bucket_size=1, sanity_size=1)
+
+    assert [lead.github_username for lead in cohort["primary"]] == ["clean"]
+    assert [lead.github_username for lead in cohort["sanity"]] == ["hinted"]
+
+
+def test_export_identity_resolution_experiment_cohort_writes_template_artifacts(tmp_path):
+    candidates = [
+        {
+            "user": {
+                "username": "ada",
+                "name": "Ada Lovelace",
+                "profile_url": "https://github.com/ada",
+                "company": "Anthropic",
+                "location": "New York",
+            },
+            "contact": {},
+            "source_query": "q1",
+            "source_strategy": "user_search",
+        }
+    ]
+    judgments = [
+        {
+            "stage": "full",
+            "decision": "SAVE",
+            "candidate_name": "Ada Lovelace",
+            "profile_url": "https://github.com/ada",
+            "confidence": 0.95,
+            "rationale": "fit",
+        }
+    ]
+    _write_jsonl(tmp_path / "candidates.jsonl", candidates)
+    _write_jsonl(tmp_path / "final_judgments.jsonl", judgments)
+    _write_jsonl(tmp_path / "outreach.jsonl", [])
+
+    export_dir = tmp_path / "experiment"
+    paths = export_identity_resolution_experiment_cohort(
+        tmp_path,
+        export_dir,
+        primary_bucket_size=1,
+        sanity_size=0,
+    )
+
+    for path in paths.values():
+        assert path.exists()
+
+
+def test_build_identity_resolution_experiment_cohort_falls_back_to_saves_when_final_judgments_empty(tmp_path):
+    candidates = [
+        {
+            "user": {
+                "username": "ada",
+                "name": "Ada Lovelace",
+                "profile_url": "https://github.com/ada",
+                "company": "Anthropic",
+                "location": "New York",
+                "bio": "Research engineer",
+            },
+            "contact": {},
+            "source_query": "q1",
+            "source_strategy": "user_search",
+        }
+    ]
+    saves = [
+        {
+            "username": "ada",
+            "name": "Ada Lovelace",
+            "github_url": "https://github.com/ada",
+            "location": "New York",
+            "bio": "Research engineer",
+            "company": "Anthropic",
+            "decision": "SAVE",
+            "confidence": 0.9,
+            "decision_path": "DIRECT:test",
+        }
+    ]
+
+    _write_jsonl(tmp_path / "candidates.jsonl", candidates)
+    _write_jsonl(tmp_path / "final_judgments.jsonl", [])
+    _write_jsonl(tmp_path / "outreach.jsonl", [])
+    _write_jsonl(tmp_path / "saves.jsonl", saves)
+
+    cohort = build_identity_resolution_experiment_cohort(tmp_path, primary_bucket_size=1, sanity_size=0)
+
+    assert len(cohort["primary"]) == 1
+    assert cohort["primary"][0].github_username == "ada"

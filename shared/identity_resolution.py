@@ -37,6 +37,20 @@ _STOPWORDS = {
     "united",
     "states",
 }
+_LOCATION_ALIAS_MAP = {
+    "nyc": "New York City Metropolitan Area",
+    "new york city": "New York City Metropolitan Area",
+    "new york city metropolitan area": "New York City Metropolitan Area",
+    "greater new york city area": "New York City Metropolitan Area",
+    "sf": "San Francisco Bay Area",
+    "san francisco": "San Francisco Bay Area",
+    "san francisco bay area": "San Francisco Bay Area",
+    "bay area": "San Francisco Bay Area",
+    "seattle metro": "Seattle Metropolitan Area",
+    "greater seattle area": "Seattle Metropolitan Area",
+}
+_AUTHOR_HINT_RE = re.compile(r"@author\s+([^)]+)", re.IGNORECASE)
+_CAMELCASE_BOUNDARY_RE = re.compile(r"(?<=[a-z])(?=[A-Z])")
 
 
 def _normalize_text(value: str) -> str:
@@ -63,6 +77,63 @@ def normalize_company_name(value: str) -> str:
 
 def normalize_location_text(value: str) -> str:
     return _normalize_text(value)
+
+
+def canonicalize_location_label(value: str) -> str:
+    normalized = normalize_location_text(value)
+    if not normalized:
+        return ""
+    if "manhattan" in normalized and "new york" in normalized:
+        return "New York City Metropolitan Area"
+    if "brooklyn" in normalized and "new york" in normalized:
+        return "New York City Metropolitan Area"
+    if "queens" in normalized and "new york" in normalized:
+        return "New York City Metropolitan Area"
+    if "new york" in normalized:
+        return "New York City Metropolitan Area"
+    if "san francisco" in normalized or "bay area" in normalized:
+        return "San Francisco Bay Area"
+    if "seattle" in normalized:
+        return "Seattle Metropolitan Area"
+    if normalized in _LOCATION_ALIAS_MAP:
+        return _LOCATION_ALIAS_MAP[normalized]
+    for alias, canonical in _LOCATION_ALIAS_MAP.items():
+        if alias in normalized:
+            return canonical
+    tokens = [token for token in normalized.split() if token]
+    if not tokens:
+        return ""
+    trimmed = tokens[:4]
+    return " ".join(token.capitalize() for token in trimmed)
+
+
+def normalize_public_linkedin_url(url: str) -> str:
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    normalized = raw.split("?", 1)[0].rstrip("/")
+    if "linkedin.com/in/" in normalized:
+        return normalized.lower()
+    return normalized
+
+
+def build_person_lookup_name(candidate_name: str, github_username: str = "") -> str:
+    raw = str(candidate_name or "").strip()
+    if not raw:
+        raw = str(github_username or "").strip()
+    if not raw:
+        return ""
+    author_match = _AUTHOR_HINT_RE.search(raw)
+    if author_match:
+        raw = author_match.group(1).strip()
+    raw = _CAMELCASE_BOUNDARY_RE.sub(" ", raw)
+    raw = raw.replace("_", " ").replace("-", " ")
+    raw = raw.replace("(", " ").replace(")", " ")
+    raw = " ".join(raw.split())
+    tokens = raw.split()
+    if tokens and all(token.isupper() for token in tokens):
+        raw = " ".join(token.capitalize() for token in tokens)
+    return raw.strip()
 
 
 def build_candidate_lookup_queries(hints: LinkedInIdentityHints) -> list[str]:

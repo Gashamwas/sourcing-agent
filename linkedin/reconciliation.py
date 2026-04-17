@@ -1,7 +1,34 @@
-"""GitHub→LinkedIn reconciliation workflow."""
+"""DEPRECATED legacy GitHub→LinkedIn reconciliation path.
+
+This module predates the canonical reconciliation contract defined in
+``GitHub-LinkedIn-Reconciliation-Source-of-Truth.md``. It enforces a
+different action taxonomy (``promote`` / ``drop_wrong_person`` /
+``drop_already_worked`` / ``promote_low_novelty`` / ``manual_review``),
+does not run the LinkedIn brief's holistic fit judge, does not open
+matched profiles for evaluation, and does not emit the canonical
+``SAVE`` / ``MANUAL_REVIEW`` / ``REJECT`` decisions with the required
+subreason taxonomy. Those are non-negotiable behavioral rules of the
+Source-of-Truth document.
+
+Do not introduce new callers of ``LinkedInReconciliationService``. The
+canonical implementation is:
+
+- runtime entry point:   ``tools/run_recruiter_identity_resolver.py``
+- service:               ``linkedin.recruiter_identity_resolver.RecruiterIdentityResolver``
+- decision gate:         ``shared.recruiter_reconciliation_decision.decide_final_reconciliation_action``
+- artifact writers:      ``github.recruiter_identity_report``
+
+This module is retained only so that previously pickled CLIs and import
+sites fail loudly with a ``DeprecationWarning`` rather than silently
+producing non-canonical artifacts. It will be physically removed once
+all known entry points have been migrated; see the "Canonical
+Implementation" section of the Source-of-Truth doc for the migration
+target.
+"""
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass
 
 from github.reconciliation_input import GitHubReconciliationLead
@@ -21,6 +48,16 @@ from shared.reconciliation_schemas import (
     ReconciliationAssessment,
     ReconciliationDecision,
     RecruiterActivitySnapshot,
+)
+
+
+LEGACY_RECONCILIATION_DEPRECATION_MESSAGE = (
+    "linkedin.reconciliation.LinkedInReconciliationService is deprecated. "
+    "It predates GitHub-LinkedIn-Reconciliation-Source-of-Truth.md and "
+    "emits a non-canonical action taxonomy without holistic LinkedIn "
+    "fit evaluation. Use linkedin.recruiter_identity_resolver."
+    "RecruiterIdentityResolver via tools/run_recruiter_identity_resolver.py "
+    "instead."
 )
 
 
@@ -70,6 +107,11 @@ class LinkedInReconciliationService:
         max_queries: int = 5,
         max_results_per_query: int = 5,
     ):
+        warnings.warn(
+            LEGACY_RECONCILIATION_DEPRECATION_MESSAGE,
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.browser = browser
         self.project_url = project_url
         self.max_queries = max_queries

@@ -1,183 +1,115 @@
-import asyncio
+"""Regression tests pinning reconciliation onto the canonical path.
+
+The canonical GitHub→LinkedIn reconciliation contract is defined in
+``GitHub-LinkedIn-Reconciliation-Source-of-Truth.md``. There is exactly
+one permitted implementation (``RecruiterIdentityResolver`` driven by
+``tools/run_recruiter_identity_resolver.py``).
+
+This file used to exercise the legacy ``LinkedInReconciliationService``
+action taxonomy (``promote`` / ``drop_already_worked`` / etc.). That
+service violates the Source-of-Truth rules, so it is now deprecated.
+These tests pin the deprecation and enforce the redirection to the
+canonical path, so that no future change silently revives the legacy
+contract.
+"""
+
+from __future__ import annotations
+
+import importlib
+import subprocess
+import sys
+import warnings
+from pathlib import Path
 from unittest.mock import AsyncMock
 
-from github.reconciliation_input import GitHubReconciliationLead
-from linkedin.reconciliation import LinkedInReconciliationService
-from shared.reconciliation_schemas import (
-    LinkedInIdentityHints,
-    LinkedInMatchResult,
-    RecruiterActivitySnapshot,
+import pytest
+
+from linkedin.reconciliation import (
+    LEGACY_RECONCILIATION_DEPRECATION_MESSAGE,
+    LinkedInReconciliationService,
 )
 
 
-def _make_lead() -> GitHubReconciliationLead:
-    hints = LinkedInIdentityHints(
-        candidate_name="Ada Lovelace",
-        github_username="ada",
-        github_url="https://github.com/ada",
-        company="JPMorgan Chase",
-        location="New York",
-        title="Head of AI Platform",
-    )
-    return GitHubReconciliationLead(
-        username="ada",
-        candidate_name="Ada Lovelace",
-        github_url="https://github.com/ada",
-        company="JPMorgan Chase",
-        location="New York",
-        title="Head of AI Platform",
-        decision="SAVE",
-        confidence=0.94,
-        rationale="Strong GitHub fit",
-        linkedin_hints=hints,
-    )
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_reconcile_lead_returns_manual_review_when_no_confident_match():
+def test_linkedin_reconciliation_service_construction_is_deprecated():
     browser = AsyncMock()
-    service = LinkedInReconciliationService(browser=browser, project_url="https://www.linkedin.com/talent/search")
-    service.lookup_candidate_by_identity = AsyncMock(return_value=[])
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        LinkedInReconciliationService(
+            browser=browser,
+            project_url="https://www.linkedin.com/talent/search",
+        )
 
-    decision = asyncio.run(service.reconcile_lead(_make_lead()))
+    deprecations = [w for w in caught if issubclass(w.category, DeprecationWarning)]
+    assert deprecations, "constructing LinkedInReconciliationService must emit DeprecationWarning"
+    assert any(
+        "RecruiterIdentityResolver" in str(w.message)
+        and "run_recruiter_identity_resolver" in str(w.message)
+        for w in deprecations
+    ), "deprecation message must redirect callers to the canonical implementation"
 
-    assert decision.action == "manual_review"
-    assert decision.assessment is not None
-    assert decision.assessment.same_person == "unknown"
+
+def test_deprecation_message_names_canonical_entry_points():
+    assert "RecruiterIdentityResolver" in LEGACY_RECONCILIATION_DEPRECATION_MESSAGE
+    assert "run_recruiter_identity_resolver" in LEGACY_RECONCILIATION_DEPRECATION_MESSAGE
 
 
-def test_assess_match_marks_low_novelty_when_recruiter_activity_is_heavy():
+def test_retired_cli_exits_non_zero_and_redirects(tmp_path, monkeypatch):
+    script = REPO_ROOT / "tools" / "reconcile_github_to_linkedin.py"
+    assert script.is_file(), "retired CLI file must remain on disk as a redirection shim"
+
+    env = {
+        **{k: v for k, v in __import__("os").environ.items()},
+        "PYTHONPATH": str(REPO_ROOT),
+    }
+    result = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        capture_output=True,
+        text=True,
+        cwd=str(tmp_path),
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode != 0, (
+        "retired CLI must exit non-zero so automation cannot silently consume its output"
+    )
+    combined = (result.stdout or "") + (result.stderr or "")
+    assert "retired" in combined.lower()
+    assert "run_recruiter_identity_resolver" in combined
+
+
+def test_canonical_cli_entry_point_is_importable():
+    module = importlib.import_module("tools.run_recruiter_identity_resolver")
+    assert hasattr(module, "main"), (
+        "canonical CLI must expose a main() function; Source-of-Truth doc names it as the runtime entry point"
+    )
+
+
+def test_canonical_resolver_module_is_importable():
+    module = importlib.import_module("linkedin.recruiter_identity_resolver")
+    assert hasattr(module, "RecruiterIdentityResolver")
+    assert hasattr(module, "RecruiterResolverConfig")
+
+
+def test_canonical_decision_gate_exposes_source_of_truth_actions():
+    """Pin that the canonical gate still emits the SoT action taxonomy."""
+    module = importlib.import_module("shared.recruiter_reconciliation_decision")
+    source = Path(module.__file__).read_text(encoding="utf-8")
+    for action in ("SAVE", "MANUAL_REVIEW", "REJECT"):
+        assert action in source, (
+            f"canonical decision module must reference the {action!r} action from the Source-of-Truth doc"
+        )
+
+
+@pytest.mark.filterwarnings("ignore::DeprecationWarning")
+def test_legacy_service_still_loadable_for_migration_grace_period():
+    """The class must remain importable so orphaned callers hit DeprecationWarning, not ImportError."""
     browser = AsyncMock()
-    service = LinkedInReconciliationService(browser=browser, project_url="https://www.linkedin.com/talent/search")
-    lead = _make_lead()
-    match = LinkedInMatchResult(
-        matched_profile_url="/talent/profile/ada",
-        matched_name="Ada Lovelace",
-        matched_company="JPMorgan Chase & Co.",
-        matched_title="Head of AI Platform",
-        matched_location="New York",
-        match_confidence=0.91,
-        match_method="recruiter_search",
-        recruiter_activity=RecruiterActivitySnapshot(message_count=7, project_count=3, view_count=4),
-        novelty_pressure="high",
+    service = LinkedInReconciliationService(
+        browser=browser,
+        project_url="https://www.linkedin.com/talent/search",
     )
-
-    assessment = service._assess_match(lead, match, "high_confidence_match")
-
-    assert assessment.same_person == "yes"
-    assert assessment.novelty_value == "low"
-    assert assessment.summary.startswith("LinkedIn appears to confirm the candidate")
-
-
-def test_assess_match_does_not_overclaim_when_classification_is_manual_review():
-    browser = AsyncMock()
-    service = LinkedInReconciliationService(browser=browser, project_url="https://www.linkedin.com/talent/search")
-    lead = _make_lead()
-    match = LinkedInMatchResult(
-        matched_profile_url="/talent/profile/ada",
-        matched_name="Ada Lovelace",
-        matched_company="JPMorgan Chase & Co.",
-        matched_title="Head of AI Platform",
-        matched_location="New York",
-        match_confidence=0.72,
-        match_method="recruiter_search",
-    )
-
-    assessment = service._assess_match(lead, match, "manual_review")
-
-    assert assessment.same_person == "possible"
-    assert assessment.fit_confirmation == "unclear"
-    assert assessment.summary.startswith("LinkedIn surfaced a plausible candidate match")
-
-
-def test_decide_action_prefers_drop_already_worked_over_promote():
-    browser = AsyncMock()
-    service = LinkedInReconciliationService(browser=browser, project_url="https://www.linkedin.com/talent/search")
-    assessment = service._assess_match(
-        _make_lead(),
-        LinkedInMatchResult(
-            matched_profile_url="/talent/profile/ada",
-            matched_name="Ada Lovelace",
-            matched_company="JPMorgan Chase",
-            matched_title="Head of AI Platform",
-            matched_location="New York",
-            match_confidence=0.92,
-            match_method="recruiter_search",
-            recruiter_activity=RecruiterActivitySnapshot(
-                message_count=3,
-                project_count=1,
-                view_count=1,
-                last_outbound_contact="1 month ago",
-            ),
-            novelty_pressure="medium",
-        ),
-        "high_confidence_match",
-    )
-    action = service._decide_action(
-        match=LinkedInMatchResult(matched_profile_url="/talent/profile/ada"),
-        classification="high_confidence_match",
-        assessment=assessment,
-    )
-
-    assert action == "drop_already_worked"
-
-
-def test_direct_linkedin_hint_takes_precedence_over_search_match():
-    browser = AsyncMock()
-    service = LinkedInReconciliationService(browser=browser, project_url="https://www.linkedin.com/talent/search")
-    lead = _make_lead()
-    lead.linkedin_hints.linkedin_url_hint = "https://www.linkedin.com/in/ada-lovelace/"
-    service.lookup_candidate_by_identity = AsyncMock(
-        return_value=[
-            type(
-                "LookupCandidate",
-                (),
-                {
-                    "query": "\"Ada Lovelace\"",
-                    "match": LinkedInMatchResult(
-                        matched_profile_url="/talent/profile/wrong-person",
-                        matched_name="Ada Lovelace",
-                        matched_company="Different Bank",
-                        matched_title="VP",
-                        matched_location="New York",
-                        match_confidence=0.61,
-                        match_method="recruiter_search",
-                    ),
-                },
-            )()
-        ]
-    )
-
-    decision = asyncio.run(service.reconcile_lead(lead))
-
-    assert decision.match_result is not None
-    assert decision.match_result.match_method.startswith("direct_linkedin_hint")
-    assert decision.action == "manual_review"
-    assert "Direct LinkedIn URL hint present" in decision.match_result.evidence
-    assert decision.match_result.matched_profile_url == "https://www.linkedin.com/in/ada-lovelace/"
-    browser.navigate_to_search.assert_not_awaited()
-
-
-def test_name_mismatch_never_promotes():
-    browser = AsyncMock()
-    service = LinkedInReconciliationService(browser=browser, project_url="https://www.linkedin.com/talent/search")
-    match = LinkedInMatchResult(
-        matched_profile_url="/talent/profile/grace",
-        matched_name="Grace Hopper",
-        matched_company="JPMorgan Chase",
-        matched_title="Head of AI Platform",
-        matched_location="New York",
-        match_confidence=0.91,
-        match_method="recruiter_search",
-        ambiguity_reasons=["Name mismatch"],
-    )
-
-    assessment = service._assess_match(_make_lead(), match, "high_confidence_match")
-    action = service._decide_action(
-        match=match,
-        classification="high_confidence_match",
-        assessment=assessment,
-    )
-
-    assert assessment.same_person == "no"
-    assert assessment.fit_confirmation == "contradicted"
-    assert action == "drop_wrong_person"
+    assert service.project_url == "https://www.linkedin.com/talent/search"
