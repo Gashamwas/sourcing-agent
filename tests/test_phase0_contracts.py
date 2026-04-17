@@ -96,6 +96,7 @@ def test_run_log_event_vocabulary_matches_current_emitters():
     source_paths = [
         ROOT / "linkedin" / "orchestrator.py",
         ROOT / "linkedin" / "acquisition.py",
+        ROOT / "linkedin" / "run_report.py",
         ROOT / "linkedin" / "search_mutation.py",
         ROOT / "linkedin" / "side_effects.py",
         ROOT / "github" / "orchestrator.py",
