@@ -8,6 +8,7 @@ from linkedin.input_backends import TypingPlan, TypingResult, TypingStep
 def test_enter_search_string_uses_backend_typing_and_never_calls_fill():
     browser = LinkedInBrowser()
     browser.go_back_to_results = AsyncMock()
+    browser.require_recruiter_tab = AsyncMock()
     browser._wait_for_search_results_ready = AsyncMock(return_value=1350)
     browser._peek_results_count_text = AsyncMock(return_value="100")
     browser._peek_top_card_signature = AsyncMock(return_value=("Ada", "/talent/profile/ada"))

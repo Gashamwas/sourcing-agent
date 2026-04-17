@@ -48,6 +48,18 @@ def _is_target_crash_error(error: BaseException | str) -> bool:
     return any(pattern in text for pattern in _TARGET_CRASH_PATTERNS)
 
 
+def _is_unusable_cdp_page_url(url: str) -> bool:
+    """CDP targets that should not be chosen when no Recruiter tab is open yet."""
+    lowered = (url or "").strip().lower()
+    if not lowered:
+        return True
+    if "chrome-devtools://" in lowered or lowered.startswith("devtools://"):
+        return True
+    if "chrome://omnibox" in lowered:
+        return True
+    return False
+
+
 async def _retry(coro_fn, retries=MAX_RETRIES, delay=RETRY_DELAY_SECONDS):
     """Retry an async callable up to `retries` times with randomized delay."""
     last_err = None
@@ -105,7 +117,16 @@ class LinkedInBrowser:
             )
             return
 
-        # No Recruiter tab found
+        if await self._bind_fallback_page(preferred_context=self._context):
+            print(
+                f"  Connected over CDP ({self._input_backend.status_label}), but no LinkedIn Recruiter tab "
+                f"was found yet.\n"
+                f"  Active page: {self._page.url}\n"
+                f"  Open https://www.linkedin.com/talent (project or Recruiter search) before the first "
+                f"search action."
+            )
+            return
+
         all_urls = []
         for ctx in self._browser.contexts:
             for page in ctx.pages:
@@ -115,9 +136,9 @@ class LinkedInBrowser:
                     all_urls.append("(unavailable tab url)")
         urls_text = "\n    ".join(all_urls) if all_urls else "(no tabs open)"
         raise RuntimeError(
-            f"No LinkedIn Recruiter tab found.\n"
-            f"  Open linkedin.com/talent in Chrome, then run again.\n"
-            f"  Found {len(all_urls)} tab(s):\n    {urls_text}"
+            "Could not attach Playwright to any browser tab over CDP.\n"
+            f"  Found {len(all_urls)} tab(s):\n    {urls_text}\n"
+            "  Open a normal page in Chrome (e.g. https://www.linkedin.com/talent ) and retry."
         )
 
     async def disconnect(self) -> None:
@@ -179,6 +200,80 @@ class LinkedInBrowser:
                 self._project_id = m.group(1)
             return True
         return False
+
+    async def _bind_fallback_page(
+        self,
+        *,
+        preferred_context: BrowserContext | None = None,
+    ) -> bool:
+        """Bind to any usable tab when CDP is up but no linkedin.com/talent URL is open."""
+        if not self._browser:
+            return False
+
+        contexts: list[BrowserContext] = []
+        if preferred_context is not None and preferred_context in self._browser.contexts:
+            contexts.append(preferred_context)
+        for ctx in self._browser.contexts:
+            if ctx not in contexts:
+                contexts.append(ctx)
+
+        triples: list[tuple[BrowserContext, Page, str]] = []
+        for ctx in contexts:
+            for page in ctx.pages:
+                try:
+                    url = page.url or ""
+                except Exception:
+                    continue
+                triples.append((ctx, page, url))
+
+        async def _try_bind(ctx: BrowserContext, page: Page) -> bool:
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=5000)
+                await self._input_backend.initialize(page)
+            except Exception as exc:
+                try:
+                    preview = page.url[:120]
+                except Exception:
+                    preview = "(url unavailable)"
+                print(f"  [bind] Skipping page ({preview}): {exc}")
+                return False
+            self._context = ctx
+            self._page = page
+            self._project_id = None
+            return True
+
+        filtered = [(c, p, u) for c, p, u in triples if not _is_unusable_cdp_page_url(u)]
+
+        for ctx, page, url in filtered:
+            if url.startswith("http://") or url.startswith("https://"):
+                if await _try_bind(ctx, page):
+                    return True
+        for ctx, page, url in filtered:
+            if await _try_bind(ctx, page):
+                return True
+        for ctx, page, url in triples:
+            if await _try_bind(ctx, page):
+                return True
+        return False
+
+    async def require_recruiter_tab(self) -> None:
+        """Bind to a Recruiter tab before operations that need Recruiter DOM (e.g. sidebar search)."""
+        if await self._bind_existing_recruiter_page(preferred_context=self._context):
+            m = re.search(r"/talent/hire/(\d+)", self._page.url)
+            if m:
+                self._project_id = m.group(1)
+            return
+        current = ""
+        try:
+            current = str(self._page.url)
+        except Exception:
+            current = ""
+        raise RuntimeError(
+            "LinkedIn Recruiter is required on an open browser tab, but none was found.\n"
+            f"  Current Playwright tab: {current or '(unknown)'}\n"
+            "  Open https://www.linkedin.com/talent (your project or Recruiter search), then retry.\n"
+            "  CDP is connected — this is not a Chrome launch failure."
+        )
 
     async def _ghost_click(self, selector: str) -> bool:
         """Click using ghost-cursor (Bézier trajectory + Fitts's Law timing).
@@ -500,6 +595,7 @@ class LinkedInBrowser:
         """
         # Pre-flight: dismiss any stale profile slide-in blocking the sidebar
         await self.go_back_to_results()
+        await self.require_recruiter_tab()
         typing_plan = typing_plan or build_boolean_typing_plan(boolean)
         previous_count_text = await self._peek_results_count_text()
         previous_top_card_signature = await self._peek_top_card_signature()
