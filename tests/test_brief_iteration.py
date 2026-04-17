@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from market_intelligence.engine import resolve_market_intel_artifact_path
 from shared.brief_iteration import (
+    _apply_iteration_proposal,
     _build_iteration_user_prompt,
     _draft_brief_path,
     _derive_next_draft_version,
@@ -291,6 +292,24 @@ def test_build_iteration_prompt_uses_compact_views():
     assert len(prompt) < len(json.dumps(report.to_dict(), indent=2)) + len(json.dumps(brief_raw, indent=2))
 
 
+def test_build_iteration_prompt_adds_strict_seniority_guardrails():
+    brief_raw = read_json(SOURCE_BRIEF)
+    report = StructuredRunReport.from_dict(_report_dict())
+    prompt = _build_iteration_user_prompt(
+        brief_raw,
+        report,
+        search_memory=None,
+        final_judgments_summary=None,
+        market_intel_summary=None,
+        allow_retrieval_design_edits=False,
+        strict_seniority_legacy=True,
+        tight=False,
+    )
+
+    assert '"strict_seniority_guardrails"' in prompt
+    assert "Keep search_priorities and additional_search_terms abstract and semantic" in prompt
+
+
 def test_build_iteration_prompt_uses_derived_legacy_views_for_explicit_retrieval_design():
     brief_raw = read_json(SOURCE_BRIEF)
     brief_raw["search_priorities"] = ["stale raw priority"]
@@ -335,6 +354,56 @@ def test_build_iteration_prompt_uses_derived_legacy_views_for_explicit_retrieval
     assert "payment orchestration" in prompt
     assert "stale raw priority" not in prompt
     assert "stale raw term" not in prompt
+
+
+def test_apply_iteration_proposal_strict_seniority_guardrails_rewrite_literal_lists_and_hold_seniority_line():
+    current_raw = read_json(SOURCE_BRIEF)
+    report_data = _report_dict()
+    report_data["metrics_summary"]["saved"] = 0
+    report = StructuredRunReport.from_dict(report_data)
+    proposal = {
+        "summary": "Bad literalization proposal.",
+        "proposed_changes": {
+            "search_priorities": [
+                "Buy-side AI lab heads at BlackRock, Bridgewater, Citadel, Two Sigma, Point72, and AQR",
+                "Global banks including JPMorgan, Goldman, Morgan Stanley, Citi, Barclays, HSBC, UBS, and Deutsche Bank",
+            ],
+            "additional_search_terms": [
+                "company-first anchors: BlackRock, Bridgewater, Citadel, Two Sigma, Point72, AQR",
+                "title variants: Head of AI Labs, Head of AI Core, Head of AI Research, Head of AI Engineering",
+            ],
+            "minimum_bar_description": (
+                "Treat buy-side MD and fintech VP titles as equivalent to Executive Director when the firm is strong."
+            ),
+            "depth_distinction": {
+                "builder_definition": current_raw["depth_distinction"]["builder_definition"],
+                "user_definition": current_raw["depth_distinction"]["user_definition"],
+                "edge_case_guidance": (
+                    "Buy-side MD and fintech VP titles should usually be treated as equivalent to bank ED."
+                ),
+            },
+            "intake_notes": "Company-first search should lead with buy-side MD and fintech VP equivalents.",
+        },
+        "changed_fields": [],
+        "warnings": [],
+    }
+
+    draft, warnings = _apply_iteration_proposal(
+        current_raw,
+        proposal,
+        Path("run-report.json"),
+        report,
+    )
+
+    assert draft["search_priorities"]
+    assert all("blackrock" not in item.lower() for item in draft["search_priorities"])
+    assert all("company-first anchors" not in item.lower() for item in draft["additional_search_terms"])
+    assert all("title variants" not in item.lower() for item in draft["additional_search_terms"])
+    assert draft["minimum_bar_description"] == current_raw["minimum_bar_description"]
+    assert draft["depth_distinction"]["edge_case_guidance"] == current_raw["depth_distinction"]["edge_case_guidance"]
+    assert draft["intake_notes"] == current_raw["intake_notes"]
+    assert any("strict-seniority brief abstract and semantic" in warning.lower() for warning in warnings)
+    assert any("internally inconsistent" in warning.lower() for warning in warnings)
 
 
 def test_run_report_prompt_summary_ranks_strings_by_signal_not_raw_order():

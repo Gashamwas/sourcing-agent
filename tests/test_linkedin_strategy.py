@@ -76,6 +76,16 @@ def test_build_strategy_user_legacy_brief_omits_layered_retrieval_design_section
     assert "These terms are anchors and hints" not in prompt
 
 
+def test_build_strategy_user_strict_seniority_legacy_brief_adds_semantic_guidance():
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    prompt = _build_strategy_user(brief, [], prior_run_data={})
+
+    assert "Treat these priorities as semantic guidance" in prompt
+    assert "These terms are anchors and hints" in prompt
+    assert "prefer technical-authority concepts" in prompt
+    assert "Do not turn these hints into broad OR groups of generic titles" in prompt
+
+
 def test_form_strategy_reorders_head_ai_opening_toward_edge_case():
     brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
     mock_plan = {
@@ -186,10 +196,9 @@ def test_form_strategy_promotes_market_intel_gap_lanes_ahead_of_cleanup():
     family_order = [item.get("family_key") for item in plan.generated_strings]
     cleanup_index = family_order.index("executive_builder_cleanup")
     assert family_order.index("reg_reporting_genai") < cleanup_index
-    assert family_order.index("payments_builder") < cleanup_index
-    assert family_order.index("founder_cto_bfsi") < cleanup_index
+    assert plan.generated_strings[0]["family_key"] == "reg_reporting_genai"
     assert all(
-        item.get("novelty_bucket") == "edge_case"
+        item.get("title_bucket_risk") != "high"
         for item in plan.generated_strings[:3]
     )
 
@@ -259,6 +268,62 @@ def test_form_strategy_demotes_exhausted_families_from_search_memory():
         plan = form_strategy(brief, [], prior_run_data=prior_run_data)
 
     assert plan.generated_strings[-1]["family_key"] == "canonical_bank_company_first"
+
+
+def test_form_strategy_strict_seniority_lint_suppresses_broad_title_buckets():
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    mock_plan = {
+        "architecture": "dragnet",
+        "architecture_rationale": "mock",
+        "architecture_success_criteria": [],
+        "architecture_pivot_triggers": [],
+        "strategy_rationale": "mock",
+        "generated_strings": [
+            {
+                "boolean": "(\"Head of\" OR \"Director\" OR \"VP\" OR \"CTO\" OR \"Principal\") AND (\"financial services\" OR \"banking\") AND (\"GenAI\" OR \"LLM\")",
+                "rationale": "Too-broad title-bucket opener.",
+                "vocabulary_sources": "mock",
+                "family_key": "broad_titles",
+                "novelty_bucket": "canonical",
+                "domain_lane": "general",
+            },
+            {
+                "boolean": "(\"Executive Director\" OR \"Head of AI Platforms\") AND (\"capital markets\" OR \"market data\") AND (\"production\" OR \"deployed\")",
+                "rationale": "Safer ED-scoped opener.",
+                "vocabulary_sources": "mock",
+                "family_key": "ed_scope",
+                "novelty_bucket": "canonical",
+                "domain_lane": "capital_markets",
+            },
+            {
+                "boolean": "(\"BlackRock\" OR \"Two Sigma\") AND (\"GenAI\" OR \"LLM\")",
+                "rationale": "Buy-side lane without builder proof should not open.",
+                "vocabulary_sources": "mock",
+                "family_key": "buy_side_generic",
+                "novelty_bucket": "edge_case",
+                "domain_lane": "asset_management",
+            },
+            {
+                "boolean": "(\"research workflow\" OR \"investment workflow\") AND (\"production\" OR \"deployed\")",
+                "rationale": "Workflow-first capital markets lane.",
+                "vocabulary_sources": "mock",
+                "family_key": "workflow_cap_markets",
+                "novelty_bucket": "edge_case",
+                "domain_lane": "capital_markets",
+            },
+        ],
+        "coverage_gaps": [],
+        "noise_predictions": [],
+    }
+
+    with patch("linkedin.strategy.opus_llm", return_value=mock_plan):
+        plan = form_strategy(brief, [], prior_run_data={})
+
+    booleans = [item["boolean"] for item in plan.generated_strings]
+    assert not any('("Head of" OR "Director" OR "VP" OR "CTO" OR "Principal")' in boolean for boolean in booleans)
+    assert plan.generated_strings[0]["family_key"] in {"ed_scope", "workflow_cap_markets"}
+    buy_side = next(item for item in plan.generated_strings if item["family_key"] == "buy_side_generic")
+    assert buy_side["opening_eligible"] is False
 
 
 def test_form_strategy_accepts_raw_search_memory_artifact():

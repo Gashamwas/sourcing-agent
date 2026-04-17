@@ -25,6 +25,12 @@ from shared.retrieval_design import (
 from shared.run_report_schema import StructuredRunReport
 from shared.search_memory import build_search_memory_summary, extract_dominant_anchors
 from shared.storage import read_json, read_jsonl, write_json
+from shared.strict_seniority import (
+    is_strict_seniority_brief,
+    looks_like_company_inventory,
+    looks_like_title_inventory,
+    mentions_risky_title_translation,
+)
 
 
 SAVE_DECISIONS = {"SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE", "SIGNAL_SAVE"}
@@ -764,7 +770,7 @@ def _summarize_run_report_for_prompt(
     }
 
 
-def _build_iteration_system(*, allow_retrieval_design_edits: bool) -> str:
+def _build_iteration_system(*, allow_retrieval_design_edits: bool, strict_seniority_legacy: bool = False) -> str:
     retrieval_design_block = """
     "retrieval_design": {
       "families": [],
@@ -777,6 +783,14 @@ def _build_iteration_system(*, allow_retrieval_design_edits: bool) -> str:
         if allow_retrieval_design_edits
         else "- Do NOT introduce a new retrieval_design for this brief. Keep edits on the existing legacy mutable fields only."
     )
+    strict_rules = ""
+    if strict_seniority_legacy:
+        strict_rules = (
+            "\n- This is a strict-seniority legacy brief. Preserve semantic search guidance and technical-authority framing; do NOT literalize employer clusters, title inventories, or company-first discoveries into long search_priorities/additional_search_terms lists.\n"
+            "- Market intel can enrich notes, intake_notes, employer_signal_rules, calibration_examples, and later-phase guidance, but it must NOT broaden seniority translation on noisy evidence.\n"
+            "- Prefer abstract search priorities like 'buy-side AI lab leaders with clearly in-range technical scope' over enumerating employer sets.\n"
+            "- Do NOT loosen ED-equivalent calibration because a lane produced saves if the run metrics are inconsistent or the saved profiles may be above band.\n"
+        )
     template = """You are revising a sourcing brief after a completed run.
 
 Return valid JSON only with this exact shape:
@@ -832,12 +846,14 @@ Rules:
 - Keep hard gates intact: geography, years, BFSI domain, post-2022 GenAI builder evidence, executive-builder scope.
 - Prefer replacing low-signal items over append-only growth.
 - Keep lists concise and high-signal.
-- __RETRIEVAL_RULES__
+- __RETRIEVAL_RULES____STRICT_RULES__
 - If you suggest employer signal rules, save_on_employer_alone must stay false.
 - If you suggest facial calibration changes, make them small and evidence-based.
 - If there is not enough evidence to change a field, omit it from proposed_changes."""
-    return template.replace("__RETRIEVAL_BLOCK__", retrieval_design_block).replace(
-        "__RETRIEVAL_RULES__", retrieval_rules
+    return (
+        template.replace("__RETRIEVAL_BLOCK__", retrieval_design_block)
+        .replace("__RETRIEVAL_RULES__", retrieval_rules)
+        .replace("__STRICT_RULES__", strict_rules)
     )
 
 
@@ -849,6 +865,7 @@ def _build_iteration_user_prompt(
     market_intel_summary: dict | None,
     *,
     allow_retrieval_design_edits: bool,
+    strict_seniority_legacy: bool = False,
     tight: bool = False,
 ) -> str:
     retrieval_design = retrieval_design_from_payload(
@@ -876,6 +893,13 @@ def _build_iteration_user_prompt(
         "final_judgments_summary": final_judgments_summary or None,
         "market_intel_summary": market_intel_summary or None,
     }
+    if strict_seniority_legacy:
+        context["strict_seniority_guardrails"] = {
+            "mode": "legacy_strict_seniority",
+            "search_hint_policy": "Keep search_priorities and additional_search_terms abstract and semantic; do not literalize employer clusters or title inventories.",
+            "seniority_policy": "Executive Director / clearly ED-analogous remains the anchor. Do not broaden buy-side MD or fintech VP translation unless strongly validated as in-band.",
+            "run_metrics_consistency": "If the run metrics are inconsistent, do not loosen seniority or expand literal search-token lists based on that evidence.",
+        }
     if allow_retrieval_design_edits:
         context["current_retrieval_design_summary"] = summarize_retrieval_design(retrieval_design)
     return (
@@ -974,11 +998,121 @@ def _find_heuristic_gap_warnings(current_raw: dict, draft_raw: dict) -> list[str
     return deduped
 
 
+def _run_metrics_are_internally_inconsistent(report: StructuredRunReport) -> bool:
+    metrics_saved = int(report.metrics_summary.get("saved", 0) or 0)
+    string_saved = sum(int(item.get("saves", 0) or 0) for item in report.string_performance)
+    return metrics_saved == 0 and string_saved > 0
+
+
+def _strict_seniority_priority_rewrite(item: str) -> str | None:
+    normalized = _normalize_text(item)
+    lowered = normalized.lower()
+    if not normalized:
+        return None
+    if looks_like_company_inventory(normalized):
+        if any(term in lowered for term in ("blackrock", "bridgewater", "citadel", "two sigma", "point72", "aqr", "buy-side", "buy side")):
+            return "Buy-side AI lab leaders with clearly in-range technical scope and real BFSI workflow credibility"
+        if any(term in lowered for term in ("stripe", "plaid", "revolut", "sofi", "affirm", "adyen", "klarna", "payments", "fintech")):
+            return "Senior fintech and payments AI builders only when the scope clearly reads ED-equivalent and builder-led"
+        if any(term in lowered for term in ("bloomberg", "s&p global", "dtcc", "factset", "market infrastructure", "tradeweb", "lseg", "broadridge")):
+            return "AI leaders at market infrastructure and financial-data firms when the scope still reads one layer below broad enterprise executives"
+        if any(term in lowered for term in ("jpmorgan", "goldman", "morgan stanley", "citi", "barclays", "hsbc", "ubs", "deutsche", "bank")):
+            return "Senior technical owners at roughly Executive Director scope inside major financial institutions"
+    return normalized
+
+
+def _strict_seniority_term_rewrite(item: str) -> str | None:
+    normalized = _normalize_text(item)
+    lowered = normalized.lower()
+    if not normalized:
+        return None
+    if looks_like_company_inventory(normalized):
+        if any(term in lowered for term in ("buy-side", "buy side", "blackrock", "citadel", "two sigma", "point72", "aqr")):
+            return "buy-side ai lab leaders with clearly in-range technical scope"
+        if any(term in lowered for term in ("stripe", "plaid", "revolut", "sofi", "affirm", "adyen", "klarna", "payments", "fintech")):
+            return "regulated-workflow ai builders with clearly ed-equivalent scope"
+        if any(term in lowered for term in ("dtcc", "s&p global", "factset", "ice", "lseg", "broadridge", "finastra")):
+            return "market-infrastructure ai builders with clear ed-equivalent technical ownership"
+        return None
+    if looks_like_title_inventory(normalized):
+        return "bounded bfsi title variants that still imply true lab-head scope"
+    return normalized
+
+
+def _apply_strict_seniority_legacy_guardrails(
+    *,
+    current_raw: dict,
+    draft: dict,
+    report: StructuredRunReport,
+    warnings: list[str],
+) -> None:
+    if not is_strict_seniority_brief(current_raw) or _raw_has_explicit_retrieval_design(current_raw):
+        return
+
+    rewritten_priorities = _dedupe_strings(
+        [
+            rewritten
+            for item in draft.get("search_priorities", [])
+            if (rewritten := _strict_seniority_priority_rewrite(item))
+        ],
+        limit=LIST_LIMITS["search_priorities"],
+    )
+    rewritten_terms = _dedupe_strings(
+        [
+            rewritten
+            for item in draft.get("additional_search_terms", [])
+            if (rewritten := _strict_seniority_term_rewrite(item))
+        ],
+        limit=LIST_LIMITS["additional_search_terms"],
+    )
+
+    if rewritten_priorities != draft.get("search_priorities", []):
+        warnings.append(
+            "Rewrote search_priorities to keep this strict-seniority brief abstract and semantic instead of company-list-first."
+        )
+        draft["search_priorities"] = (
+            rewritten_priorities or current_raw.get("search_priorities", [])
+        )
+    if rewritten_terms != draft.get("additional_search_terms", []):
+        warnings.append(
+            "Rewrote additional_search_terms to remove literal employer/title inventories and preserve semantic guidance."
+        )
+        draft["additional_search_terms"] = (
+            rewritten_terms or current_raw.get("additional_search_terms", [])
+        )
+
+    if _run_metrics_are_internally_inconsistent(report):
+        risky_fields: list[str] = []
+        if mentions_risky_title_translation(draft.get("minimum_bar_description", "")):
+            draft["minimum_bar_description"] = current_raw.get("minimum_bar_description", "")
+            risky_fields.append("minimum_bar_description")
+        depth = draft.get("depth_distinction", {}) or {}
+        current_depth = current_raw.get("depth_distinction", {}) or {}
+        if mentions_risky_title_translation(depth.get("edge_case_guidance", "")):
+            depth["edge_case_guidance"] = current_depth.get("edge_case_guidance", "")
+            draft["depth_distinction"] = depth
+            risky_fields.append("depth_distinction.edge_case_guidance")
+        if mentions_risky_title_translation(draft.get("intake_notes", "")):
+            draft["intake_notes"] = current_raw.get("intake_notes", "")
+            risky_fields.append("intake_notes")
+        if risky_fields:
+            warnings.append(
+                "Retained current seniority calibration for "
+                + ", ".join(risky_fields)
+                + " because the run metrics were internally inconsistent and did not justify loosening title translation."
+            )
+
+
 def _json_equal(left: Any, right: Any) -> bool:
     return json.dumps(left, sort_keys=True) == json.dumps(right, sort_keys=True)
 
 
-def _apply_iteration_proposal(current_raw: dict, proposal: dict, report_path: Path) -> tuple[dict, list[str]]:
+def _apply_iteration_proposal(
+    current_raw: dict,
+    proposal: dict,
+    report_path: Path,
+    report: StructuredRunReport,
+) -> tuple[dict, list[str]]:
     draft = copy.deepcopy(current_raw)
     warnings: list[str] = []
     changes = proposal.get("proposed_changes", {}) if isinstance(proposal, dict) else {}
@@ -1102,6 +1236,12 @@ def _apply_iteration_proposal(current_raw: dict, proposal: dict, report_path: Pa
         draft["notes"] = generated_note
 
     warnings.extend(_find_heuristic_gap_warnings(current_raw, draft))
+    _apply_strict_seniority_legacy_guardrails(
+        current_raw=current_raw,
+        draft=draft,
+        report=report,
+        warnings=warnings,
+    )
     return draft, _dedupe_strings(warnings)
 
 
@@ -1210,6 +1350,7 @@ def iterate_brief_draft(
 
     current_raw = read_json(brief_path)
     allow_retrieval_design_edits = _raw_has_explicit_retrieval_design(current_raw)
+    strict_seniority_legacy = is_strict_seniority_brief(current_raw) and not allow_retrieval_design_edits
     report = StructuredRunReport.from_dict(read_json(resolved_report))
     search_memory = read_json(resolved_search_memory) if resolved_search_memory and resolved_search_memory.exists() else None
     final_summary = _summarize_final_judgments(resolved_final) if resolved_final and resolved_final.exists() else None
@@ -1223,7 +1364,8 @@ def iterate_brief_draft(
         draft_source_version=str(current_raw.get("version", "")),
     ):
         system_prompt = _build_iteration_system(
-            allow_retrieval_design_edits=allow_retrieval_design_edits
+            allow_retrieval_design_edits=allow_retrieval_design_edits,
+            strict_seniority_legacy=strict_seniority_legacy,
         )
         try:
             proposal = opus_llm(
@@ -1235,6 +1377,7 @@ def iterate_brief_draft(
                     final_summary,
                     market_intel_summary,
                     allow_retrieval_design_edits=allow_retrieval_design_edits,
+                    strict_seniority_legacy=strict_seniority_legacy,
                     tight=False,
                 ),
                 expect_json=True,
@@ -1253,6 +1396,7 @@ def iterate_brief_draft(
                     final_summary,
                     market_intel_summary,
                     allow_retrieval_design_edits=allow_retrieval_design_edits,
+                    strict_seniority_legacy=strict_seniority_legacy,
                     tight=True,
                 ),
                 expect_json=True,
@@ -1262,7 +1406,7 @@ def iterate_brief_draft(
     if not isinstance(proposal, dict):
         raise ValueError("brief iteration proposal must be a dict")
 
-    draft_raw, warnings = _apply_iteration_proposal(current_raw, proposal, resolved_report)
+    draft_raw, warnings = _apply_iteration_proposal(current_raw, proposal, resolved_report, report)
     _validate_draft_brief(draft_raw)
 
     draft_path = _draft_brief_path(brief_path, str(draft_raw.get("version", "draft")))

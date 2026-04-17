@@ -28,6 +28,10 @@ from shared.search_memory import (
     normalize_family_key,
     normalize_novelty_bucket,
 )
+from shared.strict_seniority import (
+    classify_search_string_seniority,
+    is_strict_seniority_brief,
+)
 
 
 _CANONICAL_FRAMEWORK_PATTERNS = (
@@ -340,6 +344,14 @@ def _annotate_string_metadata(item: dict, *, boolean_key: str = "boolean") -> di
         boolean,
         rationale,
     )
+    seniority = classify_search_string_seniority(
+        boolean,
+        rationale,
+        domain_lane=item["domain_lane"],
+    )
+    item["seniority_risk"] = seniority["seniority_risk"]
+    item["title_bucket_risk"] = seniority["title_bucket_risk"]
+    item["opening_eligible"] = bool(seniority["opening_eligible"])
     if retrieval_recipe:
         item["retrieval_recipe"] = retrieval_recipe
     if hypothesis_ids:
@@ -416,6 +428,138 @@ def _annotate_adaptation_metadata(adaptation: AdaptationResponse) -> None:
         _annotate_string_metadata(dict(item))
         for item in adaptation.new_strings
     ]
+
+
+def _strict_seniority_opening_sort_key(item: dict, idx: int) -> tuple[int, int, int, int, int, int]:
+    lane = str(item.get("domain_lane", "") or "").strip().lower()
+    preferred_lane_rank = {
+        "capital_markets": 0,
+        "market_infra": 1,
+        "market_data": 2,
+        "risk_compliance": 3,
+        "bfsi_vendors": 4,
+        "general": 5,
+        "asset_management": 6,
+        "payments": 7,
+        "insurance": 8,
+    }.get(lane, 9)
+    novelty_rank = 0 if item.get("novelty_bucket") == "edge_case" else 1
+    title_risk_rank = {"low": 0, "medium": 1, "high": 2}.get(
+        str(item.get("title_bucket_risk", "low")).lower(),
+        0,
+    )
+    seniority_risk_rank = {"low": 0, "medium": 1, "high": 2}.get(
+        str(item.get("seniority_risk", "low")).lower(),
+        0,
+    )
+    return (
+        0 if item.get("opening_eligible", True) else 1,
+        0 if (lane in {"capital_markets", "market_infra", "market_data", "risk_compliance"} or "executive director" in str(item.get("boolean", "")).lower()) else 1,
+        preferred_lane_rank,
+        title_risk_rank,
+        seniority_risk_rank,
+        idx,
+    )
+
+
+def _apply_strict_seniority_plan_guardrails(brief: Brief, plan: ExecutionPlan) -> str:
+    if not is_strict_seniority_brief(brief):
+        return ""
+
+    kept: list[dict] = []
+    suppressed: list[dict] = []
+    for item in plan.generated_strings:
+        if (
+            item.get("title_bucket_risk") == "high"
+            and not item.get("opening_eligible", True)
+        ):
+            suppressed.append(item)
+            continue
+        kept.append(item)
+
+    if suppressed and (len(kept) >= 3 or len(kept) >= max(1, len(plan.generated_strings) // 2)):
+        plan.generated_strings = kept
+    else:
+        suppressed = []
+
+    plan.generated_strings = [
+        item
+        for _, item in sorted(
+            enumerate(plan.generated_strings),
+            key=lambda pair: _strict_seniority_opening_sort_key(pair[1], pair[0]),
+        )
+    ]
+
+    if plan.coverage_gaps:
+        reordered_gaps = []
+        for idx, gap in enumerate(plan.coverage_gaps):
+            if not gap.get("suggested_boolean"):
+                reordered_gaps.append((idx, gap))
+                continue
+            risk = classify_search_string_seniority(
+                gap.get("suggested_boolean", ""),
+                gap.get("rationale", "") or gap.get("gap", ""),
+                domain_lane=gap.get("domain_lane", ""),
+            )
+            gap["seniority_risk"] = risk["seniority_risk"]
+            gap["title_bucket_risk"] = risk["title_bucket_risk"]
+            gap["opening_eligible"] = risk["opening_eligible"]
+            reordered_gaps.append((idx, gap))
+        plan.coverage_gaps = [
+            gap
+            for _, gap in sorted(
+                reordered_gaps,
+                key=lambda pair: _strict_seniority_opening_sort_key(pair[1], pair[0]),
+            )
+        ]
+
+    if not suppressed:
+        return ""
+    return f"strict-seniority lint suppressed {len(suppressed)} broad title-bucket strings"
+
+
+def _apply_strict_seniority_adaptation_guardrails(
+    brief: Brief,
+    adaptation: AdaptationResponse,
+    remaining_strings: list[SearchString],
+) -> str:
+    if not is_strict_seniority_brief(brief):
+        return ""
+
+    kept: list[dict] = []
+    suppressed = 0
+    for item in adaptation.new_strings:
+        if (
+            item.get("title_bucket_risk") == "high"
+            and not item.get("opening_eligible", True)
+        ):
+            suppressed += 1
+            continue
+        kept.append(item)
+    adaptation.new_strings = [
+        item
+        for _, item in sorted(
+            enumerate(kept),
+            key=lambda pair: _strict_seniority_opening_sort_key(pair[1], pair[0]),
+        )
+    ]
+
+    remaining_by_id = {ss.id: ss for ss in remaining_strings}
+    for reorder in adaptation.reorder:
+        if reorder.get("move_to") != "next":
+            continue
+        ss = remaining_by_id.get(reorder.get("string_id"))
+        if not ss:
+            continue
+        if ss.opening_eligible is False or ss.title_bucket_risk == "high":
+            reorder["move_to"] = "last"
+            reason = reorder.get("reason", "").strip()
+            suffix = "Demoted by strict-seniority guardrail because this string uses a broad title bucket."
+            reorder["reason"] = f"{reason} {suffix}".strip()
+
+    if suppressed == 0:
+        return ""
+    return f"strict-seniority lint suppressed {suppressed} adaptive broad title-bucket strings"
 
 
 def _apply_search_memory_to_plan(
@@ -625,9 +769,15 @@ def form_strategy(
             prefer_rendered_strings=use_layered_retrieval,
         )
         _annotate_plan_metadata(plan)
+        strict_summary = _apply_strict_seniority_plan_guardrails(brief, plan)
+        if strict_summary:
+            print(f"  Strict-seniority guardrail: {strict_summary}")
         if _brief_targets_edge_case_opening(brief):
             summary = _rebalance_execution_plan_for_edge_case_opening(plan)
             _annotate_plan_metadata(plan)
+            strict_summary = _apply_strict_seniority_plan_guardrails(brief, plan)
+            if strict_summary:
+                print(f"  Strict-seniority guardrail: {strict_summary}")
             print(f"  Edge-case rebalance: {summary}")
         memory_summary = _apply_search_memory_to_plan(
             plan,
@@ -650,6 +800,9 @@ def form_strategy(
                 prefer_rendered_strings=use_layered_retrieval,
             )
             _annotate_plan_metadata(plan)
+            strict_summary = _apply_strict_seniority_plan_guardrails(brief, plan)
+            if strict_summary:
+                print(f"  Strict-seniority guardrail: {strict_summary}")
             print(f"  [warn] Strategy JSON was truncated — salvaged partial plan", file=sys.stderr)
             return plan
 
@@ -977,6 +1130,7 @@ def _build_strategy_user(
     use_layered_retrieval: bool = False,
 ) -> str:
     retrieval_design = _explicit_design_from_brief(brief) if use_layered_retrieval else RetrievalDesign()
+    semantic_hint_mode = use_layered_retrieval or is_strict_seniority_brief(brief)
     # Group kit strings by block for clearer vocabulary presentation
     blocks: dict[str, list[KitString]] = {}
     for ks in kit_strings:
@@ -1038,20 +1192,29 @@ the role description, archetypes, and JD context below. Apply all LinkedIn Boole
 
     if brief.search_priorities:
         prompt += f"\n## User Hints\nSearch priorities: {', '.join(brief.search_priorities)}\n"
-        if use_layered_retrieval:
+        if semantic_hint_mode:
             prompt += (
                 "Treat these priorities as semantic guidance, not as a checklist of phrases to restate. "
                 "Infer the target populations and generate your own discriminative search vocabulary.\n"
             )
+            if is_strict_seniority_brief(brief):
+                prompt += (
+                    "For this strict-seniority brief, prefer technical-authority concepts, ED-scope signals, "
+                    "architecture-deep language, and builder proof over broad management-title coverage.\n"
+                )
 
     if brief.additional_search_terms:
         prompt += f"\n## Additional Search Terms\nThese terms should be used for search string generation but are NOT evaluation criteria:\n{', '.join(brief.additional_search_terms)}\n"
-        if use_layered_retrieval:
+        if semantic_hint_mode:
             prompt += (
                 "These terms are anchors and hints, not a mandate to repeat them verbatim. "
                 "Use them to infer adjacent practitioner language, hidden title variants, workflow language, "
                 "and more discriminative phrasing.\n"
             )
+            if is_strict_seniority_brief(brief):
+                prompt += (
+                    "Do not turn these hints into broad OR groups of generic titles, company inventories, or loose seniority ladders.\n"
+                )
 
     if brief.instructions:
         prompt += f"\n## Sourcing Instructions\n" + "\n".join(f"- {i}" for i in brief.instructions) + "\n"
@@ -1285,7 +1448,10 @@ Return valid JSON only."""
         prefer_rendered_strings=use_layered_retrieval,
     )
     _annotate_adaptation_metadata(adaptation)
+    _apply_strict_seniority_adaptation_guardrails(brief, adaptation, remaining_strings)
     if checkpoint_mode != "opening_checkpoint" and _brief_targets_edge_case_opening(brief):
         adaptation = _rebalance_adaptation_for_edge_case_opening(adaptation, remaining_strings)
+        _annotate_adaptation_metadata(adaptation)
+        _apply_strict_seniority_adaptation_guardrails(brief, adaptation, remaining_strings)
     _apply_search_memory_to_adaptation(adaptation, remaining_strings, search_memory_summary)
     return adaptation
