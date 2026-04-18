@@ -1,5 +1,6 @@
 from shared.identity_resolution import (
     build_candidate_lookup_queries,
+    build_person_lookup_name,
     choose_best_match,
     classify_recruiter_activity_pressure,
     resolve_direct_linkedin_hint,
@@ -113,6 +114,62 @@ def test_choose_best_match_returns_none_for_low_confidence_pool():
 
     assert classification == "no_confident_match"
     assert best is None
+
+
+def test_build_person_lookup_name_preserves_multi_token_names():
+    assert build_person_lookup_name("Ada Lovelace", "ada") == "Ada Lovelace"
+    assert build_person_lookup_name("Eri Barrett", "erosika") == "Eri Barrett"
+    assert build_person_lookup_name("Keunwoo Choi", "keunwoochoi") == "Keunwoo Choi"
+
+
+def test_build_person_lookup_name_single_token_falls_back_to_username_derived_surname():
+    # Canonical motivating case from the dry-run: github name scraped as "Michael"
+    # and the username holds the real surname signal.
+    assert build_person_lookup_name("Michael", "mldangelo") == "Michael Mldangelo"
+
+
+def test_build_person_lookup_name_single_token_accepts_github_url_as_username():
+    assert (
+        build_person_lookup_name("Michael", "https://github.com/mldangelo")
+        == "Michael Mldangelo"
+    )
+
+
+def test_build_person_lookup_name_single_token_uses_camelcase_boundary_when_present():
+    # Explicit camelcase boundary: "mldAngelo" -> ["mld", "Angelo"]; both pass the
+    # safety filter, so both are appended (longest first). No apostrophes invented.
+    assert build_person_lookup_name("Michael", "mldAngelo") == "Michael Angelo Mld"
+
+
+def test_build_person_lookup_name_single_token_splits_on_underscore_hyphen_digit():
+    assert build_person_lookup_name("Michael", "mld_angelo") == "Michael Angelo Mld"
+    assert build_person_lookup_name("Michael", "mld-angelo-123") == "Michael Angelo Mld"
+    # Digit boundary: the leading "sam" token is dropped because it equals the
+    # candidate's single token case-insensitively; only "vangelos" is kept.
+    assert build_person_lookup_name("Sam", "sam123vangelos") == "Sam Vangelos"
+
+
+def test_build_person_lookup_name_single_token_skips_unsafe_usernames():
+    # Username equals the candidate's single token case-insensitively -> no change.
+    assert build_person_lookup_name("Michael", "Michael") == "Michael"
+    # Username too short (single char) -> no change.
+    assert build_person_lookup_name("Michael", "m") == "Michael"
+    # Empty username -> no change.
+    assert build_person_lookup_name("Michael", "") == "Michael"
+
+
+def test_build_person_lookup_name_handles_empty_candidate_name():
+    # Empty candidate name still uses the username-derived raw path as before, and
+    # does NOT activate the single-token fallback (which requires a candidate name).
+    assert build_person_lookup_name("", "ada-Lovelace") == "ada Lovelace"
+    assert build_person_lookup_name("", "") == ""
+
+
+def test_build_person_lookup_name_fallback_does_not_invent_punctuation():
+    # Explicit negative case called out in the plan: we must not emit "Michael D'Angelo"
+    # because the apostrophe is not present in the source username.
+    assert "'" not in build_person_lookup_name("Michael", "mldangelo")
+    assert "." not in build_person_lookup_name("Michael", "mldangelo")
 
 
 def test_classify_recruiter_activity_pressure_is_explainable():

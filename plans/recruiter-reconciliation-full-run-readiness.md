@@ -125,7 +125,7 @@ After P0 patches land and tests stay green:
 ## Slices
 
 - [x] Slice 1 — Phase 0 triage. Produce `plans/recruiter-reconciliation-full-run-readiness.md#phase-0-triage-notes` (append) classifying each of the 5 dry-run leads per the Phase 0 table, citing card rank + profile URL evidence. No code change.
-- [ ] Slice 2 — P0: single-token lookup-name fallback. Touch `shared/identity_resolution.py` (or a thin helper consumed by the resolver); add tests in `tests/test_identity_resolution.py` / `tests/test_recruiter_identity_resolver.py`. No behavior change for multi-token names.
+- [x] Slice 2 — P0: single-token lookup-name fallback. Touch `shared/identity_resolution.py` (or a thin helper consumed by the resolver); add tests in `tests/test_identity_resolution.py` / `tests/test_recruiter_identity_resolver.py`. No behavior change for multi-token names.
 - [ ] Slice 3 — P0: observability summary fields. Touch `github/recruiter_identity_report.py`; update `tests/test_recruiter_identity_report.py`. Backfill: re-emit summary on existing `recruiter-reconciliation-live-dryrun-nyc/` artifacts by re-running the writer (no re-run of the browser flow).
 - [ ] Slice 4 — Staged 20-lead dry run and classification writeup (append to this plan).
 - [ ] Slice 5 — Go/no-go decision on the full 179-lead run, recorded in Decisions below.

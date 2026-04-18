@@ -626,6 +626,53 @@ def test_resolve_anchor_single_plausible_live_shape_opens_without_strong_mocks(
     browser.open_profile_by_url.assert_awaited()
 
 
+def test_resolve_lead_uses_username_derived_surname_when_candidate_name_is_single_token():
+    """P0 fallback: "Michael" + github_username="mldangelo" must search
+    "Michael Mldangelo" rather than the bare single-token "Michael"."""
+    browser = AsyncMock()
+    browser.get_card_slot_count.return_value = 0
+    browser.get_card_count.return_value = 0
+    resolver = RecruiterIdentityResolver(
+        browser=browser,
+        project_url="https://www.linkedin.com/talent/hire/123/search",
+        config=RecruiterResolverConfig(max_cards=3, open_profile_on_likely_match=False),
+        linkedin_brief=MagicMock(),
+    )
+    asyncio.run(resolver.prepare_search("New York City Metropolitan Area"))
+
+    lead = GitHubReconciliationLead(
+        username="mldangelo",
+        candidate_name="Michael",
+        github_url="https://github.com/mldangelo",
+        company="@promptfoo",
+        location="New York, NY",
+        title="VP Engineering",
+        decision="SAVE",
+        confidence=0.9,
+        rationale="",
+        source_query="fde",
+        source_channel="code_search",
+        linkedin_hints=LinkedInIdentityHints(
+            candidate_name="Michael",
+            github_username="mldangelo",
+            github_url="https://github.com/mldangelo",
+            company="@promptfoo",
+            location="New York, NY",
+            title="VP Engineering",
+        ),
+    )
+
+    result = asyncio.run(resolver.resolve_lead(lead))
+
+    assert result.lookup_name == "Michael Mldangelo"
+    assert result.query == "Michael Mldangelo"
+    browser.enter_search_string.assert_awaited_once_with("Michael Mldangelo")
+    # No cards surfaced, so the resolver terminates with no_results; this confirms the
+    # query string was issued before the "no results" path and was not silently
+    # rewritten downstream.
+    assert result.identity_classification == "no_results"
+
+
 def test_use_existing_search_does_not_navigate_or_apply_filters():
     browser = AsyncMock()
     resolver = RecruiterIdentityResolver(

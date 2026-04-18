@@ -51,6 +51,9 @@ _LOCATION_ALIAS_MAP = {
 }
 _AUTHOR_HINT_RE = re.compile(r"@author\s+([^)]+)", re.IGNORECASE)
 _CAMELCASE_BOUNDARY_RE = re.compile(r"(?<=[a-z])(?=[A-Z])")
+_USERNAME_STRIP_URL_RE = re.compile(r"^https?://(?:www\.)?github\.com/", re.IGNORECASE)
+_USERNAME_TOKEN_SPLIT_RE = re.compile(r"[_\-\s]+|\d+")
+_ALPHA_ONLY_RE = re.compile(r"^[A-Za-z]+$")
 
 
 def _normalize_text(value: str) -> str:
@@ -133,7 +136,84 @@ def build_person_lookup_name(candidate_name: str, github_username: str = "") -> 
     tokens = raw.split()
     if tokens and all(token.isupper() for token in tokens):
         raw = " ".join(token.capitalize() for token in tokens)
-    return raw.strip()
+        tokens = raw.split()
+    lookup = raw.strip()
+
+    # P0 fallback: when the scraped candidate_name is a single token (e.g. "Michael"),
+    # a plain Recruiter name search devolves into "every Michael in NYC". Derive a
+    # safe second token from the GitHub username when possible. Strict rule: never
+    # invent characters not present in the source -- no apostrophes, no speculative
+    # initials-splitting.
+    if len(tokens) == 1:
+        extra = _extra_tokens_from_username(github_username, tokens[0])
+        if extra:
+            lookup = " ".join([tokens[0], *extra])
+
+    return lookup
+
+
+def _extra_tokens_from_username(
+    github_username: str,
+    candidate_single_token: str,
+) -> list[str]:
+    """Derive a list of safe title-cased surname-candidate tokens from a GitHub username.
+
+    Never invents punctuation or characters. Returns at most 2 tokens ordered by length
+    descending. Returns an empty list when no safe usable token is available.
+    """
+    raw = str(github_username or "").strip()
+    if not raw:
+        return []
+    raw = _USERNAME_STRIP_URL_RE.sub("", raw).strip().strip("/")
+    if not raw:
+        return []
+    candidate_lower = candidate_single_token.lower()
+
+    # Prefer explicit-boundary splits first: underscores, hyphens, whitespace, digits.
+    boundary_parts = [p for p in _USERNAME_TOKEN_SPLIT_RE.split(raw) if p]
+    boundary_tokens: list[str] = []
+    for part in boundary_parts:
+        # Further split by camelcase inside each part, so "mldAngelo" -> ["mld", "Angelo"].
+        for piece in _CAMELCASE_BOUNDARY_RE.split(part):
+            if _is_safe_username_token(piece, candidate_lower):
+                boundary_tokens.append(piece.lower())
+
+    if boundary_tokens:
+        unique = _ordered_unique(boundary_tokens)
+        unique.sort(key=len, reverse=True)
+        return [_title_case_token(token) for token in unique[:2]]
+
+    # No usable boundary-derived token. Fall back to appending the full username as a
+    # single title-cased token iff it is purely alphabetic, >= 2 chars, and not equal
+    # to the candidate's single token case-insensitively.
+    if _is_safe_username_token(raw, candidate_lower):
+        return [_title_case_token(raw.lower())]
+
+    return []
+
+
+def _is_safe_username_token(token: str, candidate_lower: str) -> bool:
+    if not token or len(token) < 2:
+        return False
+    if not _ALPHA_ONLY_RE.match(token):
+        return False
+    if token.lower() == candidate_lower:
+        return False
+    return True
+
+
+def _ordered_unique(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    out: list[str] = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            out.append(value)
+    return out
+
+
+def _title_case_token(token: str) -> str:
+    return token[:1].upper() + token[1:].lower() if token else token
 
 
 def build_candidate_lookup_queries(hints: LinkedInIdentityHints) -> list[str]:
