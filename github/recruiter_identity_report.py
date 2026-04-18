@@ -151,8 +151,10 @@ def build_recruiter_identity_summary(
     total = len(rows)
     action_counts: dict[str, int] = {}
     subreason_counts: dict[str, int] = {}
+    identity_classification_counts: dict[str, int] = {}
     opened_profiles = 0
     top1_saved = 0
+    full_judge_calls = 0
     novelty_counts: dict[str, int] = {}
     reachout_counts: dict[str, int] = {}
     for row in rows:
@@ -161,6 +163,11 @@ def build_recruiter_identity_summary(
         sub = str(row.get("final_subreason", "") or "").strip()
         if sub:
             subreason_counts[sub] = subreason_counts.get(sub, 0) + 1
+        classification = str(row.get("identity_classification", "") or "").strip()
+        if classification:
+            identity_classification_counts[classification] = (
+                identity_classification_counts.get(classification, 0) + 1
+            )
         if row.get("opened_profile"):
             opened_profiles += 1
         novelty = str(row.get("novelty_pressure", "") or "").strip()
@@ -174,11 +181,21 @@ def build_recruiter_identity_summary(
             candidate = top_candidates[0]
             if isinstance(candidate, dict) and candidate.get("already_saved"):
                 top1_saved += 1
+        # full_judge is invoked exactly once per _read_one_plausible_profile_review
+        # attempt whose profile extraction did not fail. Count those to give per-run
+        # visibility into LLM cost exposure (see plan Risks section).
+        reviews = row.get("plausible_profile_reviews", [])
+        if isinstance(reviews, list):
+            for review in reviews:
+                if isinstance(review, dict) and not review.get("extraction_failed"):
+                    full_judge_calls += 1
     return {
         "total_leads": total,
         "action_counts": action_counts,
         "subreason_counts": subreason_counts,
+        "identity_classification_counts": identity_classification_counts,
         "opened_profile_count": opened_profiles,
+        "full_judge_call_count": full_judge_calls,
         "top1_already_saved_count": top1_saved,
         "novelty_counts": novelty_counts,
         "reachout_counts": reachout_counts,

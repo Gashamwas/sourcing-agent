@@ -42,6 +42,108 @@ def test_build_recruiter_identity_summary_counts_actions_and_saved_top_cards():
     assert summary["input_stats"]["processed_leads"] == 2
 
 
+def test_build_recruiter_identity_summary_counts_identity_classification_and_full_judge_calls():
+    rows = [
+        {
+            "final_action": "REJECT",
+            "final_subreason": "no_plausible_profile",
+            "identity_classification": "no_confident_match",
+            "opened_profile": False,
+            "plausible_profile_reviews": [],
+        },
+        {
+            "final_action": "REJECT",
+            "final_subreason": "no_plausible_profile",
+            "identity_classification": "no_confident_match",
+            "opened_profile": False,
+            "plausible_profile_reviews": [],
+        },
+        {
+            "final_action": "REJECT",
+            "final_subreason": "fit_reject",
+            "identity_classification": "single_strong_plausible_profile",
+            "opened_profile": True,
+            "plausible_profile_reviews": [
+                {"rank": 1, "extraction_failed": False},
+            ],
+        },
+        {
+            "final_action": "REJECT",
+            "final_subreason": "fit_reject",
+            "identity_classification": "ambiguity_multi_review",
+            "opened_profile": True,
+            "plausible_profile_reviews": [
+                {"rank": 1, "extraction_failed": False},
+                {"rank": 2, "extraction_failed": False},
+                {"rank": 3, "extraction_failed": False},
+            ],
+        },
+        {
+            "final_action": "REJECT",
+            "final_subreason": "fit_reject",
+            "identity_classification": "single_strong_plausible_profile",
+            "opened_profile": True,
+            "plausible_profile_reviews": [
+                {"rank": 1, "extraction_failed": False},
+            ],
+        },
+    ]
+
+    summary = build_recruiter_identity_summary(rows)
+
+    assert summary["identity_classification_counts"] == {
+        "no_confident_match": 2,
+        "single_strong_plausible_profile": 2,
+        "ambiguity_multi_review": 1,
+    }
+    assert summary["opened_profile_count"] == 3
+    # 0 + 0 + 1 + 3 + 1 = 5 -- matches the on-disk 5-lead recruiter dry-run.
+    assert summary["full_judge_call_count"] == 5
+
+
+def test_build_recruiter_identity_summary_full_judge_excludes_failed_extractions():
+    rows = [
+        {
+            "final_action": "MANUAL_REVIEW",
+            "final_subreason": "tool_failure",
+            "identity_classification": "single_strong_plausible_profile",
+            "opened_profile": True,
+            "plausible_profile_reviews": [
+                {"rank": 1, "extraction_failed": True},
+            ],
+        },
+        {
+            "final_action": "REJECT",
+            "final_subreason": "fit_reject",
+            "identity_classification": "ambiguity_multi_review",
+            "opened_profile": True,
+            "plausible_profile_reviews": [
+                {"rank": 1, "extraction_failed": False},
+                {"rank": 2, "extraction_failed": True},
+            ],
+        },
+    ]
+
+    summary = build_recruiter_identity_summary(rows)
+
+    # Extraction-failed reviews never reach full_judge, so they are not counted.
+    assert summary["full_judge_call_count"] == 1
+
+
+def test_build_recruiter_identity_summary_handles_rows_missing_classification_or_reviews():
+    rows = [
+        # legacy / partial row with no identity_classification and no reviews field
+        {"final_action": "SAVE"},
+        {"final_action": "REJECT", "final_subreason": "fit_reject"},
+    ]
+
+    summary = build_recruiter_identity_summary(rows)
+
+    assert summary["identity_classification_counts"] == {}
+    assert summary["full_judge_call_count"] == 0
+    assert summary["total_leads"] == 2
+
+
 def test_build_recruiter_identity_row_includes_plausible_profile_reviews():
     result = RecruiterIdentityResolution(
         github_username="ada",
