@@ -27,11 +27,11 @@ The loader supports older brief formats as well as the newer structured schema. 
    - GitHub via API-driven search and enrichment
 4. Discover and evaluate candidates in stages:
    - lightweight snippet pass
-   - deeper profile review for promising candidates
+- deeper profile review for promising candidates
 5. Persist canonical candidate/work-unit/runtime state in `runtime_state.sqlite3`.
 6. Rebuild compatibility artifacts and finalize immutable run snapshots.
-7. Update market intelligence from finalized run evidence, optionally with external research.
-8. Optionally draft the next version of the brief from what the run learned.
+7. Update market intelligence from finalized run evidence with external research via Perplexity's API.
+8. Draft the next version of the brief from what the run learned.
 
 ```mermaid
 flowchart LR
