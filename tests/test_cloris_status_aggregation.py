@@ -43,7 +43,7 @@ def _build_state_dir(state_root: Path, source: str, key: str) -> Path:
 def test_aggregate_empty_state_root(tmp_path: Path) -> None:
     response = aggregate_status(tmp_path)
 
-    assert response.slice == "v0-shell-slice-2"
+    assert response.slice == "v0-shell-slice-4"
     assert response.entries == []
 
 
@@ -52,7 +52,7 @@ def test_aggregate_state_dir_without_db(tmp_path: Path) -> None:
 
     response = aggregate_status(tmp_path)
 
-    assert response.slice == "v0-shell-slice-2"
+    assert response.slice == "v0-shell-slice-4"
     assert len(response.entries) == 1
 
     entry = response.entries[0]
@@ -168,3 +168,214 @@ def test_aggregator_handles_corrupt_db_gracefully(tmp_path: Path) -> None:
     assert entry.runtime_state_present is True
     assert entry.latest_run is None
     assert entry.brief_id_from_run is None
+
+
+# --- Slice 4: enriched StateDirEntry + linkedin_resumable -----------------
+
+
+import json
+import subprocess
+import sys
+
+from cloris.control_plane import linkedin_resumable
+from cloris.worker import WORKER_SIDECAR_FILENAME, build_sidecar, write_sidecar
+
+
+def _write_worker_sidecar(state_dir: Path, **overrides) -> Path:
+    """Write a worker.json with sensible defaults plus any overrides.
+
+    Centralizes the build_sidecar plumbing so each Slice-4 test only has
+    to express what it cares about (typically: pid, mode).
+    """
+
+    payload = build_sidecar(
+        source="linkedin",
+        brief_id="brief-4",
+        brief_path=str(state_dir / "brief.json"),
+        output_dir=str(state_dir),
+        mode="fresh",
+        input_mode="concurrent",
+        started_at="2026-04-27T18:00:00+00:00",
+        pid=os.getpid(),
+        run_id=None,
+    )
+    payload.update(overrides)
+    return write_sidecar(state_dir, payload)
+
+
+def test_aggregate_status_slice_tag_bumped(tmp_path: Path) -> None:
+    """Slice 4 bumps the StatusResponse slice literal to v0-shell-slice-4."""
+
+    response = aggregate_status(tmp_path)
+
+    assert response.slice == "v0-shell-slice-4"
+
+
+def test_aggregate_enriches_with_alive_worker_sidecar(tmp_path: Path) -> None:
+    state_dir = _build_state_dir(tmp_path, "linkedin", "alive-key")
+    db_path = state_dir / "runtime_state.sqlite3"
+    store = RuntimeStateStore(db_path)
+    store.start_run(
+        source="linkedin",
+        brief_id="brief-4",
+        output_dir=str(state_dir),
+        mode="fresh",
+        resume_state={"brief_name": "brief-4"},
+    )
+
+    _write_worker_sidecar(state_dir, pid=os.getpid())
+
+    response = aggregate_status(tmp_path)
+
+    assert len(response.entries) == 1
+    entry = response.entries[0]
+    assert entry.worker_json_present is True
+    assert entry.worker_pid == os.getpid()
+    assert entry.worker_alive is True
+    assert entry.worker_state == "alive"
+    assert entry.worker_mode == "fresh"
+    assert entry.worker_input_mode == "concurrent"
+    assert entry.brief_path_from_worker == str(state_dir / "brief.json")
+
+
+def test_aggregate_enriches_with_stale_worker_sidecar_dead_pid(
+    tmp_path: Path,
+) -> None:
+    """A sidecar pointing at a dead PID is classified as stale."""
+
+    state_dir = _build_state_dir(tmp_path, "linkedin", "dead-pid-key")
+
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    child.wait()
+    dead_pid = child.pid
+
+    _write_worker_sidecar(state_dir, pid=dead_pid)
+
+    response = aggregate_status(tmp_path)
+    entry = response.entries[0]
+    assert entry.worker_json_present is True
+    assert entry.worker_pid == dead_pid
+    assert entry.worker_alive is False
+    assert entry.worker_state == "stale"
+
+
+def test_aggregate_enriches_with_stale_worker_sidecar_malformed_pid(
+    tmp_path: Path,
+) -> None:
+    """Sidecar with a non-int pid is classified as stale, pid forwarded as None."""
+
+    state_dir = _build_state_dir(tmp_path, "linkedin", "bad-pid-key")
+    sidecar_path = state_dir / WORKER_SIDECAR_FILENAME
+    sidecar_path.write_text(
+        json.dumps(
+            {
+                "pid": "not-an-int",
+                "source": "linkedin",
+                "brief_id": "brief-4",
+                "brief_path": str(state_dir / "brief.json"),
+                "output_dir": str(state_dir),
+                "run_id": None,
+                "started_at": "2026-04-27T18:00:00+00:00",
+                "heartbeat_at": "2026-04-27T18:00:00+00:00",
+                "mode": "fresh",
+                "input_mode": "concurrent",
+                "launcher_version": "cloris-v0-slice-4",
+            },
+            indent=2,
+            sort_keys=True,
+        )
+    )
+
+    response = aggregate_status(tmp_path)
+    entry = response.entries[0]
+    assert entry.worker_json_present is True
+    assert entry.worker_pid is None
+    assert entry.worker_alive is None
+    assert entry.worker_state == "stale"
+
+
+def test_aggregate_missing_worker_sidecar_classified_as_missing(
+    tmp_path: Path,
+) -> None:
+    """No worker.json means worker_state == 'missing' and worker_* defaults hold."""
+
+    _build_state_dir(tmp_path, "linkedin", "missing-key")
+
+    response = aggregate_status(tmp_path)
+    entry = response.entries[0]
+    assert entry.worker_state == "missing"
+    assert entry.worker_json_present is False
+    assert entry.worker_pid is None
+    assert entry.worker_alive is None
+    assert entry.worker_mode is None
+    assert entry.worker_input_mode is None
+    assert entry.brief_path_from_worker is None
+
+
+def test_linkedin_resumable_pending_strings(tmp_path: Path) -> None:
+    state_dir = _build_state_dir(tmp_path, "linkedin", "queued-key")
+    (state_dir / "progress.json").write_text(
+        json.dumps({"strings": [{"id": 1, "status": "queued"}]})
+    )
+
+    assert linkedin_resumable(state_dir) is True
+
+
+def test_linkedin_resumable_pending_block_ids(tmp_path: Path) -> None:
+    state_dir = _build_state_dir(tmp_path, "linkedin", "pending-blocks-key")
+    (state_dir / "progress.json").write_text(
+        json.dumps({"pending_block_string_ids": [1, 2, 3]})
+    )
+
+    assert linkedin_resumable(state_dir) is True
+
+
+def test_linkedin_resumable_no_pending_work(tmp_path: Path) -> None:
+    state_dir = _build_state_dir(tmp_path, "linkedin", "done-key")
+    (state_dir / "progress.json").write_text(
+        json.dumps(
+            {
+                "strings": [
+                    {"id": 1, "status": "done"},
+                    {"id": 2, "status": "done"},
+                ]
+            }
+        )
+    )
+
+    assert linkedin_resumable(state_dir) is False
+
+
+def test_linkedin_resumable_missing_progress_json_returns_none(
+    tmp_path: Path,
+) -> None:
+    state_dir = _build_state_dir(tmp_path, "linkedin", "no-progress-key")
+
+    assert linkedin_resumable(state_dir) is None
+
+
+def test_linkedin_resumable_malformed_returns_none(tmp_path: Path) -> None:
+    state_dir = _build_state_dir(tmp_path, "linkedin", "malformed-progress-key")
+    (state_dir / "progress.json").write_bytes(b"not json")
+
+    assert linkedin_resumable(state_dir) is None
+
+
+def test_aggregate_resumable_populated_for_linkedin_only(tmp_path: Path) -> None:
+    """LinkedIn entries get resumable from progress.json; GitHub entries are None."""
+
+    li_dir = _build_state_dir(tmp_path, "linkedin", "li-resumable-key")
+    (li_dir / "progress.json").write_text(
+        json.dumps({"strings": [{"id": 1, "status": "queued"}]})
+    )
+
+    gh_dir = _build_state_dir(tmp_path, "github", "gh-key")
+    (gh_dir / "progress.json").write_text(
+        json.dumps({"strings": [{"id": 1, "status": "queued"}]})
+    )
+
+    response = aggregate_status(tmp_path)
+    by_source = {entry.source: entry for entry in response.entries}
+
+    assert by_source["linkedin"].resumable is True
+    assert by_source["github"].resumable is None

@@ -1,4 +1,4 @@
-"""Cloris detached LinkedIn worker (Slice 3).
+"""Cloris detached LinkedIn worker.
 
 Exec-replace entrypoint that the API process spawns via
 ``subprocess.Popen([sys.executable, "-m", "cloris.worker", ...])``. The worker
@@ -13,13 +13,17 @@ This module is wrapper code only:
 - It does not write canonical SQLite state; the orchestrator does.
 - It owns ``worker.json`` as a Cloris-only sidecar (not a runtime-state record).
 
-Slice 3 deliberately:
+Slice 4 surface (current):
 
-- Sets ``heartbeat_at == started_at`` once and never updates it.
+- Sets ``heartbeat_at == started_at`` once and never updates it (no live
+  heartbeat updater yet).
 - Refuses ``--input-mode away`` at the wrapper boundary.
-- Exposes ``--mode {fresh}`` only; ``--resume`` is wired in
-  :func:`build_session_orchestrator_argv` for Slice 4 reuse but not surfaced
-  on the worker CLI yet.
+- Exposes ``--mode {fresh, resume}``. ``--mode resume`` threads ``--resume``
+  into the spawned ``linkedin.session_orchestrator`` argv via
+  :func:`build_session_orchestrator_argv`; the sidecar's ``mode`` field
+  reflects the truth (``"fresh"`` or ``"resume"``).
+- ``LAUNCHER_VERSION`` advertises ``"cloris-v0-slice-4"`` so reconciliation
+  against older sidecars stays legible.
 
 Module-level seams (``_now`` and ``_exec``) exist so tests can monkeypatch
 them without ever spawning a real subprocess or replacing the test process.
@@ -37,7 +41,7 @@ from typing import NoReturn, Sequence
 
 
 WORKER_SIDECAR_FILENAME = "worker.json"
-LAUNCHER_VERSION = "cloris-v0-slice-3"
+LAUNCHER_VERSION = "cloris-v0-slice-4"
 
 
 class BriefPathNotFoundError(Exception):
@@ -259,9 +263,9 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mode",
-        choices=["fresh"],
+        choices=["fresh", "resume"],
         default="fresh",
-        help="Slice 3 only supports fresh launches; resume is wired in Slice 4.",
+        help="fresh = new run; resume = continue an interrupted run.",
     )
     return parser
 
@@ -303,6 +307,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         brief_path=args.brief,
         state_dir=str(state_dir),
         input_mode=args.input_mode,
+        resume=(args.mode == "resume"),
     )
     _exec(argv_to_exec)
     return 0

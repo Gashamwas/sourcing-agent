@@ -75,7 +75,7 @@ def test_build_sidecar_field_contract() -> None:
     assert payload["started_at"] == "2026-04-27T18:00:00+00:00"
     assert payload["heartbeat_at"] == payload["started_at"]
     assert payload["launcher_version"] == LAUNCHER_VERSION
-    assert payload["launcher_version"] == "cloris-v0-slice-3"
+    assert payload["launcher_version"] == "cloris-v0-slice-4"
     assert payload["run_id"] is None
 
 
@@ -208,7 +208,7 @@ def test_worker_main_writes_sidecar_then_execs(
     assert payload["input_mode"] == "concurrent"
     assert payload["started_at"] == frozen_iso
     assert payload["heartbeat_at"] == frozen_iso
-    assert payload["launcher_version"] == "cloris-v0-slice-3"
+    assert payload["launcher_version"] == "cloris-v0-slice-4"
     assert payload["run_id"] is None
     assert payload["brief_path"] == str(brief)
     assert payload["output_dir"] == str(tmp_path)
@@ -233,3 +233,94 @@ def test_worker_main_rejects_input_mode_away(tmp_path: Path) -> None:
         main(["--brief", "/tmp/x", "--brief-id", "x", "--input-mode", "away"])
 
     assert exc_info.value.code != 0
+
+
+# --- Slice 4: --mode resume + LAUNCHER_VERSION bump ---------------------
+
+
+def test_launcher_version_constant_is_slice_4() -> None:
+    """Slice 4 bumps LAUNCHER_VERSION so reconciliation against older sidecars
+    can distinguish slice-3 vs slice-4 worker writes."""
+
+    assert worker_mod.LAUNCHER_VERSION == "cloris-v0-slice-4"
+
+
+def test_worker_main_resume_mode_writes_sidecar_with_mode_resume_and_passes_resume(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--mode resume threads --resume into the orchestrator argv exactly once
+    and the sidecar truthfully records mode == 'resume'."""
+
+    brief = tmp_path / "brief.json"
+    brief.write_text(json.dumps({"id": "brief-x"}))
+
+    captured_argv: list[list[str]] = []
+
+    def recorder(argv: list[str]) -> None:
+        captured_argv.append(list(argv))
+
+    monkeypatch.setattr(worker_mod, "_exec", recorder)
+    monkeypatch.setattr(worker_mod, "_now", lambda: "2026-04-27T18:00:00+00:00")
+
+    rc = main(
+        [
+            "--brief",
+            str(brief),
+            "--brief-id",
+            "x",
+            "--state-dir",
+            str(tmp_path),
+            "--mode",
+            "resume",
+        ]
+    )
+    assert rc == 0
+
+    sidecar_path = tmp_path / WORKER_SIDECAR_FILENAME
+    payload = json.loads(sidecar_path.read_text())
+    assert payload["mode"] == "resume"
+    assert payload["launcher_version"] == "cloris-v0-slice-4"
+
+    assert len(captured_argv) == 1
+    argv = captured_argv[0]
+    assert argv.count("--resume") == 1
+
+
+def test_worker_main_default_mode_is_fresh_after_slice_4_bump(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Default --mode stays 'fresh' after the slice-4 bump and --resume is
+    NOT threaded into the orchestrator argv."""
+
+    brief = tmp_path / "brief.json"
+    brief.write_text(json.dumps({"id": "brief-x"}))
+
+    captured_argv: list[list[str]] = []
+
+    def recorder(argv: list[str]) -> None:
+        captured_argv.append(list(argv))
+
+    monkeypatch.setattr(worker_mod, "_exec", recorder)
+    monkeypatch.setattr(worker_mod, "_now", lambda: "2026-04-27T18:00:00+00:00")
+
+    rc = main(
+        [
+            "--brief",
+            str(brief),
+            "--brief-id",
+            "x",
+            "--state-dir",
+            str(tmp_path),
+        ]
+    )
+    assert rc == 0
+
+    sidecar_path = tmp_path / WORKER_SIDECAR_FILENAME
+    payload = json.loads(sidecar_path.read_text())
+    assert payload["mode"] == "fresh"
+
+    assert len(captured_argv) == 1
+    argv = captured_argv[0]
+    assert "--resume" not in argv
