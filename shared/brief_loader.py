@@ -11,7 +11,9 @@ stored as Brief._new_brief.
 """
 
 from __future__ import annotations
+import copy
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
@@ -23,6 +25,45 @@ from shared.retrieval_design import (
 )
 
 KIT_BASE_URL = "https://search-kit-library.vercel.app/kit"
+
+logger = logging.getLogger(__name__)
+
+
+def _detach(value: Any) -> Any:
+    """Return a deep copy of a calibration mirror value.
+
+    Used at the compat-Brief construction site so the compat mirror cannot
+    share mutable list/dataclass state with the structured `_new_brief`.
+    """
+    return copy.deepcopy(value)
+
+# Stage-0 calibration validation: which V2 fields trigger a warning when missing.
+# Stage 2 (deferred) will turn these into hard failures. Senior-role fields are
+# only required when the brief is_senior_role(); they are checked separately.
+_V2_CALIBRATION_REQUIRED_LIST_FIELDS = (
+    "domain_verbs",
+    "domain_depth_objects",
+    "transferability_examples",
+    "canonical_framework_patterns",
+    "canonical_company_patterns",
+    "canonical_title_patterns",
+    "canonical_broad_patterns",
+    "edge_case_patterns",
+    "edge_case_company_patterns",
+    "term_blacklist_categories",
+    "abbreviation_collisions",
+    "example_compounds",
+)
+_V2_CALIBRATION_REQUIRED_STR_FIELDS = (
+    "sequencing_heuristics",
+)
+_V2_CALIBRATION_SENIOR_LIST_FIELDS = (
+    "senior_role_titles",
+    "senior_role_paradigms",
+)
+_V2_CALIBRATION_SENIOR_STR_FIELDS = (
+    "senior_role_function_name",
+)
 
 
 def _ensure_valid_retrieval_design(
@@ -76,6 +117,25 @@ class Brief:
     additional_search_terms: list[str] = field(default_factory=list)
     retrieval_design: dict = field(default_factory=dict)
     raw: dict = field(default_factory=dict)
+    # --- Vertical-agnostic calibration mirror (Slice 1) ---
+    # These fields mirror strategy-relevant calibration vocabulary from the
+    # structured V2 brief so consumers like linkedin/strategy.py can read them
+    # without spelunking _new_brief. Senior-role fields stay schema-only and
+    # are NOT mirrored here. All defaults are vertical-agnostic empties.
+    domain_verbs: list[str] = field(default_factory=list)
+    domain_depth_objects: list[str] = field(default_factory=list)
+    transferability_examples: list[Any] = field(default_factory=list)
+    canonical_framework_patterns: list[str] = field(default_factory=list)
+    canonical_company_patterns: list[str] = field(default_factory=list)
+    canonical_title_patterns: list[str] = field(default_factory=list)
+    canonical_broad_patterns: list[str] = field(default_factory=list)
+    edge_case_patterns: list[str] = field(default_factory=list)
+    edge_case_company_patterns: list[str] = field(default_factory=list)
+    sequencing_heuristics: str = ""
+    term_blacklist_categories: list[Any] = field(default_factory=list)
+    abbreviation_collisions: list[Any] = field(default_factory=list)
+    example_compounds: list[Any] = field(default_factory=list)
+    domain_lane_hints: list[Any] = field(default_factory=list)
     # V2 brief schema object (set when loading a V2 brief)
     _new_brief: Any = field(default=None, repr=False)
 
@@ -108,7 +168,8 @@ def _load_v2_brief(raw: dict) -> Brief:
     """Load a V2 brief: create the new brief_schema.Brief AND map to old Brief for compat."""
     from shared.brief_schema import Brief as NewBrief, CapabilityArea, DepthDistinction, \
         NonFitPattern, EmployerSignalRule, FacialCalibration, BiasControls, MarketDensity, \
-        PostSaveModifier
+        PostSaveModifier, TransferabilityExample, BlacklistCategory, AbbreviationCollision, \
+        ExampleCompound, DomainLaneHint
 
     # --- Build the new brief_schema.Brief ---
     # Normalize v3.1 field names: merge core_areas + differentiator_areas → capability_areas
@@ -170,6 +231,59 @@ def _load_v2_brief(raw: dict) -> Brief:
             signals=psm.get("signals", []),
         ) for psm in raw.get("post_save_modifiers", [])
     ]
+
+    # --- Vertical-agnostic calibration vocabulary (Slice 1) ---
+    # Parse the new V2 calibration fields once so we can hydrate both the
+    # structured _new_brief and the compat Brief without drift.
+    domain_verbs = list(raw.get("domain_verbs", []))
+    domain_depth_objects = list(raw.get("domain_depth_objects", []))
+    transferability_examples = [
+        TransferabilityExample(
+            result=te.get("result", ""),
+            source_context=te.get("source_context", ""),
+            target_context=te.get("target_context", ""),
+            rationale=te.get("rationale", ""),
+        ) for te in raw.get("transferability_examples", [])
+    ]
+    canonical_framework_patterns = list(raw.get("canonical_framework_patterns", []))
+    canonical_company_patterns = list(raw.get("canonical_company_patterns", []))
+    canonical_title_patterns = list(raw.get("canonical_title_patterns", []))
+    canonical_broad_patterns = list(raw.get("canonical_broad_patterns", []))
+    edge_case_patterns = list(raw.get("edge_case_patterns", []))
+    edge_case_company_patterns = list(raw.get("edge_case_company_patterns", []))
+    sequencing_heuristics = raw.get("sequencing_heuristics", "") or ""
+    term_blacklist_categories = [
+        BlacklistCategory(
+            label=bc.get("label", ""),
+            rationale=bc.get("rationale", ""),
+            terms=list(bc.get("terms", [])),
+        ) for bc in raw.get("term_blacklist_categories", [])
+    ]
+    abbreviation_collisions = [
+        AbbreviationCollision(
+            abbreviation=ac.get("abbreviation", ""),
+            expansion=ac.get("expansion", ""),
+            standalone_allowed=bool(ac.get("standalone_allowed", False)),
+            note=ac.get("note", ""),
+        ) for ac in raw.get("abbreviation_collisions", [])
+    ]
+    example_compounds = [
+        ExampleCompound(
+            boolean=ec.get("boolean", ""),
+            purpose=ec.get("purpose", ""),
+            novelty_bucket=ec.get("novelty_bucket", ""),
+        ) for ec in raw.get("example_compounds", [])
+    ]
+    domain_lane_hints = [
+        DomainLaneHint(
+            lane=dl.get("lane", ""),
+            patterns=list(dl.get("patterns", [])),
+        ) for dl in raw.get("domain_lane_hints", [])
+    ]
+    senior_role_titles = list(raw.get("senior_role_titles", []))
+    senior_role_paradigms = list(raw.get("senior_role_paradigms", []))
+    senior_role_function_name = raw.get("senior_role_function_name", "") or ""
+
     explicit_retrieval_design = raw.get("retrieval_design")
     retrieval_design = retrieval_design_from_payload(
         explicit_retrieval_design,
@@ -220,6 +334,23 @@ def _load_v2_brief(raw: dict) -> Brief:
         post_save_modifiers=post_save_modifiers,
         additional_search_terms=additional_search_terms,
         retrieval_design=retrieval_design,
+        domain_verbs=domain_verbs,
+        domain_depth_objects=domain_depth_objects,
+        transferability_examples=transferability_examples,
+        canonical_framework_patterns=canonical_framework_patterns,
+        canonical_company_patterns=canonical_company_patterns,
+        canonical_title_patterns=canonical_title_patterns,
+        canonical_broad_patterns=canonical_broad_patterns,
+        edge_case_patterns=edge_case_patterns,
+        edge_case_company_patterns=edge_case_company_patterns,
+        sequencing_heuristics=sequencing_heuristics,
+        term_blacklist_categories=term_blacklist_categories,
+        abbreviation_collisions=abbreviation_collisions,
+        example_compounds=example_compounds,
+        domain_lane_hints=domain_lane_hints,
+        senior_role_titles=senior_role_titles,
+        senior_role_paradigms=senior_role_paradigms,
+        senior_role_function_name=senior_role_function_name,
         version=raw.get("version", "2.0"),
         author=raw.get("author", ""),
         notes=raw.get("notes", ""),
@@ -302,10 +433,57 @@ def _load_v2_brief(raw: dict) -> Brief:
             for ca in new_brief.capability_areas
             if ca.key_terms
         },
+        domain_verbs=_detach(domain_verbs),
+        domain_depth_objects=_detach(domain_depth_objects),
+        transferability_examples=_detach(transferability_examples),
+        canonical_framework_patterns=_detach(canonical_framework_patterns),
+        canonical_company_patterns=_detach(canonical_company_patterns),
+        canonical_title_patterns=_detach(canonical_title_patterns),
+        canonical_broad_patterns=_detach(canonical_broad_patterns),
+        edge_case_patterns=_detach(edge_case_patterns),
+        edge_case_company_patterns=_detach(edge_case_company_patterns),
+        # sequencing_heuristics is an immutable str — no detachment needed.
+        sequencing_heuristics=sequencing_heuristics,
+        term_blacklist_categories=_detach(term_blacklist_categories),
+        abbreviation_collisions=_detach(abbreviation_collisions),
+        example_compounds=_detach(example_compounds),
+        domain_lane_hints=_detach(domain_lane_hints),
         raw=raw,
         _new_brief=new_brief,
     )
+    _validate_v2_calibration(new_brief, old_brief.id)
     return old_brief
+
+
+def _validate_v2_calibration(new_brief: Any, brief_id: str) -> None:
+    """Stage-0 calibration validator: emits a single summary warning per V2 brief.
+
+    Fires only on V2 briefs (this helper is only called from `_load_v2_brief`).
+    Stage-2 (deferred per spec) will turn missing fields into hard failures.
+    Legacy/old-format briefs never reach this code path.
+
+    Senior-role fields are only required when `is_senior_role()` is true.
+    """
+    missing: list[str] = []
+    for field_name in _V2_CALIBRATION_REQUIRED_LIST_FIELDS:
+        if not getattr(new_brief, field_name, None):
+            missing.append(field_name)
+    for field_name in _V2_CALIBRATION_REQUIRED_STR_FIELDS:
+        if not getattr(new_brief, field_name, ""):
+            missing.append(field_name)
+    if new_brief.is_senior_role():
+        for field_name in _V2_CALIBRATION_SENIOR_LIST_FIELDS:
+            if not getattr(new_brief, field_name, None):
+                missing.append(field_name)
+        for field_name in _V2_CALIBRATION_SENIOR_STR_FIELDS:
+            if not getattr(new_brief, field_name, ""):
+                missing.append(field_name)
+    if missing:
+        logger.warning(
+            "V2 brief %r is missing calibration fields (Stage 0 warning, will hard-fail in Stage 2): %s",
+            brief_id,
+            ", ".join(missing),
+        )
 
 
 def normalize_brief(raw: dict) -> Brief:

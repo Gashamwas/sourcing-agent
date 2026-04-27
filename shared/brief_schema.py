@@ -118,6 +118,63 @@ class BiasControls:
     parse_failure_alarm_rate: float = 0.03  # Flag if parse failures exceed this % of evaluations
 
 
+# ---------------------------------------------------------------------------
+# Vertical-agnostic calibration vocabulary (Slice 1).
+#
+# These dataclasses are intentionally shape-only containers. They do not encode
+# any vertical taxonomy. A brief author populates them; consumers (judgment
+# templates, strategy planner, search memory) read them. Slice 1 only lands the
+# schema and rendering helpers — Slice 2 wires consumers to read from these.
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class TransferabilityExample:
+    """A worked example showing whether one context's experience transfers to another."""
+    result: str                  # "transfers" | "does_not_transfer"
+    source_context: str          # The candidate's actual experience context
+    target_context: str          # The role's target context
+    rationale: str               # Why it does or does not transfer
+
+
+@dataclass
+class BlacklistCategory:
+    """A category of terms that should be down-weighted or excluded in search planning."""
+    label: str                              # Short human label for the category
+    rationale: str                          # Why these terms cause noise
+    terms: list[str] = field(default_factory=list)
+
+
+@dataclass
+class AbbreviationCollision:
+    """An abbreviation that collides with unrelated meanings outside this role's domain."""
+    abbreviation: str            # e.g. "P&A"
+    expansion: str               # The intended expansion in this role's domain
+    standalone_allowed: bool = False  # Whether the abbreviation alone is enough signal
+    note: str = ""               # Optional handling note (geography, pairing rules, etc.)
+
+
+@dataclass
+class ExampleCompound:
+    """A worked Boolean compound used as a planner exemplar."""
+    boolean: str                 # The Boolean string itself
+    purpose: str                 # What this string is meant to retrieve (broad recall, edge case, etc.)
+    novelty_bucket: str = ""     # Optional explicit novelty bucket: "canonical" | "edge_case" | etc.
+
+
+@dataclass
+class DomainLaneHint:
+    """An explicit lane label and the patterns that map onto that lane.
+
+    Used for search-memory normalization, not strategy classification. Strategy
+    already annotates strings with `family_key` / `novelty_bucket` / `domain_lane`;
+    these hints exist so search memory can normalize explicit metadata rather
+    than re-inferring lanes from hardcoded vocabulary.
+    """
+    lane: str                                # Canonical lane label (e.g. "distribution")
+    patterns: list[str] = field(default_factory=list)  # Patterns that should map onto this lane
+
+
 @dataclass
 class Brief:
     """
@@ -170,6 +227,32 @@ class Brief:
     post_save_modifiers: list[PostSaveModifier] = field(default_factory=list)
     additional_search_terms: list[str] = field(default_factory=list)
     retrieval_design: RetrievalDesign = field(default_factory=RetrievalDesign)
+
+    # --- Vertical-agnostic calibration vocabulary (Slice 1) ---
+    # These fields move domain-specific recruiting vocabulary out of code and
+    # into the brief. They are inert until Slice 2 wires consumers to read
+    # them; until then, populated values render through helpers below but are
+    # not yet consumed by judgment templates / strategy / search memory.
+    domain_verbs: list[str] = field(default_factory=list)
+    domain_depth_objects: list[str] = field(default_factory=list)
+    transferability_examples: list[TransferabilityExample] = field(default_factory=list)
+
+    canonical_framework_patterns: list[str] = field(default_factory=list)
+    canonical_company_patterns: list[str] = field(default_factory=list)
+    canonical_title_patterns: list[str] = field(default_factory=list)
+    canonical_broad_patterns: list[str] = field(default_factory=list)
+    edge_case_patterns: list[str] = field(default_factory=list)
+    edge_case_company_patterns: list[str] = field(default_factory=list)
+
+    sequencing_heuristics: str = ""
+    term_blacklist_categories: list[BlacklistCategory] = field(default_factory=list)
+    abbreviation_collisions: list[AbbreviationCollision] = field(default_factory=list)
+    example_compounds: list[ExampleCompound] = field(default_factory=list)
+    domain_lane_hints: list[DomainLaneHint] = field(default_factory=list)
+
+    senior_role_titles: list[str] = field(default_factory=list)
+    senior_role_paradigms: list[str] = field(default_factory=list)
+    senior_role_function_name: str = ""
 
     # --- Metadata ---
     version: str = "1.0"
@@ -577,3 +660,114 @@ If YES to all three: Override to INFERENTIAL_SAVE with confidence 0.45-0.50. The
                 f"score toward the TOP of the confidence range for areas ranked 1-{top} and toward the BOTTOM for area #{n}. "
                 f"Example: ADJACENT to area #1 → 0.65-0.75; ADJACENT to area #{n} → 0.60-0.65. "
                 f"Never score below the range floor regardless of area rank.")
+
+    # ------------------------------------------------------------------
+    # Vertical-agnostic calibration rendering helpers (Slice 1).
+    #
+    # These helpers are inert until Slice 2 — no judgment template, strategy
+    # prompt, or search-memory path calls them yet. They exist so the schema
+    # provides a stable rendering surface that consumers can later consume.
+    # All helpers return "" when their underlying field is empty so they can
+    # be safely interpolated into prompts without producing dangling headers.
+    # ------------------------------------------------------------------
+
+    def domain_verbs_block(self) -> str:
+        """Comma-separated list of domain verbs; empty string when none."""
+        if not self.domain_verbs:
+            return ""
+        return ", ".join(self.domain_verbs)
+
+    def domain_depth_objects_block(self) -> str:
+        """Bulleted list of objects that signal depth in this domain."""
+        if not self.domain_depth_objects:
+            return ""
+        return "\n".join(f"- {obj}" for obj in self.domain_depth_objects)
+
+    def transferability_examples_block(self, result: str | None = None) -> str:
+        """Render transferability examples, optionally filtered by result.
+
+        Args:
+            result: When set to "transfers" or "does_not_transfer", only examples
+                with that ``result`` value are rendered. When ``None``, every
+                example is rendered with its result label.
+        """
+        if not self.transferability_examples:
+            return ""
+        examples = self.transferability_examples
+        if result is not None:
+            examples = [ex for ex in examples if ex.result == result]
+        if not examples:
+            return ""
+        lines: list[str] = []
+        for ex in examples:
+            if result is None:
+                header = f"- [{ex.result}] {ex.source_context} → {ex.target_context}"
+            else:
+                header = f"- {ex.source_context} → {ex.target_context}"
+            lines.append(header)
+            if ex.rationale:
+                lines.append(f"  Rationale: {ex.rationale}")
+        return "\n".join(lines)
+
+    def term_blacklist_block(self) -> str:
+        """Render term-blacklist categories as a labeled bullet list."""
+        if not self.term_blacklist_categories:
+            return ""
+        lines: list[str] = []
+        for cat in self.term_blacklist_categories:
+            terms = ", ".join(cat.terms) if cat.terms else ""
+            header = f"- {cat.label}: {cat.rationale}" if cat.rationale else f"- {cat.label}"
+            lines.append(header)
+            if terms:
+                lines.append(f"  Terms: {terms}")
+        return "\n".join(lines)
+
+    def abbreviation_collisions_block(self) -> str:
+        """Render abbreviation collisions as a bullet list with handling guidance."""
+        if not self.abbreviation_collisions:
+            return ""
+        lines: list[str] = []
+        for ab in self.abbreviation_collisions:
+            standalone = "standalone allowed" if ab.standalone_allowed else "pair with expansion"
+            line = f"- {ab.abbreviation} → {ab.expansion} ({standalone})"
+            lines.append(line)
+            if ab.note:
+                lines.append(f"  Note: {ab.note}")
+        return "\n".join(lines)
+
+    def example_compounds_block(self) -> str:
+        """Render example Boolean compounds with their purpose / novelty bucket."""
+        if not self.example_compounds:
+            return ""
+        lines: list[str] = []
+        for ex in self.example_compounds:
+            bucket = f" [{ex.novelty_bucket}]" if ex.novelty_bucket else ""
+            lines.append(f"- {ex.purpose}{bucket}: {ex.boolean}")
+        return "\n".join(lines)
+
+    def domain_lane_hints_map(self) -> dict[str, list[str]]:
+        """Lane → patterns mapping for explicit search-memory normalization.
+
+        Returns an empty dict when no hints are configured. Used by search
+        memory to normalize explicit lane metadata, not for strategy
+        classification (strategy already owns novelty/lane assignment upstream).
+        """
+        if not self.domain_lane_hints:
+            return {}
+        return {hint.lane: list(hint.patterns) for hint in self.domain_lane_hints}
+
+    def strategy_pattern_sets(self) -> dict[str, list[str]]:
+        """Pattern sets keyed by role for the strategy planner.
+
+        Returns the canonical/edge-case pattern lists in a single dict so
+        strategy code (Slice 2) can consume them without spelunking individual
+        attributes. All values default to empty lists when unconfigured.
+        """
+        return {
+            "canonical_framework": list(self.canonical_framework_patterns),
+            "canonical_company": list(self.canonical_company_patterns),
+            "canonical_title": list(self.canonical_title_patterns),
+            "canonical_broad": list(self.canonical_broad_patterns),
+            "edge_case": list(self.edge_case_patterns),
+            "edge_case_company": list(self.edge_case_company_patterns),
+        }
