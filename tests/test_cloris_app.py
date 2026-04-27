@@ -1,12 +1,17 @@
-"""Tests for the Cloris app process (Slice 1).
+"""Tests for the Cloris app process (Slices 1 + 2).
 
 Covers:
 
-- ``GET /healthz`` and ``GET /`` HTTP contract via :class:`TestClient`.
+- ``GET /healthz`` and ``GET /`` HTTP contract via :class:`TestClient`
+  (Slice 1, byte-identical here).
 - :func:`cloris.app.run_app` lifecycle with a ``NullWindowLauncher`` and a
   stub ``server_factory``. No real socket is bound and no real window is
   opened; the readiness probe is monkeypatched on
   :mod:`cloris.app`.
+- ``GET /api/status`` JSON contract (Slice 2). The aggregator is monkeypatched
+  on :mod:`cloris.api` (not :mod:`cloris.control_plane`) because the route
+  binds ``aggregate_status`` into the ``cloris.api`` module namespace at
+  import time, which is the symbol the route actually calls.
 """
 
 from __future__ import annotations
@@ -18,8 +23,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 from cloris import __version__
+from cloris import api as cloris_api
 from cloris import app as cloris_app
 from cloris.app import NullWindowLauncher, _resolve_port, create_app, run_app
+from cloris.models import RunSummary, StateDirEntry, StatusResponse
 
 
 def test_healthz_contract() -> None:
@@ -183,3 +190,90 @@ def test_resolve_port_picks_free_port_for_zero_and_passes_through_otherwise() ->
     second_pick = _resolve_port("127.0.0.1", 0)
     assert isinstance(second_pick, int)
     assert second_pick > 0
+
+
+def test_api_status_endpoint_returns_empty_for_empty_state_root(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_aggregate_status() -> StatusResponse:
+        return StatusResponse(slice="v0-shell-slice-2", entries=[])
+
+    monkeypatch.setattr(cloris_api, "aggregate_status", fake_aggregate_status)
+
+    client = TestClient(create_app())
+    response = client.get("/api/status")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/json")
+    assert response.json() == {"slice": "v0-shell-slice-2", "entries": []}
+
+
+def test_api_status_endpoint_serializes_entries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = StatusResponse(
+        slice="v0-shell-slice-2",
+        entries=[
+            StateDirEntry(
+                source="linkedin",
+                state_key="li-key",
+                state_dir="/tmp/state/linkedin/li-key",
+                runtime_state_present=True,
+                latest_run=RunSummary(
+                    id=42,
+                    status="completed",
+                    stop_reason="normal",
+                    mode="fresh",
+                    started_at="2024-01-01T00:00:00+00:00",
+                    ended_at="2024-01-01T00:01:00+00:00",
+                ),
+                brief_id_from_run="brief-li",
+            ),
+            StateDirEntry(
+                source="github",
+                state_key="gh-key",
+                state_dir="/tmp/state/github/gh-key",
+                runtime_state_present=False,
+                latest_run=None,
+                brief_id_from_run=None,
+            ),
+        ],
+    )
+
+    def fake_aggregate_status() -> StatusResponse:
+        return fixture
+
+    monkeypatch.setattr(cloris_api, "aggregate_status", fake_aggregate_status)
+
+    client = TestClient(create_app())
+    response = client.get("/api/status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "slice": "v0-shell-slice-2",
+        "entries": [
+            {
+                "source": "linkedin",
+                "state_key": "li-key",
+                "state_dir": "/tmp/state/linkedin/li-key",
+                "runtime_state_present": True,
+                "latest_run": {
+                    "id": 42,
+                    "status": "completed",
+                    "stop_reason": "normal",
+                    "mode": "fresh",
+                    "started_at": "2024-01-01T00:00:00+00:00",
+                    "ended_at": "2024-01-01T00:01:00+00:00",
+                },
+                "brief_id_from_run": "brief-li",
+            },
+            {
+                "source": "github",
+                "state_key": "gh-key",
+                "state_dir": "/tmp/state/github/gh-key",
+                "runtime_state_present": False,
+                "latest_run": None,
+                "brief_id_from_run": None,
+            },
+        ],
+    }
