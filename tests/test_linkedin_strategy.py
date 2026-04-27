@@ -4,8 +4,21 @@ from pathlib import Path
 from unittest.mock import patch
 
 from shared.brief_loader import load_brief
+from shared.brief_schema import (
+    AbbreviationCollision,
+    BlacklistCategory,
+    DomainLaneHint,
+    ExampleCompound,
+)
 from shared.schemas import BlockReport, SearchString
-from linkedin.strategy import _build_strategy_system, _build_strategy_user, adapt_after_block, form_strategy
+from linkedin.strategy import (
+    _annotate_string_metadata,
+    _build_strategy_system,
+    _build_strategy_user,
+    _opening_priority,
+    adapt_after_block,
+    form_strategy,
+)
 
 
 HEAD_AI_V2_BRIEF_PATH = str(
@@ -14,6 +27,250 @@ HEAD_AI_V2_BRIEF_PATH = str(
 FDE_BRIEF_PATH = str(
     Path(__file__).parent.parent / "config" / "Forward-Deployed-Engineer-NYC" / "brief-forward-deployed-engineer-us-v1.4.json"
 )
+
+
+# Reference calibration vocabulary used to keep the historical strategy tests
+# meaningful now that `_opening_priority` reads its patterns from the compat
+# brief instead of module-level constants. These mirror what the legacy
+# constants used to be so behavioral expectations carry over; new tests below
+# vary them explicitly to assert that the classification is brief-driven.
+_LEGACY_CANONICAL_FRAMEWORK_PATTERNS = (
+    "langgraph", "pydanticai", "dspy", "crewai", "autogen", "semantic kernel",
+    "model context protocol", "mcp", "browser-use", "browser use", "playwright",
+    "litellm", "langsmith", "ragas", "deepeval",
+)
+_LEGACY_CANONICAL_COMPANY_PATTERNS = (
+    "palantir", "scale ai", "snorkel", "anthropic", "openai", "cohere",
+    "cognition", "cursor", "anduril", "dataiku", "datarobot", "c3 ai", "c3.ai",
+)
+_LEGACY_CANONICAL_TITLE_PATTERNS = (
+    "forward deployed", "forward-deployed", "fde", "fdse",
+    "customer engineer", "customer engineering",
+    "solutions engineer", "solutions engineering", "implementation engineer",
+    "implementation engineering", "delivery engineer", "delivery engineering",
+    "field engineer", "field engineering",
+)
+_LEGACY_CANONICAL_BROAD_PATTERNS = (
+    "agentic workflow", "agentic workflows", "agentic system", "agentic systems",
+    "agent orchestration", "tool calling", "function calling",
+)
+_LEGACY_EDGE_CASE_PATTERNS = (
+    "copilot", "co-pilot", "internal copilot", "analyst assistant", "treasury assistant",
+    "research workflow", "research copilot", "investment memo", "investment research",
+    "advisor copilot", "wealth platform", "portfolio analytics", "portfolio construction",
+    "buy side", "buy-side", "sell side", "sell-side", "hedge fund workflow",
+    "client reporting", "trade surveillance", "market surveillance",
+    "collateral workflow", "collateral management", "post trade", "post-trade",
+    "onboarding automation", "regulatory reporting", "regulatory filing",
+    "filing automation", "transaction monitoring", "adverse media", "case management",
+    "claims intake", "claims workflow", "underwriting workbench", "underwriting assistant",
+    "policy review", "model risk", "model governance", "regulatory response",
+    "payment orchestration", "transaction banking", "real-time payments", "fednow",
+    "swift", "cash management", "treasury management", "issuer processing",
+    "merchant risk", "market data workflow", "custody workflow", "portfolio operations",
+    "knowledge management", "knowledge assistant", "intelligent search", "semantic search",
+    "document processing", "document understanding", "document intelligence",
+    "document extraction", "isda", "10-k", "prospectus", "term sheet", "covenant review",
+    "contract analysis", "compliance workflow", "founder", "co-founder", "hands-on cto",
+    "startup cto", "support automation", "developer productivity", "internal tools",
+    "technical discovery", "solution design", "solutions delivery", "requirements gathering",
+    "trusted advisor", "technical consulting", "reference architecture",
+    "reference implementation", "deployment toolkit", "accelerator", "reusable module",
+    "reusable modules", "delivery playbook", "workflow engine", "human in the loop",
+    "human-in-the-loop", "semantic cache", "evaluation harness", "eval harness",
+    "observability", "tracing", "prompt logging", "latency optimization",
+    "cost optimization", "agent routing", "event-driven", "event driven", "temporal",
+    "fastapi",
+)
+_LEGACY_EDGE_CASE_COMPANY_PATTERNS = (
+    "exl", "deloitte", "accenture", "bcg", "bcg x", "mckinsey", "quantumblack",
+    "slalom", "thoughtworks", "epam", "globant", "ci&t", "harvey", "casetext",
+    "ironclad", "robin ai", "evenup", "notion", "glean", "moveworks", "writer",
+    "hebbia", "vellum",
+)
+_LEGACY_EXAMPLE_COMPOUNDS = (
+    ExampleCompound(
+        boolean='("agentic" OR "LLM agent") AND ("financial services" OR "banking" OR "BFSI") AND ("production" OR "deployment" OR "enterprise")',
+        purpose="Broad recall AND-gate combining agentic vocabulary, BFSI domain, and production proof",
+        novelty_bucket="canonical",
+    ),
+    ExampleCompound(
+        boolean='("Axolotl" OR "vLLM" OR "DeepSpeed")',
+        purpose="Precision sniper anchored on builder-only framework names",
+        novelty_bucket="canonical",
+    ),
+    ExampleCompound(
+        boolean='("SWE-bench" OR "MMLU" OR "HumanEval")',
+        purpose="Precision sniper anchored on builder-only benchmark names",
+        novelty_bucket="canonical",
+    ),
+    ExampleCompound(
+        boolean='("Constitutional AI" OR "GRPO")',
+        purpose="Precision sniper anchored on method-specific terms",
+        novelty_bucket="canonical",
+    ),
+    ExampleCompound(
+        boolean='("TRL" OR "PEFT")',
+        purpose="Precision sniper anchored on post-training infrastructure",
+        novelty_bucket="canonical",
+    ),
+)
+_LEGACY_TERM_BLACKLIST_CATEGORIES = (
+    BlacklistCategory(
+        label="Universal infrastructure",
+        rationale="Generic infrastructure tools shared across all software roles",
+        terms=[
+            "PyTorch", "TensorFlow", "JAX", "Keras", "Docker", "Kubernetes",
+            "AWS", "GCP", "Azure", "Spark", "Airflow", "Kafka", "Redis",
+            "PostgreSQL", "MongoDB", "Git", "GitHub", "pandas", "NumPy",
+            "SciPy", "scikit-learn",
+        ],
+    ),
+    BlacklistCategory(
+        label="Universal ML",
+        rationale="ML vocabulary so common it is non-discriminating on LinkedIn",
+        terms=[
+            "machine learning", "deep learning", "neural network",
+            "gradient descent", "backpropagation", "cross-validation",
+            "hyperparameter", "training (alone)", "inference (alone)",
+            "model (alone)", "transformer (alone)", "encoder", "decoder",
+        ],
+    ),
+    BlacklistCategory(
+        label="Generic software",
+        rationale="Generic software-engineering vocabulary present on most engineer profiles",
+        terms=[
+            "CI/CD", "GitHub Actions", "Jenkins", "unit testing", "code review",
+            "API integration", "microservices", "REST", "GraphQL",
+        ],
+    ),
+    BlacklistCategory(
+        label="User tools (not builder tools)",
+        rationale="Names of consumer/user-facing AI products are not builder evidence",
+        terms=[
+            "GitHub Copilot", "Cursor", "ChatGPT", "Claude (product)", "Gemini",
+            "LangChain", "LlamaIndex", "AutoGPT", "BabyAGI",
+        ],
+    ),
+    BlacklistCategory(
+        label="Buzzwords",
+        rationale="Marketing buzzwords are non-discriminating on LinkedIn",
+        terms=[
+            "AI-powered", "intelligent automation", "cutting-edge",
+            "generative AI (alone)", "autonomous (alone)", "automation (alone)",
+            "data-driven", "next-generation",
+        ],
+    ),
+)
+_LEGACY_ABBREVIATION_COLLISIONS = (
+    AbbreviationCollision(
+        abbreviation="IPO",
+        expansion="identity preference optimization",
+        standalone_allowed=False,
+        note="IPO collides with Initial Public Offering",
+    ),
+    AbbreviationCollision(
+        abbreviation="ORM",
+        expansion="outcome reward model",
+        standalone_allowed=False,
+        note="ORM collides with Object-Relational Mapping",
+    ),
+    AbbreviationCollision(
+        abbreviation="CAI",
+        expansion="constitutional AI",
+        standalone_allowed=False,
+        note="CAI has various non-ML meanings",
+    ),
+    AbbreviationCollision(
+        abbreviation="PPO",
+        expansion="proximal policy optimization",
+        standalone_allowed=False,
+        note="PPO collides with Preferred Provider Organization",
+    ),
+    AbbreviationCollision(
+        abbreviation="RLHF",
+        expansion="reinforcement learning from human feedback",
+        standalone_allowed=True,
+        note="No dominant non-ML meaning",
+    ),
+    AbbreviationCollision(
+        abbreviation="DPO",
+        expansion="direct preference optimization",
+        standalone_allowed=False,
+        note="DPO collides with Data Protection Officer in some markets",
+    ),
+)
+_LEGACY_SEQUENCING_HEURISTICS = (
+    "BACKLOAD RL/RLHF STRINGS — place strings anchored primarily to "
+    "RL/RLHF/post-training vocabulary in the SECOND HALF of the execution "
+    "sequence. Front-load strings targeting other capability areas first "
+    "(agentic systems, data quality/evaluation, coding agents, STEM/multimodal, "
+    "embodied AI, general fine-tuning). RL/RLHF strings surface the densest, "
+    "most well-trodden talent pool — they will still run, but later. Thinner "
+    "capability-area pools surface more net-new candidates per string. By the "
+    "time RL strings execute, the adaptation loop will have learned from "
+    "earlier strings' signal/noise patterns."
+)
+_LEGACY_DOMAIN_LANE_HINTS = (
+    DomainLaneHint(lane="capital_markets", patterns=[
+        "capital markets", "post trade", "post-trade", "collateral", "treasury",
+        "market structure", "market data", "trade surveillance", "trading",
+        "sell side", "buy side",
+    ]),
+    DomainLaneHint(lane="risk_compliance", patterns=[
+        "risk", "compliance", "surveillance", "aml", "kyc", "sanctions",
+        "regulatory", "model governance", "model risk", "fraud",
+    ]),
+    DomainLaneHint(lane="asset_management", patterns=[
+        "asset management", "wealth", "portfolio", "investment memo",
+        "investment research", "research copilot", "research workflow",
+        "client reporting", "advisor",
+    ]),
+    DomainLaneHint(lane="insurance", patterns=[
+        "insurance", "actuarial", "underwriting", "claims", "policy",
+        "broker", "carrier",
+    ]),
+    DomainLaneHint(lane="payments", patterns=[
+        "payment", "payments", "payment orchestration", "transaction banking",
+        "real-time payments", "rtp", "fednow", "swift", "cash management",
+        "merchant risk", "issuer processing",
+    ]),
+    DomainLaneHint(lane="document_intelligence", patterns=[
+        "document intelligence", "document understanding", "document extraction",
+        "document processing", "isda", "10-k", "prospectus", "term sheet",
+        "covenant review", "filing automation",
+    ]),
+    DomainLaneHint(lane="bfsi_vendors", patterns=[
+        "fintech", "regtech", "custody", "workflow vendor", "market data",
+        "vendor", "platform",
+    ]),
+)
+
+
+def _hydrate_legacy_calibration(brief):
+    """Populate the compat brief's calibration mirror with the historical AI/BFSI
+    vocabulary so existing strategy tests still exercise the bucket/score paths
+    they were designed for. Production code never mutates these lists; only
+    test fixtures do.
+
+    Slice 2 Commit 2 extends this to also inject the legacy AI vocabulary for
+    the planner-prompt fields (example_compounds, term_blacklist_categories,
+    abbreviation_collisions, sequencing_heuristics). These mirror the strings
+    that were hardcoded in `_build_strategy_system` before the planner-prompt
+    refactor, so existing AI-brief strategy tests keep their behavioral pins.
+    """
+    brief.canonical_framework_patterns = list(_LEGACY_CANONICAL_FRAMEWORK_PATTERNS)
+    brief.canonical_company_patterns = list(_LEGACY_CANONICAL_COMPANY_PATTERNS)
+    brief.canonical_title_patterns = list(_LEGACY_CANONICAL_TITLE_PATTERNS)
+    brief.canonical_broad_patterns = list(_LEGACY_CANONICAL_BROAD_PATTERNS)
+    brief.edge_case_patterns = list(_LEGACY_EDGE_CASE_PATTERNS)
+    brief.edge_case_company_patterns = list(_LEGACY_EDGE_CASE_COMPANY_PATTERNS)
+    brief.domain_lane_hints = list(_LEGACY_DOMAIN_LANE_HINTS)
+    brief.example_compounds = list(_LEGACY_EXAMPLE_COMPOUNDS)
+    brief.term_blacklist_categories = list(_LEGACY_TERM_BLACKLIST_CATEGORIES)
+    brief.abbreviation_collisions = list(_LEGACY_ABBREVIATION_COLLISIONS)
+    brief.sequencing_heuristics = _LEGACY_SEQUENCING_HEURISTICS
+    return brief
 
 
 def test_build_strategy_user_includes_search_family_memory():
@@ -87,7 +344,7 @@ def test_build_strategy_user_strict_seniority_legacy_brief_adds_semantic_guidanc
 
 
 def test_form_strategy_reorders_head_ai_opening_toward_edge_case():
-    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    brief = _hydrate_legacy_calibration(load_brief(HEAD_AI_V2_BRIEF_PATH))
     mock_plan = {
         "architecture": "dragnet",
         "architecture_rationale": "mock",
@@ -153,7 +410,7 @@ def test_form_strategy_reorders_head_ai_opening_toward_edge_case():
 
 
 def test_form_strategy_promotes_market_intel_gap_lanes_ahead_of_cleanup():
-    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    brief = _hydrate_legacy_calibration(load_brief(HEAD_AI_V2_BRIEF_PATH))
     mock_plan = {
         "architecture": "dragnet",
         "architecture_rationale": "mock",
@@ -633,3 +890,206 @@ def test_form_strategy_legacy_brief_can_fallback_to_retrieval_families_when_stri
 
     assert plan.generated_strings
     assert "deployment engineer" in plan.generated_strings[0]["boolean"]
+
+
+# ---------------------------------------------------------------------------
+# Brief-driven _opening_priority / _annotate_string_metadata coverage (Slice 2 Commit 1)
+# ---------------------------------------------------------------------------
+
+
+def test_opening_priority_returns_neutral_when_brief_has_no_calibration_patterns():
+    """With an empty calibration mirror, no string should classify as canonical or
+    edge-case — every input collapses to bucket=1 (neutral / mixed)."""
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+
+    bucket_canonical_ai, _score = _opening_priority(
+        brief,
+        '("LangGraph" OR "DSPy") AND ("OpenAI" OR "Anthropic")',
+        "Frontier framework + frontier company canonical opener.",
+    )
+    bucket_edge, _score = _opening_priority(
+        brief,
+        '("trade surveillance workflow") AND ("agentic")',
+        "Edge-case capital markets workflow population.",
+    )
+    assert bucket_canonical_ai == 1
+    assert bucket_edge == 1
+
+
+def test_opening_priority_classifies_canonical_ai_when_brief_supplies_ai_calibration():
+    """An AI-calibrated brief should mark frontier AI strings as canonical."""
+    brief = _hydrate_legacy_calibration(load_brief(HEAD_AI_V2_BRIEF_PATH))
+
+    bucket, score = _opening_priority(
+        brief,
+        '("LangGraph" OR "DSPy") AND ("OpenAI" OR "Anthropic" OR "Cohere")',
+        "Frontier framework + frontier company canonical opener.",
+    )
+    assert bucket == 2
+    assert score < 0
+
+
+def test_opening_priority_is_brief_driven_for_alternative_vertical():
+    """Construct an alternative vertical (clinical/healthtech). The same
+    'LangGraph' string is no longer canonical because the brief does not list it
+    as such; instead, a clinical edge-case string flips to bucket 0."""
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    brief.canonical_framework_patterns = []
+    brief.canonical_company_patterns = ["epic", "cerner", "athenahealth"]
+    brief.canonical_title_patterns = ["clinical informatics director"]
+    brief.canonical_broad_patterns = []
+    brief.edge_case_patterns = [
+        "telehealth triage",
+        "remote patient monitoring",
+        "clinical decision support",
+    ]
+    brief.edge_case_company_patterns = ["abridge", "nabla", "suki"]
+
+    canonical_bucket, _ = _opening_priority(
+        brief,
+        '("Epic" OR "Cerner") AND ("clinical informatics director")',
+        "Frontier EHR vendor + canonical clinical title.",
+    )
+    edge_bucket, edge_score = _opening_priority(
+        brief,
+        '("telehealth triage" OR "remote patient monitoring") AND ("clinical decision support")',
+        "Edge-case clinical AI population.",
+    )
+    ai_bucket, _ = _opening_priority(
+        brief,
+        '("LangGraph" OR "DSPy") AND ("OpenAI")',
+        "Frontier AI vocabulary that is canonical for the AI brief, but irrelevant here.",
+    )
+    assert canonical_bucket == 2
+    assert edge_bucket == 0
+    assert edge_score > 0
+    assert ai_bucket == 1
+
+
+def test_annotate_string_metadata_reflects_brief_domain_lane_hints_and_canonical_patterns():
+    """`_annotate_string_metadata` should thread the brief through into both
+    novelty_bucket and domain_lane via brief-driven classification."""
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    brief.canonical_framework_patterns = []
+    brief.canonical_company_patterns = []
+    brief.canonical_title_patterns = []
+    brief.canonical_broad_patterns = []
+    brief.edge_case_patterns = ["telehealth triage", "remote patient monitoring"]
+    brief.edge_case_company_patterns = []
+    brief.domain_lane_hints = [
+        DomainLaneHint(
+            lane="clinical_workflows",
+            patterns=["telehealth triage", "remote patient monitoring", "clinical decision support"],
+        ),
+    ]
+
+    annotated = _annotate_string_metadata(
+        brief,
+        {
+            "boolean": '("telehealth triage" OR "remote patient monitoring") AND ("clinical decision support")',
+            "rationale": "Edge-case clinical AI population.",
+        },
+    )
+
+    assert annotated["novelty_bucket"] == "edge_case"
+    assert annotated["domain_lane"] == "clinical_workflows"
+
+
+def test_annotate_string_metadata_uses_general_lane_when_brief_has_no_lane_hints():
+    """When the brief carries no domain_lane_hints, the lane defaults to 'general'."""
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    brief.domain_lane_hints = []
+
+    annotated = _annotate_string_metadata(
+        brief,
+        {
+            "boolean": '("Goldman Sachs") AND ("financial services")',
+            "rationale": "Vertical-agnostic baseline test.",
+        },
+    )
+
+    assert annotated["domain_lane"] == "general"
+
+
+def test_opening_priority_does_not_classify_fde_as_canonical_when_brief_is_empty():
+    """An empty-calibration brief must NOT classify a string containing
+    'FDE' / 'forward deployed engineer' as canonical. Classification is fully
+    brief-driven; with no patterns, every input collapses to neutral (bucket 1,
+    score 0)."""
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    brief.canonical_framework_patterns = []
+    brief.canonical_company_patterns = []
+    brief.canonical_title_patterns = []
+    brief.canonical_broad_patterns = []
+    brief.edge_case_patterns = []
+    brief.edge_case_company_patterns = []
+
+    bucket_fde, score_fde = _opening_priority(
+        brief,
+        '("FDE" OR "forward deployed engineer")',
+        "Forward-deployed canonical title — should NOT classify on an empty brief.",
+    )
+    bucket_phrase, score_phrase = _opening_priority(
+        brief,
+        '("forward deployed") AND ("delivery engineer")',
+        "Forward-deployed phrase — should NOT classify on an empty brief.",
+    )
+
+    assert (bucket_fde, score_fde) == (1, 0)
+    assert (bucket_phrase, score_phrase) == (1, 0)
+
+
+def test_opening_priority_does_not_classify_fde_as_canonical_for_non_ai_vertical():
+    """A non-AI vertical brief (clinical/healthtech) that does NOT mention FDE in
+    any canonical pattern set must NOT classify a string containing 'FDE' or
+    'forward deployed engineer' as canonical."""
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    brief.canonical_framework_patterns = []
+    brief.canonical_company_patterns = ["epic", "cerner", "athenahealth"]
+    brief.canonical_title_patterns = ["clinical informatics director"]
+    brief.canonical_broad_patterns = []
+    brief.edge_case_patterns = ["telehealth triage", "remote patient monitoring"]
+    brief.edge_case_company_patterns = ["abridge", "nabla", "suki"]
+
+    bucket_fde, _score_fde = _opening_priority(
+        brief,
+        '("FDE" OR "forward deployed engineer")',
+        "FDE has no clinical meaning — must not classify here.",
+    )
+    bucket_clinical, _score_clinical = _opening_priority(
+        brief,
+        '("Epic" OR "Cerner") AND ("clinical informatics director")',
+        "Clinical canonical opener anchored in this brief's calibration.",
+    )
+
+    assert bucket_fde == 1
+    assert bucket_clinical == 2
+
+
+def test_opening_priority_classifies_fde_as_canonical_when_brief_lists_it():
+    """Pin: brief-driven path. A brief whose canonical_title_patterns explicitly
+    names 'forward deployed' / 'fde' DOES classify those strings as canonical."""
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    brief.canonical_framework_patterns = []
+    brief.canonical_company_patterns = []
+    brief.canonical_title_patterns = ["forward deployed", "fde"]
+    brief.canonical_broad_patterns = []
+    brief.edge_case_patterns = []
+    brief.edge_case_company_patterns = []
+
+    bucket_phrase, score_phrase = _opening_priority(
+        brief,
+        '("forward deployed engineer")',
+        "Forward-deployed canonical title via brief calibration.",
+    )
+    bucket_acronym, score_acronym = _opening_priority(
+        brief,
+        '("FDE" OR "FDSE")',
+        "FDE acronym via brief calibration.",
+    )
+
+    assert bucket_phrase == 2
+    assert score_phrase < 0
+    assert bucket_acronym == 2
+    assert score_acronym < 0
+

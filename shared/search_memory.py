@@ -5,6 +5,10 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from shared.brief_loader import Brief
 
 
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
@@ -43,228 +47,6 @@ _STOPWORDS = {
     "implement",
     "engineering",
     "engineer",
-    "genai",
-    "generative",
-    "ai",
-    "llm",
-    "rag",
-    "banking",
-    "financial",
-    "services",
-    "bfsi",
-}
-
-_ANCHOR_PHRASES = (
-    "trade surveillance",
-    "market surveillance",
-    "collateral workflow",
-    "collateral management",
-    "model governance",
-    "model risk",
-    "regulatory reporting",
-    "regulatory filing",
-    "regulatory response",
-    "transaction monitoring",
-    "adverse media",
-    "case management",
-    "research copilot",
-    "analyst assistant",
-    "advisor copilot",
-    "treasury assistant",
-    "payment orchestration",
-    "transaction banking",
-    "real-time payments",
-    "cash management",
-    "treasury management",
-    "client reporting",
-    "claims intake",
-    "claims workflow",
-    "underwriting workbench",
-    "underwriting assistant",
-    "portfolio operations",
-    "portfolio analytics",
-    "portfolio construction",
-    "investment memo",
-    "investment research",
-    "onboarding automation",
-    "document intelligence",
-    "document understanding",
-    "document extraction",
-    "compliance workflow",
-    "filing automation",
-    "isda",
-    "10-k",
-    "prospectus",
-    "term sheet",
-    "covenant review",
-    "hedge fund workflow",
-    "buy-side research",
-    "sell-side research",
-    "knowledge management",
-    "intelligent search",
-    "semantic search",
-    "post trade",
-    "post-trade",
-    "capital markets",
-    "market structure",
-    "asset management",
-    "wealth management",
-    "wealth platform",
-    "policy review",
-    "custody workflow",
-    "risk workflow",
-    "aml workflow",
-    "kyc workflow",
-    "sanctions screening",
-)
-
-_BIG_BANK_TERMS = (
-    "goldman",
-    "jpmorgan",
-    "morgan stanley",
-    "barclays",
-    "citi",
-    "citigroup",
-    "bank of america",
-    "bofa",
-    "blackrock",
-    "apollo",
-    "vanguard",
-    "tradeweb",
-    "bloomberg",
-)
-
-_EDGE_CASE_TERMS = (
-    "analyst assistant",
-    "treasury assistant",
-    "research copilot",
-    "investment memo",
-    "investment research",
-    "client reporting",
-    "claims intake",
-    "underwriting",
-    "collateral",
-    "surveillance",
-    "onboarding",
-    "regulatory",
-    "regulatory reporting",
-    "regulatory filing",
-    "transaction monitoring",
-    "adverse media",
-    "case management",
-    "payment orchestration",
-    "transaction banking",
-    "real-time payments",
-    "fednow",
-    "swift",
-    "cash management",
-    "merchant risk",
-    "policy review",
-    "custody",
-    "market data",
-    "model governance",
-    "model risk",
-    "document intelligence",
-    "document understanding",
-    "document extraction",
-    "isda",
-    "prospectus",
-    "term sheet",
-    "covenant review",
-    "advisor copilot",
-    "wealth platform",
-    "portfolio analytics",
-    "hedge fund workflow",
-    "buy-side research",
-    "sell-side research",
-    "founder",
-    "co-founder",
-    "compliance workflow",
-    "knowledge management",
-    "intelligent search",
-    "semantic search",
-)
-
-_DOMAIN_LANE_HINTS: dict[str, tuple[str, ...]] = {
-    "capital_markets": (
-        "capital markets",
-        "post trade",
-        "post-trade",
-        "collateral",
-        "treasury",
-        "market structure",
-        "market data",
-        "trade surveillance",
-        "trading",
-        "sell side",
-        "buy side",
-    ),
-    "risk_compliance": (
-        "risk",
-        "compliance",
-        "surveillance",
-        "aml",
-        "kyc",
-        "sanctions",
-        "regulatory",
-        "model governance",
-        "model risk",
-        "fraud",
-    ),
-    "asset_management": (
-        "asset management",
-        "wealth",
-        "portfolio",
-        "investment memo",
-        "investment research",
-        "research copilot",
-        "research workflow",
-        "client reporting",
-        "advisor",
-    ),
-    "insurance": (
-        "insurance",
-        "actuarial",
-        "underwriting",
-        "claims",
-        "policy",
-        "broker",
-        "carrier",
-    ),
-    "payments": (
-        "payment",
-        "payments",
-        "payment orchestration",
-        "transaction banking",
-        "real-time payments",
-        "rtp",
-        "fednow",
-        "swift",
-        "cash management",
-        "merchant risk",
-        "issuer processing",
-    ),
-    "document_intelligence": (
-        "document intelligence",
-        "document understanding",
-        "document extraction",
-        "document processing",
-        "isda",
-        "10-k",
-        "prospectus",
-        "term sheet",
-        "covenant review",
-        "filing automation",
-    ),
-    "bfsi_vendors": (
-        "fintech",
-        "regtech",
-        "custody",
-        "workflow vendor",
-        "market data",
-        "vendor",
-        "platform",
-    ),
 }
 
 
@@ -273,12 +55,47 @@ def _slugify(value: str) -> str:
     return re.sub(r"_+", "_", text) or "unlabeled_family"
 
 
+def _canonicalize_lane_id(value: str) -> str:
+    """Normalize a domain lane label into the canonical lane-id shape.
+
+    Both the explicit-value path and the brief-hint fallback path in
+    ``infer_domain_lane`` must return the same shape, so this helper is the
+    single normalizer for lane labels (e.g. ``"Capital Markets"`` →
+    ``"capital_markets"``).
+    """
+    return _slugify(value)
+
+
 def _stringify_list(value: list[object]) -> list[str]:
     out: list[str] = []
     for item in value or []:
         text = str(item or "").strip()
         if text:
             out.append(text)
+    return out
+
+
+def _domain_lane_hint_map(brief: "Brief | None") -> dict[str, tuple[str, ...]]:
+    """Build a {lane: (pattern, ...)} map from a brief's domain_lane_hints, if any.
+
+    Lane keys are canonicalized to match the explicit-value path in
+    ``infer_domain_lane``; pattern values stay as raw lowercase strings so
+    substring matching against the boolean/rationale text still works.
+    """
+    if brief is None:
+        return {}
+    hints = getattr(brief, "domain_lane_hints", None) or []
+    out: dict[str, tuple[str, ...]] = {}
+    for hint in hints:
+        lane = str(getattr(hint, "lane", "") or "").strip()
+        patterns = getattr(hint, "patterns", None) or []
+        normalized = tuple(
+            str(pattern).strip().lower()
+            for pattern in patterns
+            if str(pattern).strip()
+        )
+        if lane and normalized:
+            out[_canonicalize_lane_id(lane)] = normalized
     return out
 
 
@@ -301,18 +118,20 @@ def normalize_novelty_bucket(
     novelty_bucket: str | None,
     boolean: str = "",
     rationale: str = "",
+    *,
+    brief: "Brief | None" = None,
 ) -> str:
-    """Normalize to edge_case/canonical, with a lightweight fallback heuristic."""
+    """Normalize an explicit novelty value to ``edge_case``/``canonical``.
+
+    When no explicit value is supplied, fall back to ``"canonical"`` — the
+    vertical-agnostic default. ``boolean`` and ``rationale`` are accepted for
+    signature stability with prior callers and for future brief-aware
+    classification, but are not consulted here.
+    """
     if novelty_bucket:
         value = _slugify(novelty_bucket)
         if value in {"edge_case", "canonical"}:
             return value
-
-    text = f"{boolean} {rationale}".lower()
-    if any(term in text for term in _EDGE_CASE_TERMS):
-        return "edge_case"
-    if any(term in text for term in _BIG_BANK_TERMS):
-        return "canonical"
     return "canonical"
 
 
@@ -320,36 +139,42 @@ def infer_domain_lane(
     domain_lane: str | None,
     boolean: str = "",
     rationale: str = "",
+    *,
+    brief: "Brief | None" = None,
 ) -> str:
-    """Infer the primary domain lane for a string."""
-    if domain_lane:
-        return _slugify(domain_lane)
+    """Infer the primary domain lane for a string.
 
-    text = f"{boolean} {rationale}".lower()
-    for lane, hints in _DOMAIN_LANE_HINTS.items():
-        if any(hint in text for hint in hints):
-            return lane
+    When ``brief`` exposes non-empty ``domain_lane_hints``, those patterns are
+    consulted as a fallback after the explicit ``domain_lane`` value. Otherwise
+    we default to ``"general"`` — the vertical-agnostic baseline.
+    """
+    if domain_lane:
+        return _canonicalize_lane_id(domain_lane)
+
+    lane_hints = _domain_lane_hint_map(brief)
+    if lane_hints:
+        text = f"{boolean} {rationale}".lower()
+        for lane, patterns in lane_hints.items():
+            if any(pattern in text for pattern in patterns):
+                return lane
+
     return "general"
 
 
 def extract_dominant_anchors(text: str, limit: int = 5) -> list[str]:
-    """Extract a compact list of likely anchor phrases/terms from a Boolean string."""
+    """Extract a compact list of likely anchor tokens from a Boolean string.
+
+    Uses generic English tokenization and stopword filtering only; no
+    vertical-coupled phrase pre-pass.
+    """
     lowered = (text or "").lower()
-    anchors: list[str] = []
-    seen: set[str] = set()
-
-    for phrase in _ANCHOR_PHRASES:
-        if phrase in lowered and phrase not in seen:
-            seen.add(phrase)
-            anchors.append(phrase)
-            if len(anchors) >= limit:
-                return anchors
-
     tokens = [
         token for token in _WHITESPACE.split(_NON_ALNUM.sub(" ", lowered))
         if token and token not in _STOPWORDS and len(token) > 2
     ]
     counts = Counter(tokens)
+    anchors: list[str] = []
+    seen: set[str] = set()
     for token, _count in counts.most_common():
         if token in seen:
             continue

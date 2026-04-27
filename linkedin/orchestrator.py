@@ -346,12 +346,14 @@ class Pipeline:
                 "edge_case" if search_string.retrieval_hypothesis_ids or retrieval_recipe.get("applied_hypothesis_ids") else None,
                 search_string.boolean,
                 search_string.name,
+                brief=self.brief_obj,
             )
         if not search_string.domain_lane:
             search_string.domain_lane = infer_domain_lane(
                 (retrieval_recipe.get("target_markets") or [None])[0],
                 search_string.boolean,
                 search_string.name,
+                brief=self.brief_obj,
             )
         if not search_string.retrieval_hypothesis_ids and retrieval_recipe:
             search_string.retrieval_hypothesis_ids = [

@@ -11,7 +11,6 @@ Two main functions:
 
 from __future__ import annotations
 import json
-import re
 import sys
 from shared.schemas import KitString, ExecutionPlan, BlockReport, AdaptationResponse, SearchString
 from shared.llm_clients import opus_llm
@@ -34,198 +33,17 @@ from shared.strict_seniority import (
 )
 
 
-_CANONICAL_FRAMEWORK_PATTERNS = (
-    "langgraph",
-    "pydanticai",
-    "dspy",
-    "crewai",
-    "autogen",
-    "semantic kernel",
-    "model context protocol",
-    "mcp",
-    "browser-use",
-    "browser use",
-    "playwright",
-    "litellm",
-    "langsmith",
-    "ragas",
-    "deepeval",
-)
-
-_CANONICAL_COMPANY_PATTERNS = (
-    "palantir",
-    "scale ai",
-    "snorkel",
-    "anthropic",
-    "openai",
-    "cohere",
-    "cognition",
-    "cursor",
-    "anduril",
-    "dataiku",
-    "datarobot",
-    "c3 ai",
-    "c3.ai",
-)
-
-_CANONICAL_TITLE_PATTERNS = (
-    "forward deployed",
-    "forward-deployed",
-    "customer engineer",
-    "customer engineering",
-    "solutions engineer",
-    "solutions engineering",
-    "implementation engineer",
-    "implementation engineering",
-    "delivery engineer",
-    "delivery engineering",
-    "field engineer",
-    "field engineering",
-)
-
-_CANONICAL_BROAD_PATTERNS = (
-    "agentic workflow",
-    "agentic workflows",
-    "agentic system",
-    "agentic systems",
-    "agent orchestration",
-    "tool calling",
-    "function calling",
-)
-
-_EDGE_CASE_PATTERNS = (
-    "copilot",
-    "co-pilot",
-    "internal copilot",
-    "analyst assistant",
-    "treasury assistant",
-    "research workflow",
-    "research copilot",
-    "investment memo",
-    "investment research",
-    "advisor copilot",
-    "wealth platform",
-    "portfolio analytics",
-    "portfolio construction",
-    "buy side",
-    "buy-side",
-    "sell side",
-    "sell-side",
-    "hedge fund workflow",
-    "client reporting",
-    "trade surveillance",
-    "market surveillance",
-    "collateral workflow",
-    "collateral management",
-    "post trade",
-    "post-trade",
-    "onboarding automation",
-    "regulatory reporting",
-    "regulatory filing",
-    "filing automation",
-    "transaction monitoring",
-    "adverse media",
-    "case management",
-    "claims intake",
-    "claims workflow",
-    "underwriting workbench",
-    "underwriting assistant",
-    "policy review",
-    "model risk",
-    "model governance",
-    "regulatory response",
-    "payment orchestration",
-    "transaction banking",
-    "real-time payments",
-    "fednow",
-    "swift",
-    "cash management",
-    "treasury management",
-    "issuer processing",
-    "merchant risk",
-    "market data workflow",
-    "custody workflow",
-    "portfolio operations",
-    "knowledge management",
-    "knowledge assistant",
-    "intelligent search",
-    "semantic search",
-    "document processing",
-    "document understanding",
-    "document intelligence",
-    "document extraction",
-    "isda",
-    "10-k",
-    "prospectus",
-    "term sheet",
-    "covenant review",
-    "contract analysis",
-    "compliance workflow",
-    "founder",
-    "co-founder",
-    "hands-on cto",
-    "startup cto",
-    "support automation",
-    "developer productivity",
-    "internal tools",
-    "technical discovery",
-    "solution design",
-    "solutions delivery",
-    "requirements gathering",
-    "trusted advisor",
-    "technical consulting",
-    "reference architecture",
-    "reference implementation",
-    "deployment toolkit",
-    "accelerator",
-    "reusable module",
-    "reusable modules",
-    "delivery playbook",
-    "workflow engine",
-    "human in the loop",
-    "human-in-the-loop",
-    "semantic cache",
-    "evaluation harness",
-    "eval harness",
-    "observability",
-    "tracing",
-    "prompt logging",
-    "latency optimization",
-    "cost optimization",
-    "agent routing",
-    "event-driven",
-    "event driven",
-    "temporal",
-    "fastapi",
-)
-
-_EDGE_CASE_COMPANY_PATTERNS = (
-    "exl",
-    "deloitte",
-    "accenture",
-    "bcg",
-    "bcg x",
-    "mckinsey",
-    "quantumblack",
-    "slalom",
-    "thoughtworks",
-    "epam",
-    "globant",
-    "ci&t",
-    "harvey",
-    "casetext",
-    "ironclad",
-    "robin ai",
-    "evenup",
-    "notion",
-    "glean",
-    "moveworks",
-    "writer",
-    "hebbia",
-    "vellum",
-)
-
 _MAX_PROMOTED_EDGE_CASE_GAPS = 3
+
+
+def _iter_brief_patterns(brief: Brief, attr: str) -> tuple[str, ...]:
+    """Return the lowercased non-empty patterns under ``attr`` on the compat brief."""
+    values = getattr(brief, attr, None) or ()
+    return tuple(
+        str(value).strip().lower()
+        for value in values
+        if str(value or "").strip()
+    )
 
 
 def _design_from_brief(brief: Brief) -> RetrievalDesign:
@@ -257,8 +75,13 @@ def _brief_targets_edge_case_opening(brief: Brief) -> bool:
     return any(trigger in haystack for trigger in triggers)
 
 
-def _opening_priority(boolean: str, rationale: str = "") -> tuple[int, int]:
+def _opening_priority(brief: Brief, boolean: str, rationale: str = "") -> tuple[int, int]:
     """Classify how suitable a string is for an edge-case opening sequence.
+
+    The classification draws its vocabulary entirely from the calibration
+    mirror on the compat ``Brief`` (canonical_*_patterns, edge_case_patterns,
+    edge_case_company_patterns). When those mirrors are empty the function
+    degrades to ``(1, 0)`` for every input — neutral / mixed.
 
     Returns (bucket, score):
       bucket 0 = edge-case / adjacent opening string
@@ -267,22 +90,26 @@ def _opening_priority(boolean: str, rationale: str = "") -> tuple[int, int]:
     """
     text = f"{boolean} {rationale}".lower()
 
-    framework_hits = sum(1 for pattern in _CANONICAL_FRAMEWORK_PATTERNS if pattern in text)
-    company_hits = sum(1 for pattern in _CANONICAL_COMPANY_PATTERNS if pattern in text)
-    title_hits = sum(1 for pattern in _CANONICAL_TITLE_PATTERNS if pattern in text)
-    broad_hits = sum(1 for pattern in _CANONICAL_BROAD_PATTERNS if pattern in text)
-    edge_hits = sum(1 for pattern in _EDGE_CASE_PATTERNS if pattern in text)
-    edge_hits += sum(1 for pattern in _EDGE_CASE_COMPANY_PATTERNS if pattern in text)
+    framework_patterns = _iter_brief_patterns(brief, "canonical_framework_patterns")
+    company_patterns = _iter_brief_patterns(brief, "canonical_company_patterns")
+    title_patterns = _iter_brief_patterns(brief, "canonical_title_patterns")
+    broad_patterns = _iter_brief_patterns(brief, "canonical_broad_patterns")
+    edge_patterns = _iter_brief_patterns(brief, "edge_case_patterns")
+    edge_company_patterns = _iter_brief_patterns(brief, "edge_case_company_patterns")
 
-    has_exact_fde = bool(
-        re.search(r"\bforward deployed\b|\bforward-deployed\b|\bfde\b|\bfdse\b", text)
-    )
+    framework_hits = sum(1 for pattern in framework_patterns if pattern in text)
+    company_hits = sum(1 for pattern in company_patterns if pattern in text)
+    title_hits = sum(1 for pattern in title_patterns if pattern in text)
+    broad_hits = sum(1 for pattern in broad_patterns if pattern in text)
+    edge_hits = sum(1 for pattern in edge_patterns if pattern in text)
+    edge_hits += sum(1 for pattern in edge_company_patterns if pattern in text)
+
     framework_first = framework_hits >= 2 and edge_hits == 0
     company_first = company_hits >= 2 and edge_hits == 0
-    title_first = (title_hits >= 1 or has_exact_fde) and edge_hits == 0
+    title_first = title_hits >= 1 and edge_hits == 0
     broad_core = broad_hits >= 2 and edge_hits == 0
 
-    canonical = has_exact_fde or framework_first or company_first or title_first or broad_core
+    canonical = framework_first or company_first or title_first or broad_core
     edge_case = edge_hits >= 2 or (edge_hits >= 1 and not canonical)
 
     if edge_case and not canonical:
@@ -298,15 +125,15 @@ def _opening_priority(boolean: str, rationale: str = "") -> tuple[int, int]:
         - company_hits * 3
         - title_hits * 3
         - broad_hits * 2
-        - (4 if has_exact_fde else 0)
     )
     return bucket, score
 
 
-def _sort_strings_for_edge_case_opening(strings: list[dict]) -> list[dict]:
+def _sort_strings_for_edge_case_opening(brief: Brief, strings: list[dict]) -> list[dict]:
     annotated: list[tuple[tuple[int, int, int], dict]] = []
     for idx, item in enumerate(strings):
         bucket, score = _opening_priority(
+            brief,
             item.get("boolean", ""),
             item.get("rationale", "") or item.get("gap", ""),
         )
@@ -315,11 +142,16 @@ def _sort_strings_for_edge_case_opening(strings: list[dict]) -> list[dict]:
     return [item for _, item in annotated]
 
 
-def _annotate_string_metadata(item: dict, *, boolean_key: str = "boolean") -> dict:
+def _annotate_string_metadata(
+    brief: Brief,
+    item: dict,
+    *,
+    boolean_key: str = "boolean",
+) -> dict:
     """Ensure generated strings carry stable family/novelty/domain labels."""
     boolean = item.get(boolean_key, "") or ""
     rationale = item.get("rationale", "") or item.get("gap", "") or ""
-    bucket, _score = _opening_priority(boolean, rationale)
+    bucket, _score = _opening_priority(brief, boolean, rationale)
     retrieval_recipe = item.get("retrieval_recipe", {}) if isinstance(item.get("retrieval_recipe"), dict) else {}
     hypothesis_ids = [
         str(hypothesis_id).strip()
@@ -337,12 +169,14 @@ def _annotate_string_metadata(item: dict, *, boolean_key: str = "boolean") -> di
         or ("edge_case" if hypothesis_ids or bucket == 0 else "canonical"),
         boolean,
         rationale,
+        brief=brief,
     )
     item["domain_lane"] = infer_domain_lane(
         item.get("domain_lane")
         or retrieval_recipe.get("target_markets", [None])[0],
         boolean,
         rationale,
+        brief=brief,
     )
     seniority = classify_search_string_seniority(
         boolean,
@@ -408,9 +242,9 @@ def _materialize_retrieval_adaptation(
         adaptation.new_strings = rendered_strings + list(adaptation.new_strings)
 
 
-def _annotate_plan_metadata(plan: ExecutionPlan) -> None:
+def _annotate_plan_metadata(brief: Brief, plan: ExecutionPlan) -> None:
     plan.generated_strings = [
-        _annotate_string_metadata(dict(item))
+        _annotate_string_metadata(brief, dict(item))
         for item in plan.generated_strings
     ]
 
@@ -418,14 +252,16 @@ def _annotate_plan_metadata(plan: ExecutionPlan) -> None:
     for gap in plan.coverage_gaps:
         gap_item = dict(gap)
         if gap_item.get("suggested_boolean"):
-            gap_item = _annotate_string_metadata(gap_item, boolean_key="suggested_boolean")
+            gap_item = _annotate_string_metadata(
+                brief, gap_item, boolean_key="suggested_boolean"
+            )
         annotated_gaps.append(gap_item)
     plan.coverage_gaps = annotated_gaps
 
 
-def _annotate_adaptation_metadata(adaptation: AdaptationResponse) -> None:
+def _annotate_adaptation_metadata(brief: Brief, adaptation: AdaptationResponse) -> None:
     adaptation.new_strings = [
-        _annotate_string_metadata(dict(item))
+        _annotate_string_metadata(brief, dict(item))
         for item in adaptation.new_strings
     ]
 
@@ -660,7 +496,7 @@ def _augment_novelty_metrics(plan: ExecutionPlan) -> None:
         plan.architecture_pivot_triggers.append(sequencing_trigger)
 
 
-def _rebalance_execution_plan_for_edge_case_opening(plan: ExecutionPlan) -> str:
+def _rebalance_execution_plan_for_edge_case_opening(brief: Brief, plan: ExecutionPlan) -> str:
     """Promote edge-case coverage gaps and demote canonical opening strings."""
     promoted_gaps: list[dict] = []
     remaining_gaps: list[dict] = []
@@ -671,7 +507,9 @@ def _rebalance_execution_plan_for_edge_case_opening(plan: ExecutionPlan) -> str:
             remaining_gaps.append(gap)
             continue
 
-        bucket, score = _opening_priority(boolean, f"{gap.get('gap', '')} {gap.get('rationale', '')}")
+        bucket, score = _opening_priority(
+            brief, boolean, f"{gap.get('gap', '')} {gap.get('rationale', '')}"
+        )
         if bucket != 2 and score >= 20 and len(promoted_gaps) < _MAX_PROMOTED_EDGE_CASE_GAPS:
             promoted_gaps.append(
                 {
@@ -684,14 +522,14 @@ def _rebalance_execution_plan_for_edge_case_opening(plan: ExecutionPlan) -> str:
             remaining_gaps.append(gap)
 
     combined = promoted_gaps + list(plan.generated_strings)
-    plan.generated_strings = _sort_strings_for_edge_case_opening(combined)
+    plan.generated_strings = _sort_strings_for_edge_case_opening(brief, combined)
     plan.coverage_gaps = remaining_gaps
     _augment_novelty_metrics(plan)
 
     canonical_early = sum(
         1
         for item in plan.generated_strings[:8]
-        if _opening_priority(item.get("boolean", ""), item.get("rationale", ""))[0] == 2
+        if _opening_priority(brief, item.get("boolean", ""), item.get("rationale", ""))[0] == 2
     )
     return (
         f"promoted {len(promoted_gaps)} edge-case coverage gaps; "
@@ -701,10 +539,11 @@ def _rebalance_execution_plan_for_edge_case_opening(plan: ExecutionPlan) -> str:
 
 
 def _rebalance_adaptation_for_edge_case_opening(
+    brief: Brief,
     adaptation: AdaptationResponse,
     remaining_strings: list[SearchString],
 ) -> AdaptationResponse:
-    adaptation.new_strings = _sort_strings_for_edge_case_opening(adaptation.new_strings)
+    adaptation.new_strings = _sort_strings_for_edge_case_opening(brief, adaptation.new_strings)
 
     remaining_by_id = {ss.id: ss for ss in remaining_strings}
     for reorder in adaptation.reorder:
@@ -713,7 +552,7 @@ def _rebalance_adaptation_for_edge_case_opening(
         ss = remaining_by_id.get(reorder.get("string_id"))
         if not ss:
             continue
-        bucket, _score = _opening_priority(ss.boolean, ss.name)
+        bucket, _score = _opening_priority(brief, ss.boolean, ss.name)
         if bucket == 2:
             reorder["move_to"] = "last"
             reason = reorder.get("reason", "").strip()
@@ -768,13 +607,13 @@ def form_strategy(
             base_design=explicit_design if use_layered_retrieval else None,
             prefer_rendered_strings=use_layered_retrieval,
         )
-        _annotate_plan_metadata(plan)
+        _annotate_plan_metadata(brief, plan)
         strict_summary = _apply_strict_seniority_plan_guardrails(brief, plan)
         if strict_summary:
             print(f"  Strict-seniority guardrail: {strict_summary}")
         if _brief_targets_edge_case_opening(brief):
-            summary = _rebalance_execution_plan_for_edge_case_opening(plan)
-            _annotate_plan_metadata(plan)
+            summary = _rebalance_execution_plan_for_edge_case_opening(brief, plan)
+            _annotate_plan_metadata(brief, plan)
             strict_summary = _apply_strict_seniority_plan_guardrails(brief, plan)
             if strict_summary:
                 print(f"  Strict-seniority guardrail: {strict_summary}")
@@ -799,7 +638,7 @@ def form_strategy(
                 base_design=explicit_design if use_layered_retrieval else None,
                 prefer_rendered_strings=use_layered_retrieval,
             )
-            _annotate_plan_metadata(plan)
+            _annotate_plan_metadata(brief, plan)
             strict_summary = _apply_strict_seniority_plan_guardrails(brief, plan)
             if strict_summary:
                 print(f"  Strict-seniority guardrail: {strict_summary}")
@@ -1447,11 +1286,13 @@ Return valid JSON only."""
         base_design=explicit_design if use_layered_retrieval else None,
         prefer_rendered_strings=use_layered_retrieval,
     )
-    _annotate_adaptation_metadata(adaptation)
+    _annotate_adaptation_metadata(brief, adaptation)
     _apply_strict_seniority_adaptation_guardrails(brief, adaptation, remaining_strings)
     if checkpoint_mode != "opening_checkpoint" and _brief_targets_edge_case_opening(brief):
-        adaptation = _rebalance_adaptation_for_edge_case_opening(adaptation, remaining_strings)
-        _annotate_adaptation_metadata(adaptation)
+        adaptation = _rebalance_adaptation_for_edge_case_opening(
+            brief, adaptation, remaining_strings
+        )
+        _annotate_adaptation_metadata(brief, adaptation)
         _apply_strict_seniority_adaptation_guardrails(brief, adaptation, remaining_strings)
     _apply_search_memory_to_adaptation(adaptation, remaining_strings, search_memory_summary)
     return adaptation
