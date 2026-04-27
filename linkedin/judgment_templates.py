@@ -77,7 +77,7 @@ CAPABILITY AREAS for this role:
 DECISION
 ═══════════════════════════════════════════════════════
 
-Ambiguity favors NO. A FACIAL_YES requires at least one STRONG positive signal — a title, company, or trajectory element that directly connects to a required capability area. Generic seniority + generic AI keywords is NOT sufficient for YES.
+Ambiguity favors NO. A FACIAL_YES requires at least one STRONG positive signal — a title, company, or trajectory element that directly connects to a required capability area. Generic seniority + generic capability-area keywords is NOT sufficient for YES.
 
 Do NOT open a profile just to "verify" or "assess depth" — if the snippet does not contain a clear positive signal, the answer is FACIAL_NO. The cost of opening a non-fit profile (60+ seconds of session budget, detection risk, wasted Opus tokens) exceeds the cost of missing an ambiguous candidate who can be found through other search strings.
 
@@ -113,7 +113,7 @@ NON-FIT PATTERNS (automatic FACIAL_NO): {non_fit_compact}
 
 CAPABILITY AREAS: {capability_area_names_inline}
 
-Ambiguity favors NO. A FACIAL_YES requires at least one STRONG positive signal — a title, company, or trajectory that DIRECTLY connects to a capability area. Generic seniority + AI keywords is NOT sufficient.
+Ambiguity favors NO. A FACIAL_YES requires at least one STRONG positive signal — a title, company, or trajectory that DIRECTLY connects to a capability area. Generic seniority + generic capability-area keywords is NOT sufficient.
 
 - FACIAL_YES: At least one position shows a title, employer, or transition that DIRECTLY connects to a capability area. The connection must be specific, not generic.
 - FACIAL_NO: No position shows a specific connection to any capability area, OR a non-fit pattern is detected.
@@ -123,7 +123,6 @@ CANDIDATES:
 
 Respond with EXACTLY this format for each candidate, one per line:
 [candidate_number] FACIAL_YES or FACIAL_NO | one-sentence reason citing trajectory signal"""
-
 
 # ---------------------------------------------------------------------------
 # FULL EVALUATION TEMPLATE
@@ -146,7 +145,7 @@ EVIDENCE HIERARCHY:
 1. Summary bullets from experience entries — HIGHEST value. These describe actual work.
 2. Publications, team names, project names mentioned in bullets — HIGH value.
 3. Title + company combinations — MODERATE value. Indicates environment but not what they built.
-4. Skills list — LOWEST value for general skills. HOWEVER: highly specific technical skills ({discriminating_skills_examples} — terms only practitioners use) are meaningful signal, especially on sparse profiles. "PyTorch" tells you nothing. "QLoRA" tells you this person has fine-tuned models.
+4. Skills list — LOWEST value for general skills. HOWEVER: highly specific technical skills ({discriminating_skills_examples} — terms only practitioners use) are meaningful signal, especially on sparse profiles. Generic infrastructure terms tell you nothing; domain-specific practitioner terms tell you the person has hands-on construction experience in the brief's capability areas.
 {seniority_calibration_block}
 ═══════════════════════════════════════════════════════
 SPARSE PROFILE CHECK (run FIRST, before anything else)
@@ -156,7 +155,7 @@ A sparse profile is one with FEW OR NO summary bullets — just titles, companie
 
 {inferential_save_block}
 
-ADDITIONAL SPARSE SIGNAL: If the profile is sparse BUT the skills list contains highly specific practitioner terms ({discriminating_skills_examples}), treat this as supporting evidence. These terms are too specific to list without hands-on experience. A sparse profile with PhD + ML title + QLoRA in skills is a stronger inferential save than PhD + ML title alone.
+ADDITIONAL SPARSE SIGNAL: If the profile is sparse BUT the skills list contains highly specific practitioner terms ({discriminating_skills_examples}), treat this as supporting evidence. These terms are too specific to list without hands-on experience. A sparse profile pairing a high-prior credential and a relevant title with a discriminating practitioner term in skills is a stronger inferential save than the credential and title alone.
 
 If an inferential save condition is met, respond with DECISION: INFERENTIAL_SAVE, confidence 0.35–0.50. These go to the recruiter for manual review.
 
@@ -177,24 +176,25 @@ EMPLOYER SIGNAL RULES:
 
 RESULT — classify the match as one of:
 - DIRECT: Summary bullets describe work that falls squarely within a capability area. Cite the area and the evidence.
-- ADJACENT: The work touches a capability area but isn't core to it (e.g., built ML evaluation tools but for a non-LLM domain). Note what's adjacent and why.
+- ADJACENT: The work touches a capability area but isn't core to it (e.g., the candidate built tooling shaped like a capability area but applied to a different domain than the brief targets). Note what's adjacent and why.
 - NONE: No capability area maps. This is NOT an automatic reject — proceed to Step 2.
 
 ═══════════════════════════════════════════════════════
 STEP 2 — DEPTH TEST (runs REGARDLESS of Step 1 result)
 ═══════════════════════════════════════════════════════
 
-This step evaluates the candidate's hands-on ML depth INDEPENDENT of whether their domain matches. Read the summary bullets across ALL positions. Do they describe hands-on ML work where data quality, model training, or evaluation methodology was a primary focus?
+This step evaluates the candidate's hands-on capability-area depth INDEPENDENT of whether their domain matches. Read the summary bullets across ALL positions. Do they describe hands-on construction work in any of the brief's capability areas — work where the candidate owned the design, build, evaluation, or refinement loop rather than just consuming a finished tool?
 
 {depth_block}
 
 Key distinction — look at VERBS and OBJECTS in the summary bullets:
-- Hands-on ML verbs: designed, built, created, fine-tuned, trained, developed (a pipeline/framework/system), published, implemented (a novel method), explored, prototyped, experimented with
-- Application-layer verbs: deployed (without training), integrated (an API), managed (a team), monitored (dashboards), used (a pre-built model)
-- ML-depth objects: training pipelines, evaluation suites/frameworks, reward models, fine-tuned models, data curation systems, quality metrics, annotation methodologies, synthetic data generators, RL environments, custom model architectures, novel evaluation methods
+- Domain builder verbs (signal hands-on construction work in the brief's capability areas): {domain_verbs_block}
+- Application-layer verbs: deployed (without training), integrated (an API), managed (a team), monitored (dashboards), used (a pre-built tool or service)
+- Domain depth objects (artifacts whose creation requires capability-area expertise):
+{domain_depth_objects_block}
 - Application-layer objects: production APIs, dashboards, business KPIs, customer-facing features, A/B test results
 
-"Fine-tuned" is a BUILDER verb — someone who fine-tuned an LLM with hands-on PyTorch/HuggingFace work is doing model training. "Fine-tuned via API" without code is using a service.
+A domain builder verb paired with a domain depth object signals hands-on construction work in the brief's capability areas. The same verb attached to an application-layer object (e.g. "deployed via API" without underlying construction) signals consumption, not depth.
 
 A profile that lists relevant skills but whose bullets describe only application-layer work does not pass the depth test.
 {executive_builder_block}
@@ -204,18 +204,13 @@ STEP 3 — TRANSFERABILITY (only if Step 1 was ADJACENT or NONE)
 
 If Step 1 found no direct capability area match, ask: does this person's METHODOLOGY transfer to the role, even though their DOMAIN doesn't match?
 
-The test: "If you took this person's skills and methodology and pointed them at LLM training data / RL environments / model evaluation instead of their current domain, would the skills apply?"
+The test: "If you took this person's skills and methodology and pointed them at the brief's capability areas instead of their current domain, would the skills apply?"
 
 TRANSFERS (methodology is domain-portable):
-- Evaluation framework design in any ML domain → evaluation framework design for LLMs. The person knows how to measure model quality. The specific model changes; the methodology of rigorous evaluation is the same.
-- Data quality systems for model training in any domain → data quality for frontier model training. Someone who built data curation pipelines and quality metrics for computational biology models knows what training data quality means. The domain content changes; the data engineering and quality judgment transfer.
-- Custom model training (architectures, training loops, hyperparameter optimization) in any domain → can learn LLM training. Deep hands-on model training experience is the hardest skill to develop.
-- PhD-level research methodology with hands-on implementation → the rigor, the experimental design, the evaluation instincts transfer even when the specific research area doesn't.
+{transferability_transfers_block}
 
 DOES NOT TRANSFER (domain gap is too wide AND methodology doesn't port):
-- Classical engineering simulation (CFD, FEA, circuit design) without ML → uses "simulation" but the methodology is physics-based, not learned.
-- Statistical analysis / hypothesis testing without ML model building → data-adjacent but no model training methodology to transfer.
-- Software engineering with no ML component → strong coding but no ML depth to port.
+{transferability_does_not_transfer_block}
 
 RESULT: TRANSFERABLE (cite what methodology transfers) or NOT_TRANSFERABLE (explain why the gap is too wide).
 
@@ -273,6 +268,78 @@ SUMMARY: [one-line evaluation a hiring manager could act on]"""
 # The judger calls these — never constructs prompts directly.
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Calibration-vocabulary fallback helpers
+# ---------------------------------------------------------------------------
+# The four FULL_EVALUATION_TEMPLATE placeholders that consume
+# brief.domain_verbs / domain_depth_objects / transferability_examples must
+# render cleanly even when the brief omits those calibration fields. The
+# helpers below return capability-area-driven fallback prose so an empty
+# block never leaves an orphan colon, dangling section header, or malformed
+# transition. The prose is intentionally vertical-agnostic — it never
+# mentions ML, LLM, or any specific capability vocabulary.
+# ---------------------------------------------------------------------------
+
+
+def _calibration_verbs_or_default(brief: Brief) -> str:
+    """Render brief.domain_verbs or a vertical-agnostic fallback phrase."""
+    rendered = brief.domain_verbs_block() if hasattr(brief, "domain_verbs_block") else ""
+    if rendered:
+        return rendered
+    return (
+        "any verbs in the candidate's bullets that describe hands-on construction "
+        "in the brief's capability areas (designing, building, owning end-to-end "
+        "implementation rather than consuming a finished tool)"
+    )
+
+
+def _calibration_depth_objects_or_default(brief: Brief) -> str:
+    """Render brief.domain_depth_objects or a vertical-agnostic fallback bullet."""
+    rendered = (
+        brief.domain_depth_objects_block()
+        if hasattr(brief, "domain_depth_objects_block")
+        else ""
+    )
+    if rendered:
+        return rendered
+    return (
+        "  (no specific depth objects enumerated by the brief — infer depth from "
+        "whether bullets describe owned construction in any capability area listed above)"
+    )
+
+
+def _calibration_transfers_or_default(brief: Brief) -> str:
+    """Render brief.transferability_examples (transfers) or a fallback bullet."""
+    rendered = (
+        brief.transferability_examples_block(result="transfers")
+        if hasattr(brief, "transferability_examples_block")
+        else ""
+    )
+    if rendered:
+        return rendered
+    return (
+        "- (no worked transferability examples in the brief — apply the test using "
+        "your judgment of whether the candidate's methodology, evaluation instincts, "
+        "and tooling habits map onto the brief's capability areas)"
+    )
+
+
+def _calibration_does_not_transfer_or_default(brief: Brief) -> str:
+    """Render brief.transferability_examples (does_not_transfer) or a fallback bullet."""
+    rendered = (
+        brief.transferability_examples_block(result="does_not_transfer")
+        if hasattr(brief, "transferability_examples_block")
+        else ""
+    )
+    if rendered:
+        return rendered
+    return (
+        "- (no worked non-transfer examples in the brief — judge the gap by whether "
+        "the candidate's methodology has nothing to port into the brief's capability areas)"
+    )
+
+
 def assemble_facial_system(brief: Brief) -> str:
     """Return the cacheable system prompt for facial triage (all brief context, no candidate data)."""
     return FACIAL_TRIAGE_TEMPLATE.format(
@@ -312,6 +379,10 @@ def assemble_full_evaluation_system(brief: Brief) -> str:
         calibration_block=brief.calibration_block(),
         instructions_block=brief.instructions_block(),
         capability_area_stack_rank_guidance=brief.capability_area_stack_rank_guidance(),
+        domain_verbs_block=_calibration_verbs_or_default(brief),
+        domain_depth_objects_block=_calibration_depth_objects_or_default(brief),
+        transferability_transfers_block=_calibration_transfers_or_default(brief),
+        transferability_does_not_transfer_block=_calibration_does_not_transfer_or_default(brief),
         candidate_profile="[provided in user message]",
     )
 
@@ -390,6 +461,10 @@ def assemble_full_evaluation_prompt(brief: Brief, candidate_profile: str) -> str
         calibration_block=brief.calibration_block(),
         instructions_block=brief.instructions_block(),
         capability_area_stack_rank_guidance=brief.capability_area_stack_rank_guidance(),
+        domain_verbs_block=_calibration_verbs_or_default(brief),
+        domain_depth_objects_block=_calibration_depth_objects_or_default(brief),
+        transferability_transfers_block=_calibration_transfers_or_default(brief),
+        transferability_does_not_transfer_block=_calibration_does_not_transfer_or_default(brief),
         candidate_profile=candidate_profile,
     )
 
