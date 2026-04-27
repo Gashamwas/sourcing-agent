@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cloris</title>
+    <style>
+      :root {
+        --cream: #f5efe1;
+        --cream-deep: #ebe2cd;
+        --mustard: #d4a53a;
+        --mustard-deep: #b88a28;
+        --wood: #6b4a2b;
+        --wood-deep: #4a3220;
+        --peach: #e39a76;
+        --peach-deep: #c67d5a;
+        --ink: #2a1f14;
+        --ink-soft: #5c4a38;
+      }
+
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--cream);
+        color: var(--ink);
+      }
+
+      body {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 4rem 2rem;
+        box-sizing: border-box;
+      }
+
+      .shell {
+        max-width: 36rem;
+        width: 100%;
+      }
+
+      .section-number {
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        font-size: 0.875rem;
+        letter-spacing: 0.08em;
+        color: var(--ink-soft);
+        margin: 0 0 1.5rem 0;
+      }
+
+      .label {
+        font-family: Fraunces, Georgia, serif;
+        font-size: 1.125rem;
+        line-height: 1.6;
+        color: var(--ink);
+        margin: 0;
+      }
+
+      .rule {
+        border: 0;
+        border-top: 1px solid var(--ink-soft);
+        opacity: 0.25;
+        margin: 1.5rem 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <p class="section-number">01</p>
+      <hr class="rule" />
+      <p class="label">Cloris — shell v0 — slice 1</p>
+    </main>
+  </body>
+</html>
