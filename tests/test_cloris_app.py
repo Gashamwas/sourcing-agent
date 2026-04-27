@@ -26,7 +26,8 @@ from cloris import __version__
 from cloris import api as cloris_api
 from cloris import app as cloris_app
 from cloris.app import NullWindowLauncher, _resolve_port, create_app, run_app
-from cloris.models import RunSummary, StateDirEntry, StatusResponse
+from cloris.models import LaunchResponse, RunSummary, StateDirEntry, StatusResponse
+from cloris.worker import BriefPathNotFoundError, WorkerAlreadyRunningError
 
 
 def test_healthz_contract() -> None:
@@ -277,3 +278,97 @@ def test_api_status_endpoint_serializes_entries(
             },
         ],
     }
+
+
+def test_launch_linkedin_endpoint_201_happy_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+
+    def fake_launch(req: Any) -> LaunchResponse:
+        captured["brief_path"] = req.brief_path
+        return LaunchResponse(
+            source="linkedin",
+            input_mode="concurrent",
+            pid=12345,
+            state_dir="/tmp/state/linkedin/key",
+            worker_json_path="/tmp/state/linkedin/key/worker.json",
+        )
+
+    monkeypatch.setattr(cloris_api, "launch_linkedin_worker", fake_launch)
+
+    client = TestClient(create_app())
+    response = client.post("/api/launch/linkedin", json={"brief_path": "/tmp/brief.json"})
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "slice": "v0-shell-slice-3",
+        "source": "linkedin",
+        "input_mode": "concurrent",
+        "pid": 12345,
+        "state_dir": "/tmp/state/linkedin/key",
+        "worker_json_path": "/tmp/state/linkedin/key/worker.json",
+    }
+    assert captured["brief_path"] == "/tmp/brief.json"
+
+
+def test_launch_linkedin_endpoint_409_when_worker_alive(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_launch(req: Any) -> LaunchResponse:
+        raise WorkerAlreadyRunningError(
+            pid=12345,
+            state_dir="/tmp/state/linkedin/key",
+        )
+
+    monkeypatch.setattr(cloris_api, "launch_linkedin_worker", fake_launch)
+
+    client = TestClient(create_app())
+    response = client.post("/api/launch/linkedin", json={"brief_path": "/tmp/brief.json"})
+
+    assert response.status_code == 409
+    body = response.json()
+    detail = body["detail"]
+    assert detail["error"] == "worker_already_running"
+    assert detail["pid"] == 12345
+    assert detail["state_dir"] == "/tmp/state/linkedin/key"
+
+
+def test_launch_linkedin_endpoint_400_on_missing_brief_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fake_launch(req: Any) -> LaunchResponse:
+        raise BriefPathNotFoundError("/tmp/missing.json")
+
+    monkeypatch.setattr(cloris_api, "launch_linkedin_worker", fake_launch)
+
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/launch/linkedin", json={"brief_path": "/tmp/missing.json"}
+    )
+
+    assert response.status_code == 400
+    body = response.json()
+    detail = body["detail"]
+    assert detail["error"] == "brief_path_not_found"
+    assert detail["brief_path"] == "/tmp/missing.json"
+
+
+def test_launch_linkedin_endpoint_rejects_input_mode_field(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def boom(req: Any) -> LaunchResponse:
+        raise AssertionError(
+            "launch_linkedin_worker should not be called when the request "
+            "body has an unknown field"
+        )
+
+    monkeypatch.setattr(cloris_api, "launch_linkedin_worker", boom)
+
+    client = TestClient(create_app())
+    response = client.post(
+        "/api/launch/linkedin",
+        json={"brief_path": "/tmp/brief.json", "input_mode": "away"},
+    )
+
+    assert response.status_code == 422

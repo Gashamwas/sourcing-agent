@@ -62,3 +62,27 @@ class StatusResponse(BaseModel):
 
     slice: Literal["v0-shell-slice-2"] = Field(default="v0-shell-slice-2")
     entries: list[StateDirEntry]
+
+
+class LaunchResponse(BaseModel):
+    """Response payload for ``POST /api/launch/linkedin`` (Slice 3).
+
+    ``slice`` is pinned to ``"v0-shell-slice-3"`` so callers can detect the
+    launch-contract version without re-typing the literal at every
+    construction site. ``source`` and ``input_mode`` are intentionally
+    ``Literal``-typed because Slice 3 is LinkedIn-only and concurrent-only;
+    GitHub launches and ``away`` mode are out of scope.
+
+    ``pid`` is the spawned worker process's PID at the moment ``Popen``
+    returns; after the worker ``execvp``s into
+    ``linkedin.session_orchestrator``, the same PID belongs to the
+    orchestrator, so this value remains the truthful process handle for
+    later stop/probe operations.
+    """
+
+    slice: Literal["v0-shell-slice-3"] = Field(default="v0-shell-slice-3")
+    source: Literal["linkedin"]
+    input_mode: Literal["concurrent"]
+    pid: int
+    state_dir: str
+    worker_json_path: str

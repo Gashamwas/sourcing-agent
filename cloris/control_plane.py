@@ -147,3 +147,19 @@ def aggregate_status(state_root: Path | None = None) -> StatusResponse:
 
     entries.sort(key=lambda e: (e.source, e.state_key))
     return StatusResponse(slice="v0-shell-slice-2", entries=entries)
+
+
+def read_worker_sidecar(state_dir: Path) -> dict | None:
+    """Return the parsed ``worker.json`` for ``state_dir``, or ``None``.
+
+    Thin wrapper around :func:`cloris.worker.read_sidecar` so the control
+    plane stays the single seam between Cloris and per-state-dir disk
+    artifacts (canonical SQLite + the ``worker.json`` sidecar). Slice 3
+    does not enrich ``GET /api/status`` with sidecar data; this helper
+    exists so the launch helper and any future status enrichment share one
+    read path.
+    """
+
+    from cloris.worker import read_sidecar
+
+    return read_sidecar(state_dir)
