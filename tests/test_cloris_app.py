@@ -51,7 +51,12 @@ def test_healthz_contract() -> None:
     assert body["version"] == __version__
 
 
-def test_index_serves_inline_html() -> None:
+def test_index_serves_built_html_with_cloris_shell_root() -> None:
+    """Slice 5: ``GET /`` returns the Vite-built ``index.html`` from
+    ``cloris/frontend/dist/``. The response must carry the SPA mount
+    point ``id="cloris-shell"`` and the literal ``Cloris`` somewhere
+    in the document — the Slice-1 placeholder copy is gone."""
+
     client = TestClient(create_app())
 
     response = client.get("/")
@@ -59,8 +64,8 @@ def test_index_serves_inline_html() -> None:
     assert response.headers["content-type"].startswith("text/html")
 
     body = response.text
-    assert "01" in body
-    assert "Cloris — shell v0 — slice 1" in body
+    assert 'id="cloris-shell"' in body
+    assert "Cloris" in body
 
 
 class _StubServer:
@@ -739,3 +744,59 @@ def test_launch_endpoint_still_returns_slice_3_tag(
 
     assert response.status_code == 201
     assert response.json()["slice"] == "v0-shell-slice-3"
+
+
+# --- Slice 5: built SPA + /assets static mount --------------------------
+
+
+def _dist_assets_dir() -> Path:
+    return Path(__file__).resolve().parents[1] / "cloris" / "frontend" / "dist" / "assets"
+
+
+def test_assets_mount_serves_a_known_file() -> None:
+    """Slice 5: the ``/assets/`` static mount serves the hashed JS and CSS
+    bundles Vite emits into ``cloris/frontend/dist/assets/``. We discover
+    one ``.js`` and one ``.css`` filename via ``os.scandir`` rather than
+    pinning the hash, because the hash changes with every build."""
+
+    assets_dir = _dist_assets_dir()
+    assert assets_dir.exists(), (
+        f"expected built assets dir at {assets_dir}; run `pnpm build` "
+        "in cloris/frontend/ to generate the committed dist artifact"
+    )
+
+    js_name: str | None = None
+    css_name: str | None = None
+    with os.scandir(assets_dir) as entries:
+        for entry in entries:
+            if entry.is_file():
+                if js_name is None and entry.name.endswith(".js"):
+                    js_name = entry.name
+                elif css_name is None and entry.name.endswith(".css"):
+                    css_name = entry.name
+    assert js_name is not None, f"no .js file found under {assets_dir}"
+    assert css_name is not None, f"no .css file found under {assets_dir}"
+
+    client = TestClient(create_app())
+
+    js_response = client.get(f"/assets/{js_name}")
+    assert js_response.status_code == 200
+    js_ct = js_response.headers["content-type"].split(";", 1)[0].strip()
+    assert js_ct in {"application/javascript", "text/javascript"}, (
+        f"unexpected JS content-type {js_ct!r} for {js_name}"
+    )
+
+    css_response = client.get(f"/assets/{css_name}")
+    assert css_response.status_code == 200
+    assert css_response.headers["content-type"].startswith("text/css")
+
+
+def test_assets_mount_returns_404_for_unknown_file() -> None:
+    """Slice 5: requests for files that don't exist under the mounted
+    ``/assets/`` directory must 404 — StaticFiles' default behavior, but
+    pinned here so a future configuration drift cannot silently start
+    serving a fallback."""
+
+    client = TestClient(create_app())
+    response = client.get("/assets/this-does-not-exist.js")
+    assert response.status_code == 404

@@ -1,13 +1,14 @@
 """Cloris HTTP surface.
 
-Slice 1 endpoints (kept byte-identical here):
+Slice 1 endpoints (route declarations byte-identical here; only the body
+``GET /`` returns has changed in Slice 5 — see below):
 
 - ``GET /healthz`` — readiness probe used by :func:`cloris.app.run_app` and by
   external smoke checks. Stable JSON contract: ``status``, ``slice``,
   ``version``. The slice tag stays ``"v0-shell-slice-1"`` because this is a
   readiness probe, not a slice-version banner.
-- ``GET /`` — returns the inline placeholder ``index.html`` directly. Slice 1
-  intentionally does **not** mount a ``StaticFiles`` tree.
+- ``GET /`` — returns the built Cloris UI's ``index.html``. See the Slice 5
+  paragraph below.
 
 Slice 2 endpoint (route body byte-identical, payload bumped to slice-4 by the
 aggregator):
@@ -54,6 +55,19 @@ Slice 4 endpoints:
   shapes are reused identically.
 
 Pause is still out of scope per ``docs/cloris-control-plane-spec.md`` §7.
+
+Slice 5 surface change (no API contract changes):
+
+- ``GET /`` now returns the built Svelte SPA from
+  ``cloris/frontend/dist/index.html``. The Slice 1 inline placeholder is
+  gone; the entry HTML is emitted by Vite at build time.
+- :func:`mount_static` mounts ``cloris/frontend/dist/assets/`` at
+  ``/assets/`` via :class:`fastapi.staticfiles.StaticFiles`. Vite emits
+  hashed JS/CSS filenames there (e.g. ``index-DJcGuPNc.js``), plus the
+  bundled OFL-licensed fonts under ``/assets/fonts/``. The mount is added
+  by :func:`cloris.app.create_app` calling :func:`mount_static` after the
+  router is included; existing API routes are unaffected. No slice tag in
+  any payload bumps for Slice 5.
 """
 
 from __future__ import annotations
@@ -67,6 +81,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict
 
 from cloris import __version__
@@ -87,8 +102,24 @@ from cloris.worker import (
 
 router = APIRouter()
 
-_FRONTEND_DIR = Path(__file__).parent / "frontend"
-_INDEX_HTML = _FRONTEND_DIR / "index.html"
+_DIST_DIR = Path(__file__).parent / "frontend" / "dist"
+
+
+def mount_static(app) -> None:
+    """Mount the built Cloris UI's hashed asset bundle at ``/assets/``.
+
+    Slice 5 ships a Vite-built Svelte SPA; Vite emits hashed JS/CSS
+    filenames into ``cloris/frontend/dist/assets/``. Mounting StaticFiles
+    there lets the browser fetch the bundled chunks (and bundled fonts)
+    without any per-asset FastAPI route. Existing API routes are
+    unaffected.
+    """
+
+    app.mount(
+        "/assets",
+        StaticFiles(directory=_DIST_DIR / "assets"),
+        name="cloris-assets",
+    )
 
 
 def _send_sigterm(pid: int) -> None:
@@ -151,9 +182,15 @@ def healthz() -> dict[str, str]:
 
 @router.get("/")
 def index() -> FileResponse:
-    """Serve the placeholder index page directly (no static mount)."""
+    """Serve the built Cloris UI's ``index.html`` from
+    ``cloris/frontend/dist/``.
 
-    return FileResponse(_INDEX_HTML, media_type="text/html")
+    Slice 5 replaced the Slice-1 inline placeholder with a Vite-built
+    Svelte SPA; the entry HTML lives in
+    ``cloris/frontend/dist/index.html`` and references hashed bundles
+    under ``/assets/`` (mounted by :func:`mount_static`)."""
+
+    return FileResponse(_DIST_DIR / "index.html", media_type="text/html")
 
 
 @router.get("/api/status")

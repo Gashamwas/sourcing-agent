@@ -1,0 +1,117 @@
+/* Cloris three-typeface system. Fonts are vendored locally as woff2 in
+   ../public/assets/fonts/; Vite ships public/ verbatim into dist/, so the
+   browser receives them under /assets/fonts/<file>.woff2 — which the
+   FastAPI StaticFiles mount at /assets/ serves at runtime.
+
+   No Google Fonts CDN. See ../fonts/LICENSES.md (the source-of-truth
+   OFL-1.1 attribution; also copied alongside the fonts in
+   public/assets/fonts/LICENSES.md for distribution). */
+
+@font-face {
+  font-family: "Fraunces";
+  src: url("/assets/fonts/Fraunces.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/assets/fonts/InstrumentSerif-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Instrument Serif";
+  src: url("/assets/fonts/InstrumentSerif-Italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/assets/fonts/JetBrainsMono.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/assets/fonts/JetBrainsMono-Italic.woff2") format("woff2-variations");
+  font-weight: 100 900;
+  font-style: italic;
+  font-display: swap;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--cream);
+  color: var(--ink);
+}
+
+body {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 17px;
+  line-height: 1.6;
+  padding: 4rem 2rem;
+  box-sizing: border-box;
+  min-height: 100vh;
+}
+
+#cloris-shell {
+  max-width: 38rem;
+  margin: 0 auto;
+}
+
+/* Editorial primitives. */
+
+.section-number {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.08em;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.hairline-rule {
+  border: 0;
+  border-top: 1px solid var(--ink-soft);
+  opacity: 0.25;
+  margin: 1.25rem 0 1.5rem 0;
+}
+
+.prose {
+  font-family: "Fraunces", Georgia, serif;
+  max-width: 36rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+.mono-meta {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  color: var(--ink-soft);
+}
+
+.italic-note {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--ink-soft);
+  font-size: 1rem;
+}
+
+/* Section rhythm. */
+
+.section {
+  margin: 0 0 3rem 0;
+}
+
+.section + .section {
+  margin-top: 3rem;
+}

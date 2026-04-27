@@ -37,12 +37,15 @@ def create_app() -> "FastAPI":
     ``fastapi`` is imported lazily so that importing :mod:`cloris.app` (e.g.
     by tests that only need the launcher protocol or the CLI parser) does not
     require FastAPI to be installed.
+
+    Slice 5 mounts the built Svelte UI's ``/assets/`` directory via
+    ``StaticFiles``.
     """
 
     from fastapi import FastAPI
 
     from cloris import __version__
-    from cloris.api import router
+    from cloris.api import mount_static, router
 
     app = FastAPI(
         title="Cloris",
@@ -50,6 +53,7 @@ def create_app() -> "FastAPI":
         description="Cloris desktop shell — v0 / slice 1.",
     )
     app.include_router(router)
+    mount_static(app)
     return app
 
 

@@ -1,0 +1,13 @@
+/* Cloris design tokens. Source: docs/cloris-ui-spec.md §5. */
+:root {
+  --cream: #f5efe1;
+  --cream-deep: #ebe2cd;
+  --mustard: #d4a53a;
+  --mustard-deep: #b88a28;
+  --wood: #6b4a2b;
+  --wood-deep: #4a3220;
+  --peach: #e39a76;
+  --peach-deep: #c67d5a;
+  --ink: #2a1f14;
+  --ink-soft: #5c4a38;
+}

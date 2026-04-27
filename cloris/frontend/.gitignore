@@ -1,0 +1,9 @@
+node_modules/
+.vite/
+*.log
+.DS_Store
+
+# NOTE: dist/ is intentionally NOT ignored. Python serves the built SPA
+# directly out of cloris/frontend/dist/ at runtime, and CI does not run
+# Node. Committing dist/ keeps `make validate` green without requiring
+# `pnpm install`.
