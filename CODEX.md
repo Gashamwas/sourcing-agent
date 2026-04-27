@@ -1,9 +1,8 @@
 # CODEX.md
 
-This file defines how Codex should think and work in this repo, including its relationship to Cursor and the default use of Opus 4.7 inside Cursor for development work. It is both:
+This file is the **Codex↔Cursor operating contract** for this repo: how Codex should think, its relationship to Cursor, and the default use of Opus 4.7 inside Cursor for development work.
 
-- a working-relationship contract
-- a compact repo brain
+It is **not** the repo brain. For architecture, canonical truths, high-risk files, testing expectations, and working norms, read [`AGENTS.md`](./AGENTS.md) — that is the canonical repo-level guide and it is auto-injected into both Codex and Cursor sessions.
 
 It is not a full product spec or a runbook.
 
@@ -66,6 +65,8 @@ Use Codex and Cursor as complementary tools, not interchangeable ones. The defau
 
 ## 3. Default Codex/Cursor Workflow
 
+The shared artifact for any non-trivial piece of work is a plan file under `plans/<topic>.md`. Template and conventions live in `plans/README.md`. Codex writes/updates the plan; Cursor reads it to implement; Codex reviews back against it. Without that artifact, every crossing of the Codex↔Cursor bridge starts from zero context.
+
 Use this as the default collaboration loop:
 
 1. Start in Codex with the messy thought, bug, refactor idea, or desired outcome.
@@ -96,6 +97,24 @@ Use this as the default collaboration loop:
    - is the seam actually good?
    - what should be committed separately?
    - what should happen next?
+
+Important distinction:
+
+- the **plan** should usually be slice-sized
+- the **implementation** should usually be commit-sized
+
+That means Codex should help define the next real slice of work, but Cursor
+should usually execute one clean commit at a time. Do not default to either of
+these extremes:
+
+- giant all-at-once implementation prompts that span several commits
+- over-cautious "micropatch" loops where every safe whole-file change turns
+  into multiple dry runs, staging passes, and review cycles
+
+When the seam is already clear and the remaining work is a clean whole-file
+slice, the preferred Cursor loop is often: implement → run the narrow test band
+→ stage → commit. Reserve the slower staged-diff-review loop for partial-file
+commits, mixed dirty worktrees, high-risk files, or ambiguous boundaries.
 
 ## 4. When To Use Which Tool
 
@@ -149,6 +168,10 @@ Default operating preference for this repo:
 - use Opus 4.7 in Cursor to do the actual local dev work
 - bring the important outputs back to Codex for second-pass review, risk checking, and next-step selection
 
+Cursor Plan mode is best used to validate or sharpen the next slice against the
+real repo surface. It is not the default place to invent a giant roadmap when
+Codex has already defined the slice and the plan file exists.
+
 This means Codex should optimize for high-context discussion and judgment, not try to replace the local implementation loop unless the task specifically benefits from Codex directly editing the repo.
 
 ## 7. Good Prompt Patterns
@@ -158,7 +181,11 @@ This means Codex should optimize for high-context discussion and judgment, not t
 - “Don’t edit yet. Explain how this subsystem works end to end and cite files.”
 - “Trace the critical path through these files only.”
 - “Identify the smallest safe refactor seam.”
+- “Validate the next slice against `plans/<topic>.md` and tell me whether it is
+  clean enough for a one-commit implementation pass.”
 - “Implement only the tightest behavior-preserving slice.”
+- “If this is a clean whole-file slice, implement, test, stage, and commit in
+  one pass.”
 - “Run the narrowest relevant tests and summarize failures.”
 
 ### Good prompts for Codex
@@ -171,87 +198,4 @@ This means Codex should optimize for high-context discussion and judgment, not t
 
 ## 8. Repo Brain
 
-### What this repo is
-
-This repo is a sourcing platform with three main layers:
-
-1. source adapters
-   - LinkedIn sourcing flow
-   - GitHub sourcing flow
-
-2. shared execution and runtime state
-   - canonical candidate/run/work-unit state
-   - resume semantics
-   - compatibility projections
-
-3. post-run intelligence
-   - run snapshots
-   - market intelligence
-   - brief iteration and strategy artifacts
-
-### Canonical truths
-
-- `runtime_state.sqlite3` is canonical for sourcing runtime state.
-- JSON/JSONL files in live state dirs are compatibility projections, not source-of-truth control state.
-- `output/runs/...` is immutable finalized run output.
-- `output/market_intelligence/...` is market-scoped synthesis, separate from live per-project runtime state.
-
-If there is a disagreement between SQLite and projection files, trust SQLite first.
-
-### High-risk areas
-
-- `shared/runtime_state/store.py`
-  - shared persistence + lifecycle + reconciliation hot spot
-- `shared/runtime_state/linkedin.py`
-  - LinkedIn resume/progress bridge semantics
-- `linkedin/orchestrator.py`
-  - large policy-heavy file; avoid casual broad edits
-- `linkedin/browser.py`
-  - brittle browser/runtime behavior; prefer small, targeted changes
-- `market_intelligence/engine.py`
-  - large orchestration surface; refactor carefully
-
-### Working norms
-
-- Prefer targeted edits over broad cleanup.
-- Preserve behavior unless the task explicitly calls for changing it.
-- When refactoring, add or strengthen tests first when feasible.
-- Keep changes narrow and commit slices intentional.
-- Do not casually mix runtime-state work with unrelated strategy, reconciliation, or config work.
-
-### Brief / config discipline
-
-- Do not edit draft briefs unless explicitly asked.
-- Treat brief churn carefully; config files often encode product truth.
-- Avoid making scratch briefs look runnable by accident.
-
-### Output / artifact discipline
-
-- Avoid editing `output/` directly.
-- Rebuild projections or artifacts through code paths/tools instead of hand-editing files.
-- Prefer runtime/admin flows over manual file surgery.
-
-### Testing expectations
-
-- After targeted runtime-state changes, run the narrowest relevant test band first.
-- For LinkedIn runtime-state changes, start with:
-  - `PYTHONPATH=/Users/sam.vangelos/Projects/recruiting-tools/sourcing-agent pytest tests/test_linkedin_runtime_state.py -q`
-- Expand outward only if the change crosses boundaries.
-- Prefer proving behavior with tests before “cleanup” refactors.
-
-### Search / inspection defaults
-
-- Prefer `rg` for finding code or text quickly.
-- Ask for file-cited explanations when tracing architecture.
-- When investigating complexity, distinguish:
-  - canonical state
-  - projections
-  - snapshots
-  - in-memory working state
-
-### Repo biases
-
-- Runtime-state-first thinking is preferred.
-- Behavior-preserving extraction is preferred over giant rewrites.
-- Clean commit hygiene matters.
-- Cross-cutting changes should be staged deliberately.
+Repo brain lives in [`AGENTS.md`](./AGENTS.md). Do not duplicate it here. When you need architecture, canonical truths, high-risk files, testing expectations, or working norms, read that file.
