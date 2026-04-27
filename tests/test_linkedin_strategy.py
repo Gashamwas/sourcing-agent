@@ -1093,3 +1093,251 @@ def test_opening_priority_classifies_fde_as_canonical_when_brief_lists_it():
     assert bucket_acronym == 2
     assert score_acronym < 0
 
+
+# ---------------------------------------------------------------------------
+# Brief-driven planner-prompt assembly (Slice 2 Commit 2)
+# ---------------------------------------------------------------------------
+#
+# These tests pin the structural shape of `_build_strategy_system` after the
+# planner-prompt refactor. They prove:
+#   1. With empty calibration, the legacy AI-specific planner prose
+#      (Axolotl/vLLM/SWE-bench/RLHF/PyTorch/IPO/BACKLOAD-RL/etc.) is no longer
+#      rendered.
+#   2. With the legacy AI calibration replayed via `_hydrate_legacy_calibration`,
+#      the same vocabulary IS rendered — proving the path is brief-driven.
+#   3. With a non-AI vertical's calibration, the prompt reflects THAT
+#      vertical's vocabulary and does NOT leak AI/ML terms.
+#   4. Empty brief fields collapse cleanly without orphan headers or dangling
+#      section markers.
+#   5. The universal Boolean mechanics / JSON contract / response-shape
+#      sections survive untouched (token-efficiency-style assertions are
+#      intentionally absent — this file remains behavior-focused).
+
+
+def _ai_planner_prose_terms() -> tuple[str, ...]:
+    """Strings that used to be hardcoded into `_build_strategy_system`.
+
+    If any of these appear in a system prompt, the planner is leaking
+    AI-specific vocabulary that should now come from the brief. These tokens
+    were chosen because they appear ONLY in the legacy planner prose, not in
+    any field rendered from the head-AI brief JSON itself (e.g. archetypes,
+    noise_archetypes). Adding tokens here that ALSO appear in the brief JSON
+    would cause false positives because the prompt legitimately renders brief
+    content as JSON.
+    """
+    return (
+        # Boolean compound example
+        '("LLM" OR "GenAI" OR "agentic")',
+        '("agentic" OR "LLM agent")',
+        '"financial services" OR "banking" OR "BFSI"',
+        # Precision sniper parenthetical examples
+        "Axolotl",
+        "vLLM",
+        "DeepSpeed",
+        "SWE-bench, MMLU, HumanEval",
+        "Constitutional AI, GRPO",
+        "TRL, PEFT",
+        # Sequencing heuristic prose
+        "BACKLOAD RL/RLHF STRINGS",
+        # Abbreviation collision examples (full expansions; the abbreviations
+        # IPO/ORM/PPO etc. appear too often in unrelated contexts to pin)
+        "Initial Public Offering",
+        "Object-Relational Mapping",
+        "Preferred Provider Organization",
+        "Data Protection Officer",
+        # Universal blacklist category labels
+        "Universal infrastructure",
+        "Universal ML",
+        "AI-powered, intelligent automation",
+        # Commit 2.1 — universal-mechanics example tokens that previously
+        # leaked AI/RL vocabulary through morphology / Signal Test /
+        # Disambiguation / Tool/Library example sites. After the polish pass,
+        # these should appear in the prompt only when the brief explicitly
+        # renders them via _hydrate_legacy_calibration (where they live in
+        # ExampleCompound / AbbreviationCollision values). Bare "fine-tuning"
+        # is intentionally NOT pinned because it appears in the head-AI
+        # brief's archetype builder_signals and therefore renders into the
+        # system prompt independently of the universal-mechanics section.
+        "RLHF",
+        "reinforcement learning from human feedback",
+        "SWE-bench",
+        "swebench",
+        "axolotl",
+        "mujoco",
+        "reward model",
+        "fine-tuned",
+        "finetuning",
+        "OpenDevin",
+        "OpenHands",
+        "Tianshou",
+    )
+
+
+def test_build_strategy_system_with_empty_calibration_drops_ai_specific_planner_prose():
+    """An AI brief loaded WITHOUT any of the new calibration fields populated
+    must not render the legacy hardcoded AI/ML planner vocabulary."""
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    assert brief.example_compounds == []
+    assert brief.term_blacklist_categories == []
+    assert brief.abbreviation_collisions == []
+    assert brief.sequencing_heuristics == ""
+
+    system = _build_strategy_system(brief, has_kit=False)
+
+    for leak in _ai_planner_prose_terms():
+        assert leak not in system, f"unexpected AI-specific planner prose still in prompt: {leak!r}"
+
+    assert "Example rendered compounds:" not in system
+    assert "### Abbreviation Collision Filter" not in system
+    assert "### Blacklist — NEVER Include" not in system
+    assert "SEQUENCING:" not in system
+
+    assert "Common traps:" in system
+    assert "### Tool/Library Names Are Proper Nouns" in system
+
+
+def test_build_strategy_system_with_legacy_ai_calibration_renders_ai_planner_prose():
+    """Hydrating the brief with the legacy AI calibration must restore the
+    AI-specific planner content via brief-driven rendering — proving the
+    path is brief-driven, not hardcoded."""
+    brief = _hydrate_legacy_calibration(load_brief(HEAD_AI_V2_BRIEF_PATH))
+
+    system = _build_strategy_system(brief, has_kit=False)
+
+    assert "Example rendered compounds:" in system
+    assert "Axolotl" in system
+    assert "SWE-bench" in system
+    assert "Constitutional AI" in system
+
+    assert "### Abbreviation Collision Filter" in system
+    assert "IPO" in system
+    assert "identity preference optimization" in system
+    assert "RLHF" in system
+    assert "reinforcement learning from human feedback" in system
+
+    assert "### Blacklist — NEVER Include" in system
+    assert "Universal infrastructure" in system
+    assert "PyTorch" in system
+    assert "AI-powered" in system
+
+    assert "SEQUENCING:" in system
+    assert "BACKLOAD RL/RLHF STRINGS" in system
+
+
+def test_build_strategy_system_renders_non_ai_vertical_calibration_without_ai_leaks():
+    """A non-AI vertical (clinical/healthtech) brief that supplies its own
+    calibration values produces a system prompt reflecting THAT vertical's
+    vocabulary and never leaks AI/ML examples."""
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    brief.example_compounds = [
+        ExampleCompound(
+            boolean='("telehealth triage" OR "remote patient monitoring") AND ("clinical decision support") AND ("production" OR "deployed")',
+            purpose="Broad recall AND-gate for clinical AI builders",
+            novelty_bucket="canonical",
+        ),
+        ExampleCompound(
+            boolean='("Epic FHIR" OR "Cerner Millennium")',
+            purpose="Precision sniper anchored on EHR vendor builder vocabulary",
+            novelty_bucket="canonical",
+        ),
+    ]
+    brief.term_blacklist_categories = [
+        BlacklistCategory(
+            label="Generic clinical buzzwords",
+            rationale="Non-discriminating terms common to all clinician profiles",
+            terms=["bedside care", "patient-centered", "evidence-based"],
+        ),
+        BlacklistCategory(
+            label="Universal healthcare admin",
+            rationale="Healthcare administrative tools shared across all clinical roles",
+            terms=["HIPAA training", "EHR access", "clinical workflows"],
+        ),
+    ]
+    brief.abbreviation_collisions = [
+        AbbreviationCollision(
+            abbreviation="EHR",
+            expansion="electronic health record",
+            standalone_allowed=True,
+            note="EHR has no dominant non-clinical meaning",
+        ),
+        AbbreviationCollision(
+            abbreviation="CDS",
+            expansion="clinical decision support",
+            standalone_allowed=False,
+            note="CDS collides with credit default swap and content delivery service",
+        ),
+    ]
+    brief.sequencing_heuristics = (
+        "BACKLOAD GENERIC CLINICAL TITLE STRINGS — front-load specialty + "
+        "telehealth/RPM-anchored strings; clinical informatics title-anchored "
+        "strings cleanup pass."
+    )
+
+    system = _build_strategy_system(brief, has_kit=False)
+
+    assert "telehealth triage" in system
+    assert "Epic FHIR" in system
+    assert "EHR" in system
+    assert "clinical decision support" in system
+    assert "Generic clinical buzzwords" in system
+    assert "BACKLOAD GENERIC CLINICAL TITLE STRINGS" in system
+
+    for leak in _ai_planner_prose_terms():
+        assert leak not in system, f"AI vocabulary leaked into clinical brief prompt: {leak!r}"
+
+
+def test_build_strategy_system_collapses_empty_calibration_without_orphan_headers():
+    """When all four calibration fields are empty, none of the brief-driven
+    sections render and the surrounding universal sections remain well-formed
+    (no orphan headers, no dangling colons, no broken markdown)."""
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    brief.example_compounds = []
+    brief.term_blacklist_categories = []
+    brief.abbreviation_collisions = []
+    brief.sequencing_heuristics = ""
+
+    system = _build_strategy_system(brief, has_kit=False)
+
+    assert "Example rendered compounds:\n\n" not in system
+    assert "Example rendered compounds:" not in system
+    assert "SEQUENCING:\n\n" not in system
+    assert "SEQUENCING:" not in system
+    assert "### Abbreviation Collision Filter" not in system
+    assert "### Blacklist — NEVER Include" not in system
+    assert "### Blacklist" not in system
+
+    assert "\n\n\n\n" not in system
+
+    assert "### Tool/Library Names Are Proper Nouns" in system
+    assert "Common traps:" in system
+
+
+def test_build_strategy_system_preserves_universal_boolean_mechanics_and_json_contract():
+    """The universal LinkedIn Boolean mechanics, response-shape preamble, and
+    JSON contract are NOT vertical calibration — they must remain in the
+    prompt regardless of brief content."""
+    brief = load_brief(HEAD_AI_V2_BRIEF_PATH)
+    system_empty = _build_strategy_system(brief, has_kit=False)
+
+    hydrated = _hydrate_legacy_calibration(load_brief(HEAD_AI_V2_BRIEF_PATH))
+    system_hydrated = _build_strategy_system(hydrated, has_kit=False)
+
+    universal_pins = (
+        "### LinkedIn Search Behavior (MANDATORY",
+        "Case-insensitive.",
+        "No stemming.",
+        "Substring-embedded.",
+        "### Signal Test (every OR group must pass)",
+        "### Disambiguation — No Bare Generic Terms",
+        "### Tool/Library Names Are Proper Nouns",
+        "### Mandatory Self-Review Before Output",
+        "Return JSON with this structure:",
+        '"architecture": Your selected architecture',
+        '"generated_strings": Array of compound strings',
+        '"coverage_gaps": Array of gaps identified',
+        '"noise_predictions": Array of objects',
+        "Return valid JSON only.",
+    )
+    for pin in universal_pins:
+        assert pin in system_empty, f"universal section missing under empty calibration: {pin!r}"
+        assert pin in system_hydrated, f"universal section missing under hydrated calibration: {pin!r}"

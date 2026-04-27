@@ -36,6 +36,87 @@ from shared.strict_seniority import (
 _MAX_PROMOTED_EDGE_CASE_GAPS = 3
 
 
+def _render_example_compounds_block(brief: Brief) -> str:
+    """Render brief.example_compounds as an "Example rendered compound" block.
+
+    The compat brief mirrors structured ``ExampleCompound`` dataclass instances
+    with attributes ``boolean``, ``purpose`` and ``novelty_bucket``. If the
+    brief carries no example compounds (or they are all empty), return ``""``
+    so the caller can omit the section cleanly.
+
+    This is read-only on the brief — it never mutates the mirrored list.
+    """
+    examples = getattr(brief, "example_compounds", None) or ()
+    lines: list[str] = []
+    for ex in examples:
+        boolean = str(getattr(ex, "boolean", "") or "").strip()
+        if not boolean:
+            continue
+        purpose = str(getattr(ex, "purpose", "") or "").strip()
+        bucket = str(getattr(ex, "novelty_bucket", "") or "").strip()
+        bucket_suffix = f" [{bucket}]" if bucket else ""
+        if purpose:
+            lines.append(f"- {purpose}{bucket_suffix}: {boolean}")
+        else:
+            lines.append(f"- {boolean}{bucket_suffix}")
+    return "\n".join(lines)
+
+
+def _render_term_blacklist_block(brief: Brief) -> str:
+    """Render brief.term_blacklist_categories as a labeled bullet list.
+
+    Mirrors the shape of ``shared.brief_schema.Brief.term_blacklist_block`` but
+    operates on the compat ``Brief`` mirror (a list of ``BlacklistCategory``
+    dataclass instances). Returns ``""`` when the brief carries no
+    blacklist categories so the caller can omit the surrounding section.
+    """
+    categories = getattr(brief, "term_blacklist_categories", None) or ()
+    lines: list[str] = []
+    for cat in categories:
+        label = str(getattr(cat, "label", "") or "").strip()
+        rationale = str(getattr(cat, "rationale", "") or "").strip()
+        terms = [str(t).strip() for t in (getattr(cat, "terms", None) or []) if str(t).strip()]
+        if not (label or rationale or terms):
+            continue
+        if label and rationale:
+            lines.append(f"- **{label}** — {rationale}")
+        elif label:
+            lines.append(f"- **{label}**")
+        elif rationale:
+            lines.append(f"- {rationale}")
+        if terms:
+            lines.append(f"  Terms: {', '.join(terms)}")
+    return "\n".join(lines)
+
+
+def _render_abbreviation_collisions_block(brief: Brief) -> str:
+    """Render brief.abbreviation_collisions as a guidance bullet list.
+
+    Mirrors ``shared.brief_schema.Brief.abbreviation_collisions_block``. The
+    block produced is the body of the "Abbreviation Collision Filter" section
+    — the surrounding rule prose is kept static in the prompt. Returns ``""``
+    when no collisions are configured so the caller can omit the section.
+    """
+    collisions = getattr(brief, "abbreviation_collisions", None) or ()
+    lines: list[str] = []
+    for ab in collisions:
+        abbreviation = str(getattr(ab, "abbreviation", "") or "").strip()
+        expansion = str(getattr(ab, "expansion", "") or "").strip()
+        if not abbreviation:
+            continue
+        standalone = bool(getattr(ab, "standalone_allowed", False))
+        note = str(getattr(ab, "note", "") or "").strip()
+        if expansion:
+            handling = "standalone allowed" if standalone else "pair with expansion"
+            lines.append(f"- \"{abbreviation}\" → {expansion} ({handling})")
+        else:
+            handling = "standalone allowed" if standalone else "do not use standalone"
+            lines.append(f"- \"{abbreviation}\" — {handling}")
+        if note:
+            lines.append(f"  Note: {note}")
+    return "\n".join(lines)
+
+
 def _iter_brief_patterns(brief: Brief, attr: str) -> tuple[str, ...]:
     """Return the lowercased non-empty patterns under ``attr`` on the compat brief."""
     values = getattr(brief, attr, None) or ()
@@ -704,6 +785,47 @@ def _build_strategy_system(
 
     market_hint = f" Brief specifies: **{brief.market_density}**." if brief.market_density else ""
 
+    example_compounds_block = _render_example_compounds_block(brief)
+    example_compounds_section = (
+        f"\n\nExample rendered compounds:\n{example_compounds_block}"
+        if example_compounds_block
+        else ""
+    )
+
+    sequencing_text = str(getattr(brief, "sequencing_heuristics", "") or "").strip()
+    sequencing_section = (
+        f"\n\nSEQUENCING:\n{sequencing_text}" if sequencing_text else ""
+    )
+
+    abbreviation_block = _render_abbreviation_collisions_block(brief)
+    abbreviation_text = (
+        f"""### Abbreviation Collision Filter
+
+An abbreviation MUST NOT appear standalone if it has a more common non-domain meaning on LinkedIn.
+
+{abbreviation_block}
+
+Rule: an abbreviation that fails alone IS acceptable when paired with its full expansion in the same OR group."""
+        if abbreviation_block
+        else ""
+    )
+
+    blacklist_block = _render_term_blacklist_block(brief)
+    blacklist_text = (
+        f"""### Blacklist — NEVER Include
+
+{blacklist_block}"""
+        if blacklist_block
+        else ""
+    )
+
+    abbreviation_blacklist_block = "\n\n".join(
+        section for section in (abbreviation_text, blacklist_text) if section
+    )
+    abbreviation_blacklist_section = (
+        f"\n{abbreviation_blacklist_block}\n" if abbreviation_blacklist_block else ""
+    )
+
     return f"""You are a senior sourcing strategist planning a Boolean search execution for LinkedIn Recruiter.
 
 Role: {brief.role_title}
@@ -764,7 +886,7 @@ Your job: design targeted {"layered retrieval families and rendered search strin
 {"The kit provides terms organized by skill cluster. This" if has_kit else "This"} role requires an INTERSECTION of skills.
 Create {"retrieval families that AND-gate high-signal layers" if use_layered_retrieval else "compound searches that AND-gate high-signal concepts"} {"from different kit clusters with" if has_kit else "with"} domain/seniority qualifiers from the brief.
 
-Example rendered compound: ("agentic" OR "LLM agent") AND ("financial services" OR "banking" OR "BFSI") AND ("production" OR "deployment" OR "enterprise")
+Use the proven broad-to-narrow shape: cohort or adjacent-population doorway AND capability/workflow signals AND execution or production proof.{example_compounds_section}
 
 {total_count_guidance} {"Each family may emit one or more concrete booleans." if use_layered_retrieval else ""} You MUST include a mix of TWO {mix_label}:
 
@@ -777,19 +899,11 @@ Broad searches that surface the general cohort. 500-5000 expected results.
 Narrow searches using specific tool names, framework names, benchmark names, or niche technical terms that only genuine practitioners would have on their profile. 20-500 expected results.
 - {"Use the kit's Precision cluster terms — specific tools, libraries, benchmarks, methods" if has_kit else "Use specific tool names, framework names, benchmark names, or method-specific terms from the JD and role description"}
 - Cross with minimal domain qualifiers (or none — the tool name IS the qualifier)
-- Examples of precision signals: specific framework names (Axolotl, vLLM, DeepSpeed), benchmark names (SWE-bench, MMLU, HumanEval), method-specific terms (Constitutional AI, GRPO), infrastructure (TRL, PEFT)
+- Precision signals are typically specific framework names, benchmark names, method-specific terms, or infrastructure that only genuine practitioners would have on their profile
 - These strings may return few results but nearly every result is a real practitioner
 - {"Look through the kit vocabulary for the most specific, least ambiguous terms and USE them" if has_kit else "Mine the JD for the most specific, least ambiguous terms and USE them"}
 
-Order: alternate between Type A and Type B so precision-oriented families run early, not just as an afterthought.
-
-SEQUENCING — BACKLOAD RL/RLHF STRINGS:
-Place strings anchored primarily to RL/RLHF/post-training vocabulary in the SECOND HALF of the execution sequence. Front-load strings targeting other capability areas first (agentic systems, data quality/evaluation, coding agents, STEM/multimodal, embodied AI, general fine-tuning). Rationale:
-- RL/RLHF strings surface the densest, most well-trodden talent pool — they will still run, but later
-- Thinner capability area pools are faster to work through and surface more net-new candidates per string
-- RL practitioners also appear in non-RL strings (someone building RL environments shows up on "simulation" or "agent" strings too — and that incidental RL signal is often stronger than the boilerplate RLHF keyword match)
-- By the time RL strings execute, the adaptation loop will have learned from earlier strings' signal/noise patterns, producing more strategic RL searches than the obvious keyword combinations
-This is NOT deprioritization — all RL strings still execute. It is sequencing for maximum marginal yield.
+Order: alternate between Type A and Type B so precision-oriented families run early, not just as an afterthought.{sequencing_section}
 
 ### Tapped-Market / Edge-Case Opening (MANDATORY when the brief says the obvious pool is exhausted)
 
@@ -804,7 +918,7 @@ For the FIRST 8 strings:
 - At least 5 must target edge-case or transfer populations
 - Prefer intersections like backend/platform + copilots, internal AI platforms, delivery accelerators, reference architectures, observability/tracing/evals, product/problem-language AI builders, consultancy ICs with build evidence, or vertical SaaS builders
 - Do NOT front-load exact-title strings, company-first canonical employer strings, or framework-first strings where a fashionable tool/library name is the main qualifier
-- Do NOT front-load broad core strings like ("LLM" OR "GenAI" OR "agentic") AND ("production" OR "deployed") unless they are crossed with a non-obvious adjacent population qualifier
+- Do NOT front-load broad core strings (the canonical role-vocabulary AND production-proof shape) unless they are crossed with a non-obvious adjacent population qualifier
 
 The canonical pool still matters, but it belongs in later cleanup passes once the edge-case populations have been tested.
 
@@ -829,70 +943,46 @@ LinkedIn Recruiter search has three properties that dictate how you construct ev
 
 1. **Case-insensitive.** "AgentBench" and "agentbench" return identical results. NEVER include case-only variants — they waste OR slots and add zero coverage.
 
-2. **No stemming.** Every character difference is a different search token. "model" does NOT match "models." "fine-tuning" does NOT match "fine-tuned." You MUST include all morphological variants as separate OR terms:
-   - Singular AND plural: "reward model" AND "reward models"
-   - Base AND past tense: "fine-tuning" AND "fine-tuned"
-   - Noun AND gerund: "reward model" AND "reward modeling"
-   - Spacing/hyphenation variants: "fine-tuning" AND "fine tuning" AND "finetuning"
-   - Common truncations practitioners use: "evals" for "evaluations", "env" for "environment"
-   - Acronym + expansion: "RLHF" AND "reinforcement learning from human feedback"
+2. **No stemming.** Every character difference is a different search token. "deployment" does NOT match "deployments." "deploy" does NOT match "deployed." You MUST include all morphological variants as separate OR terms:
+   - Singular AND plural: "deployment" AND "deployments"
+   - Base AND past tense: "deploy" AND "deployed"
+   - Noun AND gerund: "analyst" AND "analyzing"
+   - Spacing/hyphenation variants: "co-founder" AND "co founder" AND "cofounder"
+   - Common truncations practitioners use: "admin" for "administrator", "ops" for "operations"
+   - Acronym + expansion: "PMP" AND "project management professional"
    No penalty for long OR strings — 8 well-chosen variants is better than 3. Every missing variant is a missing candidate.
 
-3. **Substring-embedded.** "reward model" DOES match "reward model development" because the exact character sequence is embedded. NEVER add superstrings of existing terms — they add zero coverage.
+3. **Substring-embedded.** "systems engineer" DOES match "systems engineering manager" because the exact character sequence is embedded. NEVER add superstrings of existing terms — they add zero coverage.
 
 ### Signal Test (every OR group must pass)
 
 - **Recall groups:** "Does this group anchor me to the right general population for this role?" It should return people plausibly in the right space, even if not all are perfect fits.
-  - PASS: ("RLHF" OR "reinforcement learning from human feedback") → returns post-training practitioners
-  - FAIL: ("machine learning") → too broad, returns everyone in ML
+  - PASS: ("PMP" OR "project management professional") → returns project management practitioners
+  - FAIL: ("management") → too broad, returns everyone with any leadership role
   - FAIL: ("Python") → returns all of software engineering
 
 - **Precision groups:** "Does this group confirm specific expertise that distinguishes specialists from generalists?"
-  - PASS: ("SWE-bench" OR "SWE bench" OR "swebench") → specific benchmark, only builders know it
+  - PASS: ("ISO 27001") → specific certification, only security/compliance specialists hold it
   - FAIL: ("code" OR "coding") → everyone codes
   - FAIL: ("trajectory") → matches "career trajectory" on every profile
 
 ### Disambiguation — No Bare Generic Terms
 
-A bare single-word term with a dominant non-technical meaning on LinkedIn MUST NOT appear in any OR group. Test: if a recruiter pastes this word alone into LinkedIn search, would the majority of results be non-ML? If yes, use only qualified compound forms.
+A bare single-word term with a dominant non-technical meaning on LinkedIn MUST NOT appear in any OR group. Test: if a recruiter pastes this word alone into LinkedIn search, would the majority of results be outside the target population? If yes, use only qualified compound forms.
 
-Wrong: ("alignment" OR "AI alignment" OR "model alignment") — bare "alignment" matches organizational alignment, strategic alignment, etc.
-Right: ("AI alignment" OR "model alignment" OR "LLM alignment") — every form is qualified.
+Wrong: ("plan" OR "project plan" OR "execution plan") — bare "plan" matches "5-year plan", "plan to graduate", "lesson plan", and every other use of the word.
+Right: ("project plan" OR "execution plan" OR "delivery plan") — every form is qualified.
 
-Common traps: trajectory, episode, agent, alignment, grounding, planning, reflection, oracle, sandbox, rollout, simulation, curriculum, exploration — all have dominant everyday meanings. Use only compound forms: "agent trajectory", "RL episode", "AI agent", "model alignment", etc.
+Common traps: trajectory, agent, alignment, planning, oracle, sandbox, rollout, simulation, exploration — all have dominant everyday meanings on LinkedIn (career trajectory, insurance agent, strategic alignment, financial planning, Oracle the company, AWS sandbox, product rollout, financial simulation, market exploration). Use only compound forms: "career trajectory", "customer-facing agent", "strategic alignment", "project plan", etc.
 
-### Abbreviation Collision Filter
-
-An abbreviation MUST NOT appear standalone if it has a more common non-ML meaning on LinkedIn.
-
-- "IPO" → Initial Public Offering. FAIL — use only "identity preference optimization"
-- "ORM" → Object-Relational Mapping. FAIL — use only "outcome reward model"
-- "CAI" → various non-ML meanings. FAIL — use only "constitutional AI"
-- "PPO" → Preferred Provider Organization. Borderline — "proximal policy optimization" is safer
-- "RLHF" → No dominant non-ML meaning. PASS.
-- "DPO" → Data Protection Officer in some markets. Acceptable if paired with expansion: ("DPO" OR "direct preference optimization")
-
-Rule: an abbreviation that fails alone IS acceptable when paired with its full expansion in the same OR group.
-
-### Blacklist — NEVER Include
-
-**Universal infrastructure:** PyTorch, TensorFlow, JAX, Keras, Docker, Kubernetes, AWS, GCP, Azure, Spark, Airflow, Kafka, Redis, PostgreSQL, MongoDB, Git, GitHub, pandas, NumPy, SciPy, scikit-learn
-
-**Universal ML:** machine learning, deep learning, neural network, gradient descent, backpropagation, cross-validation, hyperparameter, training (alone), inference (alone), model (alone), transformer (alone), encoder, decoder
-
-**Generic software:** CI/CD, GitHub Actions, Jenkins, unit testing, code review, API integration, microservices, REST, GraphQL
-
-**User tools (not builder tools):** GitHub Copilot, Cursor, ChatGPT, Claude (product), Gemini, LangChain, LlamaIndex, AutoGPT, BabyAGI
-
-**Buzzwords:** AI-powered, intelligent automation, cutting-edge, generative AI (alone), autonomous (alone), automation (alone), data-driven, next-generation
-
+{abbreviation_blacklist_section}
 ### Tool/Library Names Are Proper Nouns
 
-Do NOT fabricate compound expansions for tool names. No practitioner writes "playwright automation" or "MuJoCo physics" on their profile.
+Do NOT fabricate compound expansions for tool names. No practitioner writes "Postgres database" or "Kubernetes orchestration" on their profile.
 
-Valid expansions: package/repo names ("mujoco-py", "axolotl-ai"), version identifiers ("SWE-bench Lite"), known alternate names ("OpenDevin" for OpenHands), spacing/hyphenation variants ("SWE-bench" / "SWE bench" / "swebench").
+Valid expansions: package/repo names ("django-rest-framework", "postgres-14"), version identifiers ("Kubernetes 1.28"), known alternate names ("k8s" for Kubernetes), spacing/hyphenation variants ("postgresql" / "postgres-sql" / "postgres sql").
 
-A single-term group is valid. If a tool has no variants, the group is just ("Tianshou") and that is correct.
+A single-term group is valid. If a tool has no variants, the group is just ("Terraform") and that is correct.
 
 ### Mandatory Self-Review Before Output
 
@@ -900,7 +990,7 @@ Execute these checks on every OR group in your output:
 
 1. **Case dedup:** Do any two terms differ ONLY by capitalization? Delete one.
 2. **Disambiguation:** Any bare single-word terms that fail the recruiter-paste test? Replace with compound forms.
-3. **Abbreviation check:** Any standalone abbreviations with non-ML meanings without their expansion paired? Remove or expand.
+3. **Abbreviation check:** Any standalone abbreviations with non-domain meanings without their expansion paired? Remove or expand.
 4. **Lexical expansion:** Does each group include all necessary variants — singular/plural, base/past tense, noun/gerund, spacing/hyphenation, common truncations? Every missing variant is a missing candidate. But never add superstrings (substring embedding handles those). Tool names are proper nouns — do not invent variants.
 
 ### 2. IDENTIFY coverage gaps
