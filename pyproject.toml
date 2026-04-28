@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+markers = [
+    "live_integration: opt-in tests that hit the real Perplexity API (require PERPLEXITY_API_KEY + PERPLEXITY_LIVE_INTEGRATION=1)",
+]
