@@ -13,7 +13,7 @@ FDE_RUN_DIR ?= $(ROOT)/output/runs/linkedin/1990251114/2026-04-12T12-26-33-17837
 FDE_SEARCH_MEMORY ?= $(FDE_RUN_DIR)/search_memory-1990251114.json
 FDE_FINAL_JUDGMENTS ?= $(FDE_RUN_DIR)/final_judgments.jsonl
 
-.PHONY: help validate hygiene test-default test-full head-ai-mi head-ai-brief fde-mi fde-brief
+.PHONY: help validate hygiene test-default test-full audit-ui audit-css-tokens head-ai-mi head-ai-brief fde-mi fde-brief
 
 help: ## Show available shortcuts
 	@printf "\nAvailable shortcuts:\n\n"
@@ -31,6 +31,14 @@ test-default: ## Run the default green validation suite
 
 test-full: ## Run the full pytest suite, including heavier replay coverage
 	$(PYTHON) tools/run_validation.py full
+
+audit-css-tokens: ## Validate var(--name) CSS references against tokens.css definitions
+	@$(PYTHON) tools/audit_css_static.py
+
+audit-ui: audit-css-tokens ## Walk every Cloris surface, score against design rules, emit Markdown report
+	@$(PYTHON) tools/audit_surfaces.py --viewports 1024 1280 1440
+	@$(PYTHON) tools/audit_rules.py
+	@$(PYTHON) tools/audit_report.py
 
 head-ai-mi: ## Run Head of Applied AI market intel with external research
 	$(PYTHON) tools/update_market_intel.py \
