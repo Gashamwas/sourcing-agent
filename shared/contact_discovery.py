@@ -89,8 +89,63 @@ async def discover_contacts(
     return contact
 
 
-def merge_profile_contact(contact: ContactInfo, user_email: str, twitter: str, blog: str) -> ContactInfo:
-    """Merge additional contact info from the user profile into ContactInfo."""
+# OSS Maintainers Slice 8: regex used to scan bio + profile README
+# for embedded LinkedIn URLs. Requires the full ``linkedin.com/in/<handle>``
+# shape — bare keywords like "ex-LinkedIn" don't match (per spec §12
+# false-positive mitigation). Captures either ``in/`` (personal
+# profiles) or ``company/`` (company pages); the resolver only acts
+# on personal profiles, but the parser captures both so we can log
+# discoveries we choose not to use.
+_LINKEDIN_URL_RE = re.compile(
+    r"https?://(?:www\.)?linkedin\.com/(?:in|pub|company)/[A-Za-z0-9_\-./%]+",
+    re.IGNORECASE,
+)
+
+
+def _extract_linkedin_url(text: str) -> str:
+    """Return the first ``linkedin.com/in/<handle>`` URL in ``text``, else ''."""
+
+    if not text:
+        return ""
+    match = _LINKEDIN_URL_RE.search(text)
+    if match is None:
+        return ""
+    url = match.group(0)
+    # Trim trailing punctuation that often clings to URLs in prose.
+    return url.rstrip(".,;:)]}>\"'")
+
+
+def merge_profile_contact(
+    contact: ContactInfo,
+    user_email: str,
+    twitter: str,
+    blog: str,
+    *,
+    bio: str = "",
+    readme_text: str = "",
+) -> ContactInfo:
+    """Merge additional contact info from the user profile into ContactInfo.
+
+    OSS Maintainers Slice 8: the optional ``bio`` and ``readme_text``
+    arguments enable LinkedIn URL discovery beyond the historical
+    ``blog`` field. Provenance is recorded on
+    ``contact.linkedin_url_source`` so downstream consumers (the
+    cross-source identity resolver in
+    :mod:`shared.identity_resolution_service`, the recruiter
+    workspace) can band confidence: ``"blog"`` is highest, ``"bio"``
+    and ``"readme"`` are medium. Per spec §12, the bio/readme
+    extractors require a full URL match (regex
+    :data:`_LINKEDIN_URL_RE`), so passing references like "ex-
+    LinkedIn" do not falsely trigger a cross-link.
+
+    Resolution order: ``blog`` wins if present (deliberate recruiter
+    placement). ``bio`` is checked next; ``readme_text`` is the
+    final fallback. The resolver never re-asserts a higher-
+    confidence source if a lower one was already populated — i.e.,
+    if a previous call set ``linkedin_url`` from ``"readme"``, this
+    call's ``"blog"`` URL wins.
+    """
+
     # Add profile email
     if _is_real_email(user_email):
         email_lower = user_email.lower().strip()
@@ -101,13 +156,29 @@ def merge_profile_contact(contact: ContactInfo, user_email: str, twitter: str, b
     if twitter:
         contact.twitter_url = f"https://twitter.com/{twitter}"
 
-    # Blog/website
+    # Blog/website (spec: blog-derived URLs are highest confidence)
     if blog:
         url = blog if blog.startswith("http") else f"https://{blog}"
         contact.website = url
-
         # Check if blog is a LinkedIn URL
         if "linkedin.com" in blog.lower():
             contact.linkedin_url = url
+            contact.linkedin_url_source = "blog"
+
+    # Bio scan (spec: medium confidence — bio prose may include
+    # full LinkedIn URLs the recruiter would want surfaced).
+    if not contact.linkedin_url:
+        bio_url = _extract_linkedin_url(bio)
+        if bio_url:
+            contact.linkedin_url = bio_url
+            contact.linkedin_url_source = "bio"
+
+    # Profile README scan (spec: same as bio — full URL match
+    # required, lower than blog).
+    if not contact.linkedin_url:
+        readme_url = _extract_linkedin_url(readme_text)
+        if readme_url:
+            contact.linkedin_url = readme_url
+            contact.linkedin_url_source = "readme"
 
     return contact

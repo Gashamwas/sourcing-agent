@@ -155,11 +155,18 @@ class GitHubAcquisitionService:
             pipeline._in_flight_usernames.discard(username)
             raise
 
+        # OSS Maintainers Slice 8: pass bio + profile README so the
+        # cross-source resolver picks up LinkedIn URLs the recruiter
+        # included in prose, not just the blog field. Provenance
+        # ("blog" / "bio" / "readme") lands on
+        # ``contact.linkedin_url_source`` for downstream banding.
         candidate.contact = merge_profile_contact(
             candidate.contact,
             candidate.user.email,
             candidate.user.twitter_username,
             candidate.user.blog,
+            bio=candidate.user.bio,
+            readme_text=candidate.readme_text,
         )
 
         pipeline._governor.record_enrichment()

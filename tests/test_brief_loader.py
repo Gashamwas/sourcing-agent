@@ -172,3 +172,96 @@ def test_load_brief_compat_mirror_isolated_from_new_brief(tmp_path: Path) -> Non
     brief.prior_search.ruled_out_urls.append("c")
 
     assert brief._new_brief.prior_search.ruled_out_urls == ["a", "b"]
+
+
+# ---------------------------------------------------------------------------
+# OSS Maintainers module Slice 2 — V2 brief hydration
+# ---------------------------------------------------------------------------
+
+
+def test_load_brief_hydrates_default_oss_maintainer_fields(tmp_path: Path) -> None:
+    """A V2 brief without OSS Maintainer keys gets the dataclass defaults.
+
+    Behavior-preserving for classic github briefs per spec §11:
+    `target_projects` empty ⇒ classifier and full-eval block are
+    no-ops in Slice 6.
+    """
+
+    brief_path = _write_brief(tmp_path, _minimal_v2_brief())
+    brief = load_brief(brief_path)
+
+    assert brief.target_projects == []
+    assert brief.target_stacks == []
+    assert brief.maintainership_level == "contributor"
+    assert brief._new_brief.target_projects == []
+    assert brief._new_brief.target_stacks == []
+    assert brief._new_brief.maintainership_level == "contributor"
+
+
+def test_load_brief_hydrates_full_oss_maintainer_fields(tmp_path: Path) -> None:
+    """A V2 brief carrying every OSS Maintainer key hydrates onto compat AND _new_brief."""
+
+    payload = _minimal_v2_brief()
+    payload["target_projects"] = ["kubernetes/kubernetes", "etcd-io/etcd"]
+    payload["target_stacks"] = ["go", "container-orchestration"]
+    payload["maintainership_level"] = "maintainer"
+
+    brief_path = _write_brief(tmp_path, payload)
+    brief = load_brief(brief_path)
+
+    assert brief.target_projects == ["kubernetes/kubernetes", "etcd-io/etcd"]
+    assert brief.target_stacks == ["go", "container-orchestration"]
+    assert brief.maintainership_level == "maintainer"
+
+    assert brief._new_brief.target_projects == [
+        "kubernetes/kubernetes",
+        "etcd-io/etcd",
+    ]
+    assert brief._new_brief.target_stacks == ["go", "container-orchestration"]
+    assert brief._new_brief.maintainership_level == "maintainer"
+
+
+def test_load_brief_oss_maintainer_compat_mirror_isolated_from_new_brief(
+    tmp_path: Path,
+) -> None:
+    """`target_projects` mirror on compat Brief must not share mutable state.
+
+    Mirrors the `_detach` pattern used for vertical-agnostic
+    calibration fields and exec_search blocks. Mutating the compat
+    Brief's lists must not affect the structured `_new_brief`.
+    """
+
+    payload = _minimal_v2_brief()
+    payload["target_projects"] = ["kubernetes/kubernetes", "rust-lang/rust"]
+
+    brief_path = _write_brief(tmp_path, payload)
+    brief = load_brief(brief_path)
+
+    brief.target_projects.append("etcd-io/etcd")
+
+    assert brief._new_brief.target_projects == [
+        "kubernetes/kubernetes",
+        "rust-lang/rust",
+    ]
+
+
+def test_load_brief_filters_malformed_oss_maintainer_entries(
+    tmp_path: Path,
+) -> None:
+    """Defensive coercion: non-string list entries drop, garbage levels degrade."""
+
+    payload = _minimal_v2_brief()
+    # Intentionally seed garbage; validate_v2_brief WOULD reject this,
+    # but the loader's defensive coercion should still produce a sane
+    # Brief if it ever bypasses validation (e.g., legacy raw load).
+    payload["target_projects"] = ["kubernetes/kubernetes", None, ""]
+    payload["target_stacks"] = ["go"]
+    payload["maintainership_level"] = ""
+
+    brief_path = _write_brief(tmp_path, payload)
+    brief = load_brief(brief_path)
+
+    assert brief.target_projects == ["kubernetes/kubernetes"]
+    assert brief.target_stacks == ["go"]
+    # Empty string degrades to default per loader coercion.
+    assert brief.maintainership_level == "contributor"

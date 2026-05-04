@@ -278,7 +278,7 @@ The decision standard: would the hiring manager agree this person has the hands-
 On GitHub, "hands-on ML work" can be evidenced by professional self-description (bio, README) describing specific ML toolchain and production systems, even when public repos don't demonstrate it. The recruiter will cross-check LinkedIn — the agent's job is to surface candidates worth that cross-check, not to fully validate depth from public repos alone.
 
 The guard against permissiveness is the DEPTH TEST, not the capability mapping. A person must demonstrate hands-on ML builder depth to be saved — no exceptions. What the capability mapping determines is confidence level, not the binary decision. Strong domain match + depth = high confidence save. No domain match + depth + transferable methodology = moderate confidence save. No depth = reject regardless of domain.
-
+{maintainership_block}
 CANDIDATE EVIDENCE:
 {candidate_evidence}
 
@@ -445,6 +445,7 @@ def assemble_github_full_evaluation_system(brief: Brief) -> str:
         employer_signal_block=brief.employer_signal_block(),
         inferential_save_block=brief.inferential_save_block(),
         discriminating_skills_examples=brief.discriminating_skills_examples(),
+        maintainership_block=_assemble_maintainership_block(brief),
         candidate_evidence="[provided in user message]",
     )
 
@@ -518,5 +519,43 @@ def assemble_github_full_evaluation_prompt(brief: Brief, evidence_text: str) -> 
         employer_signal_block=brief.employer_signal_block(),
         inferential_save_block=brief.inferential_save_block(),
         discriminating_skills_examples=brief.discriminating_skills_examples(),
+        maintainership_block=_assemble_maintainership_block(brief),
         candidate_evidence=evidence_text,
     )
+
+
+def _assemble_maintainership_block(brief: Brief) -> str:
+    """Return the maintainership-evaluation guidance block, or empty string.
+
+    OSS Maintainers Slice 6 — when the brief carries explicit
+    ``target_projects``, append a block instructing the LLM how to
+    weigh the MAINTAINERSHIP EVIDENCE section in candidate evidence.
+    Behavior-preserving for classic github briefs: empty
+    ``target_projects`` ⇒ empty string ⇒ template renders byte-
+    identically to today.
+    """
+
+    target_projects = list(getattr(brief, "target_projects", []) or [])
+    if not target_projects:
+        return ""
+
+    desired_level = (
+        getattr(brief, "maintainership_level", "contributor") or "contributor"
+    )
+    project_list = ", ".join(target_projects)
+    return f"""
+
+═══════════════════════════════════════════════════════
+MAINTAINERSHIP-LEVEL EVALUATION (named-project mode)
+═══════════════════════════════════════════════════════
+
+This brief names specific target projects: {project_list}. The recruiter wants candidates classified at maintainership level: "{desired_level}". A separate classifier produces a MAINTAINERSHIP EVIDENCE section in the candidate evidence below — when present, weigh it as authoritative for these named projects (not generic OSS prestige).
+
+Maintainership level interpretation:
+- contributor: meaningful merged work on the project; not a trusted reviewer / merger.
+- maintainer: holds review authority; evidenced by merged-by signals, CONTRIBUTORS / MAINTAINERS file mentions, and sustained reviewer activity.
+- project_lead: holds direction-setting authority; evidenced by GOVERNANCE.md mentions, README lead designation, or being the consistent release tag author.
+
+When the candidate's classified level meets or exceeds the brief's "{desired_level}" requirement on a named project, treat it as a STRONG positive in Step 1's capability mapping (DIRECT match) and Step 2's depth test (BUILDER). When it falls below, the rest of the evaluation proceeds normally — maintainership is a positive lift, not a hard gate, because the recruiter may still want adjacent contributors who could grow into maintainership.
+
+A "budget exhausted" note in MAINTAINERSHIP EVIDENCE means the classifier hit its API cap before all signals scored — partial evidence; weigh it as conservative-floor rather than ceiling."""

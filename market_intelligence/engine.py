@@ -1623,6 +1623,17 @@ def _load_evidence_batch(
             batch,
             reconstruct_report_analysis=reconstruct_report_analysis,
         )
+    elif batch.source == "github":
+        # OSS Maintainers Slice 9: github batches get an ecosystem-
+        # momentum narrative variant rather than the LinkedIn lane
+        # / search-memory analysis. The shared abstraction (Phase 3
+        # cleanup per spec §16) unifies the two once both have
+        # hardened against real customer signal.
+        from market_intelligence.github_reflection import (
+            maybe_build_and_persist_github_research_packet,
+        )
+
+        batch = maybe_build_and_persist_github_research_packet(batch)
     return batch
 
 

@@ -115,6 +115,21 @@ class ContactInfo:
     linkedin_url: str = ""
     twitter_url: str = ""
     website: str = ""
+    # OSS Maintainers Slice 8: provenance label for `linkedin_url`. The
+    # cross-source identity resolver and the recruiter workspace use
+    # this to band confidence in the cross-link without inventing a
+    # numeric confidence channel. One of:
+    # - "" (no LinkedIn URL discovered)
+    # - "blog" — discovered via the GitHub profile's blog/website field
+    #   (highest confidence; recruiter set the URL deliberately).
+    # - "bio" — extracted from bio prose (medium; URL may be a passing
+    #   reference like "ex-LinkedIn" rather than the candidate's own
+    #   profile, so the bio-extractor requires a full URL match).
+    # - "readme" — extracted from the profile README (medium; same
+    #   reasoning as bio).
+    # Spec §12: bio/readme-derived URLs carry lower confidence than
+    # blog-field URLs.
+    linkedin_url_source: str = ""
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -162,6 +177,20 @@ class GitHubCandidate:
     # --- Outreach (stored, never sent) ---
     outreach_copy: dict = field(default_factory=dict)
 
+    # OSS Maintainers Slice 6: optional maintainership classification
+    # for the candidate's relationship to the brief's
+    # ``target_projects``. Populated by
+    # :func:`github.maintainership.classify` when
+    # ``brief.target_projects`` is non-empty (spec §11 behavior-
+    # preserving contract: classic github briefs leave this ``None``
+    # and the evidence + prompt blocks render unchanged). Stored as a
+    # plain dict on the candidate (not a typed field) because
+    # serialization round-trips through ``to_dict``/JSONL — the
+    # classifier dataclass exposes :meth:`MaintainershipClassification.to_dict`
+    # for that purpose. Consumers that want the typed shape rebuild
+    # it from the dict.
+    maintainership: Optional[dict] = None
+
     def to_dict(self) -> dict:
         d = {
             "user": self.user.to_dict(),
@@ -185,6 +214,7 @@ class GitHubCandidate:
             "capability_mapping": self.capability_mapping,
             "builder_evidence": self.builder_evidence,
             "user_evidence": self.user_evidence,
+            "maintainership": self.maintainership,
             "repo_analysis": self.repo_analysis,
             "outreach_copy": self.outreach_copy,
         }
@@ -376,6 +406,30 @@ class GitHubCandidate:
             for fc in self.frontier_contributions:
                 lines.append(f"  - {fc.get('repo', '')}: {fc.get('type', '')} — {fc.get('detail', '')}")
 
+        # OSS Maintainers Slice 6: maintainership classification.
+        # Renders ONLY when populated (i.e., classifier ran because
+        # `brief.target_projects` was non-empty). Behavior-preserving
+        # for classic github briefs — `maintainership is None` ⇒
+        # this block is omitted byte-identically. Section header
+        # signals the LLM that the evidence is authoritative for
+        # the recruiter-named projects (per spec §11), not generic
+        # OSS prestige.
+        if isinstance(self.maintainership, dict) and self.maintainership.get("level"):
+            level = self.maintainership.get("level", "contributor")
+            confidence = self.maintainership.get("confidence", 0.0)
+            evidence_sources = self.maintainership.get("evidence_sources", []) or []
+            lines.append(f"\n═══ MAINTAINERSHIP EVIDENCE (recruiter-named projects) ═══")
+            lines.append(f"  Classified level: {level} (confidence {confidence:.2f})")
+            if evidence_sources:
+                lines.append(f"  Evidence sources:")
+                for src in evidence_sources:
+                    lines.append(f"    - {src}")
+            if self.maintainership.get("signals", {}).get("budget_exhausted"):
+                lines.append(
+                    "  NOTE: classifier API budget exhausted before all "
+                    "signals scored — evidence may be partial."
+                )
+
         # Top repos with READMEs
         lines.append(f"\n═══ REPOSITORIES ═══")
         for r in self.top_repos[:10]:
@@ -433,12 +487,26 @@ class GitHubCandidate:
                 lines.append(f"  - {ue}")
 
         # Contact info
-        if self.contact.emails or self.contact.website:
+        # OSS Maintainers Slice 8: include linkedin_url when discovered.
+        # Provenance label ("blog" / "bio" / "readme") is rendered
+        # alongside so the LLM (and downstream resolver) can band
+        # confidence — a blog-field URL is recruiter-deliberate; a
+        # bio/readme extraction is corroborating.
+        if (
+            self.contact.emails
+            or self.contact.website
+            or self.contact.linkedin_url
+        ):
             lines.append(f"\n═══ CONTACT ═══")
             if self.contact.emails:
                 lines.append(f"  Emails: {', '.join(self.contact.emails)}")
             if self.contact.website:
                 lines.append(f"  Website: {self.contact.website}")
+            if self.contact.linkedin_url:
+                source = self.contact.linkedin_url_source or "unknown"
+                lines.append(
+                    f"  LinkedIn: {self.contact.linkedin_url} (via {source})"
+                )
 
         return "\n".join(lines)
 

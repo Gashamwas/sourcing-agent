@@ -50,8 +50,17 @@ def form_github_strategy(
     # Validate and repair LLM-generated queries
     queries, _validation_results = validate_batch(queries, brief, set())
 
-    # Append default repo mining and org exploration queries if configured
+    # OSS Maintainers Slice 7: target-project seeding. When the
+    # recruiter named explicit ``target_projects`` (per OSS
+    # Maintainers Module Spec §8), seed acquisition queries from
+    # them BEFORE the global FRONTIER_AI_REPOS defaults — those are
+    # generic; the target projects are recruiter-authoritative.
+    # Behavior-preserving for classic github briefs: empty
+    # ``target_projects`` ⇒ no extra queries.
     next_id = max((q.id for q in queries), default=0) + 1
+    next_id = _append_target_project_queries(brief, queries, next_id)
+
+    # Append default repo mining and org exploration queries if configured
     if include_default_repos:
         for repo in gc.FRONTIER_AI_REPOS:
             queries.append(GitHubSearchQuery(
@@ -410,7 +419,96 @@ def _default_queries(
             ))
             query_id += 1
 
+    # OSS Maintainers Slice 7: also seed from target_projects on the
+    # fallback path so a recruiter-named project survives even when
+    # LLM strategy formation fails.
+    query_id = _append_target_project_queries(brief, queries, query_id)
+
     return queries
+
+
+def _append_target_project_queries(
+    brief: Brief,
+    queries: list[GitHubSearchQuery],
+    next_id: int,
+) -> int:
+    """Seed acquisition queries from ``brief.target_projects`` (OSS Maintainers Slice 7).
+
+    For each ``owner/repo`` in ``target_projects``:
+
+    - One ``repo_mining`` query (contributor channel on the named
+      repo). Surfaces candidates with attributable activity on the
+      project — the maintainership classifier (Slice 4) then keys
+      its merge-authority / release / governance signals to this
+      project.
+    - One ``stargazer_mining`` query, optionally filtered by
+      ``target_stacks``. Stargazers signal interest; stack filter
+      narrows to candidates with stack-aligned profiles.
+
+    Behavior-preserving for classic briefs: empty ``target_projects``
+    ⇒ no queries appended; returns ``next_id`` unchanged.
+    Deduplicates against existing ``target_repo`` entries so the
+    LLM-emitted queries plus the FRONTIER_AI_REPOS defaults can't
+    collide with target-project seeds (the maintainership classifier
+    re-keys signals per project so duplicates are wasteful, not
+    harmful).
+    """
+
+    target_projects = list(getattr(brief, "target_projects", []) or [])
+    if not target_projects:
+        return next_id
+
+    target_stacks = list(getattr(brief, "target_stacks", []) or [])
+
+    # Build the existing-target set so we don't double-seed when
+    # the LLM strategy or FRONTIER_AI_REPOS already named the same
+    # repo. Compare case-insensitively to match GitHub's resolution.
+    existing_targets = {
+        (q.target_repo or "").strip().lower()
+        for q in queries
+        if (q.target_repo or "").strip()
+    }
+
+    for raw in target_projects:
+        if not isinstance(raw, str):
+            continue
+        target = raw.strip()
+        if not target or target.lower() in existing_targets:
+            continue
+        existing_targets.add(target.lower())
+
+        # Repo mining (contributor channel).
+        queries.append(
+            GitHubSearchQuery(
+                id=next_id,
+                name=f"Target project — mine contributors: {target}",
+                query="",
+                channel="repo_mining",
+                target_repo=target,
+            )
+        )
+        next_id += 1
+
+        # Stargazer mining, optionally stack-filtered. The stack
+        # filter is opportunistic — it doesn't gate emission. If
+        # the recruiter listed stacks, we encode the first one in
+        # the query name for readability; deeper filtering happens
+        # downstream when the stargazer enrichment renders profiles.
+        stack_hint = (
+            f" (stack: {target_stacks[0]})" if target_stacks else ""
+        )
+        queries.append(
+            GitHubSearchQuery(
+                id=next_id,
+                name=f"Target project — stargazer mining: {target}{stack_hint}",
+                query="",
+                channel="stargazer_mining",
+                target_repo=target,
+            )
+        )
+        next_id += 1
+
+    return next_id
 
 
 # ---------------------------------------------------------------------------

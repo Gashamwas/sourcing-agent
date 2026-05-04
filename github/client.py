@@ -492,6 +492,157 @@ class GitHubClient:
         )
         return items
 
+    # ── User-organization membership (Slice 3 — OSS Maintainers) ────
+
+    async def get_user_orgs(self, username: str) -> list[dict]:
+        """Fetch the user's public org memberships.
+
+        OSS Maintainers Slice 3. Returns ``[]`` on 404 or non-200
+        (private org membership is not visible to the API; the spec
+        notes this as expected). Used by the maintainership classifier
+        to corroborate "maintainer at this project's owning org"
+        signals when present.
+        """
+
+        params = {"per_page": gc.RESULTS_PER_PAGE}
+        items = await self._paginate(
+            f"/users/{username}/orgs",
+            params=params,
+            max_pages=2,
+            max_items=200,
+        )
+        return items
+
+    # ── Pull request endpoints (Slice 3 — OSS Maintainers) ──────────
+
+    async def list_repo_pulls(
+        self,
+        owner_repo: str,
+        state: str = "closed",
+        sort: str = "updated",
+        max_results: int = 100,
+    ) -> list[dict]:
+        """Fetch pull requests for a repo with `merged_by` populated.
+
+        OSS Maintainers Slice 3. ``state`` defaults to ``closed`` and
+        ``sort`` to ``updated`` because the maintainership classifier
+        is interested in recently-merged PRs (used to score merge
+        authority via ``merged_by.login``). Returned dicts carry the
+        full PR shape, including ``merged_by``, ``user``, and
+        ``merged_at``.
+
+        Note: GitHub's ``/pulls`` does NOT filter by author server-
+        side. Callers filter the returned list by ``merged_by.login``
+        to find merge-authority signals; the per-target-project
+        budget caps the number of items pulled.
+        """
+
+        params: dict = {
+            "state": state,
+            "sort": sort,
+            "direction": "desc",
+            "per_page": gc.RESULTS_PER_PAGE,
+        }
+        items = await self._paginate(
+            f"/repos/{owner_repo}/pulls",
+            params=params,
+            max_pages=(max_results // gc.RESULTS_PER_PAGE + 1),
+            max_items=max_results,
+        )
+        return items
+
+    async def get_pull_reviews(
+        self,
+        owner_repo: str,
+        pull_number: int,
+    ) -> list[dict]:
+        """Fetch reviews for a single pull request.
+
+        OSS Maintainers Slice 3. Used by the classifier's "reviewer
+        activity" signal: sample a handful of recent merged PRs from
+        :meth:`list_repo_pulls`, then call this per-PR to count
+        reviews authored by the candidate username. Returns ``[]`` on
+        404 or non-200; the classifier treats absence as zero
+        reviews, not as an error.
+        """
+
+        params = {"per_page": gc.RESULTS_PER_PAGE}
+        items = await self._paginate(
+            f"/repos/{owner_repo}/pulls/{pull_number}/reviews",
+            params=params,
+            max_pages=2,
+            max_items=100,
+        )
+        return items
+
+    # ── Release endpoints (Slice 3 — OSS Maintainers) ───────────────
+
+    async def list_repo_releases(
+        self,
+        owner_repo: str,
+        max_results: int = 30,
+    ) -> list[dict]:
+        """Fetch a repo's releases, newest first, with ``author`` populated.
+
+        OSS Maintainers Slice 3. Used by the classifier's "release tag
+        authorship" signal (count releases authored by the candidate)
+        AND by the project-quality sub-index (Slice 5) for release
+        cadence. ETag-cached at the underlying ``_get`` layer when
+        possible; the maintainer-signal cache layer above adds a 7d
+        TTL.
+        """
+
+        params = {"per_page": gc.RESULTS_PER_PAGE}
+        items = await self._paginate(
+            f"/repos/{owner_repo}/releases",
+            params=params,
+            max_pages=(max_results // gc.RESULTS_PER_PAGE + 1),
+            max_items=max_results,
+        )
+        return items
+
+    # ── Repo contents (Slice 3 — OSS Maintainers) ───────────────────
+
+    async def get_repo_contents(
+        self,
+        owner_repo: str,
+        path: str,
+    ) -> Optional[str]:
+        """Fetch a single file's plaintext content via ``/contents/``.
+
+        OSS Maintainers Slice 3. Used to read CONTRIBUTORS / MAINTAINERS
+        / GOVERNANCE.md files for the maintainership classifier's
+        text-mine signals. Returns the decoded plaintext (capped at
+        ~64KB to bound memory; governance docs are typically < 10KB)
+        or ``None`` on 404 or any decode failure.
+
+        Files larger than 1MB return None (GitHub's contents API
+        returns a different shape for large files; the maintainer
+        classifier's signals all live in small governance docs so
+        the cap is intentional).
+        """
+
+        status, body, _headers = await self._get(
+            f"/repos/{owner_repo}/contents/{path}",
+            use_etag=True,
+        )
+        if status not in (200, 304) or not isinstance(body, dict):
+            return None
+        if "content" not in body:
+            return None
+        size = body.get("size")
+        if isinstance(size, int) and size > 1_000_000:
+            return None
+        import base64
+
+        try:
+            content = base64.b64decode(body["content"]).decode(
+                "utf-8", errors="replace"
+            )
+            return content[:65536]
+        except Exception:
+            return None
+
     # ── Profile README ───────────────────────────────────────────────
 
     async def get_profile_readme(self, username: str) -> Optional[str]:

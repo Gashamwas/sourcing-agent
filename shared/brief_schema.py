@@ -319,6 +319,58 @@ class Brief:
     executive_movement_window_days: int = 180
     executive_calibration: Optional[ExecutiveCalibration] = None
 
+    # --- Executive Search module (Slice 5) ---
+    # Per-search dossier-spend cap (USD) and optional company-stage
+    # signal hints. The budget tracker
+    # (:mod:`exec_search.budget`) reads `dossier_spend_cap_usd`;
+    # Crunchbase + PitchBook adapters consume `company_stage_signals`
+    # as additional query refinements (Slice 5 ships the schema; the
+    # adapters fall back to candidate-derived company names when the
+    # bag is empty).
+    dossier_spend_cap_usd: float = 200.0
+    company_stage_signals: dict = field(default_factory=dict)
+
+    # --- OSS Maintainers module (Slice 2) ---
+    # Optional, default-bearing top-level evaluation inputs for the
+    # github source. Inert until Slices 6-7 consume them: Slice 6
+    # gates the maintainership-evidence block in `to_evidence_text()`
+    # and the full-eval prompt on `target_projects` non-empty; Slice
+    # 7 seeds acquisition queries from `target_projects` /
+    # `target_stacks`. Brief polish preserves `target_projects` via
+    # the `_target_projects_drift` cascade entry in
+    # :mod:`market_intelligence.brief_polish` (Slice 2).
+    #
+    # Spec rationale (top-level rather than nested under
+    # `source_config.github`): per OSS Maintainers Module Spec §8,
+    # `source_config.*` is for save-destination semantics and these
+    # are evaluation inputs. github saves continue to land in the
+    # run folder + workspace; no per-brief github destination to
+    # configure.
+    target_projects: list[str] = field(default_factory=list)
+    target_stacks: list[str] = field(default_factory=list)
+    maintainership_level: str = "contributor"
+
+    # --- Multi-module routing (Slice 2 substrate; partial mfm Slice 2) ---
+    # `target_modules` declares which modules a brief is meant to launch
+    # against (e.g. ``["linkedin"]``, ``["linkedin", "exec_search"]``).
+    # Lives at the V2 schema's top level
+    # (`shared/brief_v2_schema.py:97`) and on `BriefInfo`
+    # (`cloris/models.py`); inlined here so `dossier_mode` (below) and
+    # any other module-specific branching reads from one canonical
+    # place. mfm Slice 2 will drop this mirror once `Brief` is V2-only.
+    target_modules: list[str] = field(default_factory=list)
+
+    @property
+    def dossier_mode(self) -> bool:
+        """Whether this brief should evaluate in dossier (2-paragraph) mode.
+
+        True when ``"exec_search"`` is in ``target_modules``. Slice 2 of
+        the executive-search module branches the LinkedIn full-eval
+        prompt on this — same evaluation pipeline, paragraph-of-prose
+        rationale instead of a one-line ``SUMMARY:``.
+        """
+        return "exec_search" in self.target_modules
+
     def capability_area_names(self) -> list[str]:
         """Convenience: list of just the capability area names for template injection."""
         return [ca.name for ca in self.capability_areas]

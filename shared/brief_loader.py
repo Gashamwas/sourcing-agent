@@ -149,6 +149,23 @@ class Brief:
     board_signals: Any = None
     executive_movement_window_days: int = 180
     executive_calibration: Any = None
+    # --- OSS Maintainers module (Slice 2) ---
+    # Mirrors of the OSS Maintainers top-level evaluation inputs onto
+    # the compat Brief so consumers in `github/strategy.py` (Slice 7)
+    # and `github/judgment_templates.py` (Slice 6 — imports the V2
+    # Brief, but adapt-after-batch reads via the legacy Brief) can
+    # read without spelunking _new_brief. Defaults match the V2
+    # dataclass defaults so a brief without these fields renders as
+    # behavior-preserving for classic github briefs (spec §11).
+    target_projects: list[str] = field(default_factory=list)
+    target_stacks: list[str] = field(default_factory=list)
+    maintainership_level: str = "contributor"
+    # --- Multi-module routing (Slice 2 substrate; partial mfm Slice 2) ---
+    # Mirror of `_new_brief.target_modules` for compat consumers like
+    # `linkedin/strategy.py` that take the compat Brief and need to
+    # branch on whether the brief targets executive search (Slice 2's
+    # `title_first` architecture bias) or any other module.
+    target_modules: list[str] = field(default_factory=list)
     # V2 brief schema object (set when loading a V2 brief)
     _new_brief: Any = field(default=None, repr=False)
 
@@ -347,6 +364,46 @@ def _load_v2_brief(raw: dict) -> Brief:
     else:
         executive_calibration = None
 
+    # Slice 5: dossier-spend cap (recruiter-overridable; default
+    # $200) + company-stage signal hints. Defensive coercion so a
+    # malformed brief degrades to the default cap rather than
+    # raising mid-load.
+    dossier_spend_cap_raw = raw.get("dossier_spend_cap_usd", 200.0)
+    try:
+        dossier_spend_cap_usd = float(dossier_spend_cap_raw or 200.0)
+    except (TypeError, ValueError):
+        dossier_spend_cap_usd = 200.0
+    if dossier_spend_cap_usd < 0.0:
+        dossier_spend_cap_usd = 200.0
+    company_stage_signals_raw = raw.get("company_stage_signals") or {}
+    if not isinstance(company_stage_signals_raw, dict):
+        company_stage_signals_raw = {}
+
+    # --- OSS Maintainers module (Slice 2) ---
+    # Hydrate top-level evaluation inputs: target_projects /
+    # target_stacks / maintainership_level. The validator
+    # (validate_v2_brief) has already gated maintainership_level
+    # to the recognized enum and asserted both lists are
+    # list-of-string when present. Defensive list / str coercion
+    # here mirrors the Exec Search pattern above so a partially-
+    # malformed brief still loads (the worst case is an empty
+    # list / default level, which downgrades to classic-github
+    # behavior per spec §11).
+    target_projects = list(raw.get("target_projects", []) or [])
+    target_projects = [p for p in target_projects if isinstance(p, str) and p]
+    target_stacks = list(raw.get("target_stacks", []) or [])
+    target_stacks = [s for s in target_stacks if isinstance(s, str) and s]
+    maintainership_level_raw = raw.get("maintainership_level") or "contributor"
+    if not isinstance(maintainership_level_raw, str) or not maintainership_level_raw:
+        maintainership_level_raw = "contributor"
+
+    # Multi-module routing (Slice 2 substrate). Defensive list / str
+    # coercion: a brief that omits `target_modules` defaults to
+    # ``[]`` so downstream consumers see "no modules declared" rather
+    # than crash. Slice 2's `dossier_mode` derives from this list.
+    target_modules = list(raw.get("target_modules", []) or [])
+    target_modules = [m for m in target_modules if isinstance(m, str) and m]
+
     explicit_retrieval_design = raw.get("retrieval_design")
     retrieval_design = retrieval_design_from_payload(
         explicit_retrieval_design,
@@ -422,6 +479,12 @@ def _load_v2_brief(raw: dict) -> Brief:
         board_signals=board_signals,
         executive_movement_window_days=executive_movement_window_days,
         executive_calibration=executive_calibration,
+        dossier_spend_cap_usd=dossier_spend_cap_usd,
+        company_stage_signals=dict(company_stage_signals_raw),
+        target_projects=target_projects,
+        target_stacks=target_stacks,
+        maintainership_level=maintainership_level_raw,
+        target_modules=target_modules,
     )
 
     # --- Map V2 fields to old Brief for strategy.py / adaptation compat ---
@@ -521,6 +584,10 @@ def _load_v2_brief(raw: dict) -> Brief:
         board_signals=_detach(board_signals),
         executive_movement_window_days=executive_movement_window_days,
         executive_calibration=_detach(executive_calibration) if executive_calibration is not None else None,
+        target_projects=_detach(target_projects),
+        target_stacks=_detach(target_stacks),
+        maintainership_level=maintainership_level_raw,
+        target_modules=_detach(target_modules),
         raw=raw,
         _new_brief=new_brief,
     )

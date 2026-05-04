@@ -108,6 +108,14 @@ class _Candidate:
     real_name: str = ""
     normalized_name: str = ""
     github_username: str = ""
+    # OSS Maintainers Slice 8: provenance label for `linkedin_handle`
+    # when the source is `github`. One of "blog" / "bio" / "readme" /
+    # "" (no LinkedIn discovered). Used by downstream consumers to
+    # band confidence in the cross-source link without inventing a
+    # numeric confidence channel. Empty for non-github candidates
+    # (the linkedin source's `linkedin_handle` derives from the
+    # candidate's own profile URL, which carries no provenance band).
+    linkedin_url_source: str = ""
 
     @property
     def primary_key(self) -> tuple[str, str, int]:
@@ -146,11 +154,20 @@ def _extract_signals(candidate: _Candidate) -> None:
             candidate.real_name = candidate.display_name
         # The cross-source bridge: LinkedIn URL captured via the GitHub
         # reconciliation pipeline (`shared.reconciliation_schemas` /
-        # `linkedin.recruiter_identity_resolver`).
+        # `linkedin.recruiter_identity_resolver`) AND, since OSS
+        # Maintainers Slice 8, via bio + profile-README extraction in
+        # `shared.contact_discovery.merge_profile_contact`. Provenance
+        # ("blog" / "bio" / "readme") rides on
+        # ``contact.linkedin_url_source`` so downstream consumers can
+        # band confidence — bio/readme matches require a full URL
+        # match (no false positive on bare keywords), but a recruiter-
+        # set blog field still wins when both are present.
         contact = cr.get("contact") if isinstance(cr, dict) else None
         linkedin_url_hint = ""
+        url_source = ""
         if isinstance(contact, dict):
             linkedin_url_hint = str(contact.get("linkedin_url") or "").strip()
+            url_source = str(contact.get("linkedin_url_source") or "").strip()
         if not linkedin_url_hint:
             for key in ("linkedin_url", "linkedin_url_hint", "matched_profile_url"):
                 value = cr.get(key) if isinstance(cr, dict) else None
@@ -158,6 +175,7 @@ def _extract_signals(candidate: _Candidate) -> None:
                     linkedin_url_hint = str(value).strip()
                     break
         candidate.linkedin_handle = normalize_public_linkedin_handle(linkedin_url_hint)
+        candidate.linkedin_url_source = url_source if candidate.linkedin_handle else ""
     else:
         candidate.real_name = candidate.display_name
 

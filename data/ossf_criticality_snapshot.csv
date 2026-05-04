@@ -1,0 +1,63 @@
+# snapshot_source: https://github.com/ossf/criticality_score
+# snapshot_date: 2026-04-15
+# refresh_cadence_target: weekly (manual until tooling lands)
+# notes: Seed snapshot for OSS Maintainers Slice 5. Contains representative
+#   high-criticality projects spanning infrastructure / systems / devtools /
+#   web (per fixture span discipline in spec §13.1). Production refresh
+#   should pull the latest published criticality_score CSV from the upstream
+#   repo and replace this file in place; the lookup is in-process so a fresh
+#   `_load_snapshot()` call (after `reset_snapshot_cache()`) picks up the new
+#   values. Scores below are illustrative orderings; replace with live values
+#   on next refresh.
+repo,score
+kubernetes/kubernetes,0.99432
+torvalds/linux,0.99110
+rust-lang/rust,0.97845
+golang/go,0.97411
+python/cpython,0.96985
+nodejs/node,0.96844
+facebook/react,0.95923
+microsoft/vscode,0.95611
+pytorch/pytorch,0.95402
+tensorflow/tensorflow,0.95187
+huggingface/transformers,0.93722
+vercel/next.js,0.93501
+denoland/deno,0.92114
+rails/rails,0.91987
+django/django,0.91733
+spring-projects/spring-framework,0.91429
+apache/spark,0.91185
+apache/kafka,0.90902
+elastic/elasticsearch,0.90651
+prometheus/prometheus,0.89512
+grafana/grafana,0.89187
+hashicorp/terraform,0.89014
+ansible/ansible,0.88455
+docker/cli,0.88191
+moby/moby,0.88044
+helm/helm,0.87532
+istio/istio,0.87102
+envoyproxy/envoy,0.86855
+etcd-io/etcd,0.86511
+containerd/containerd,0.86204
+cilium/cilium,0.85801
+prometheus/node_exporter,0.85412
+postgres/postgres,0.85107
+redis/redis,0.84922
+mongodb/mongo,0.84654
+nginx/nginx,0.84321
+apache/httpd,0.84102
+openssl/openssl,0.83887
+curl/curl,0.83655
+git/git,0.83401
+torvalds/subsurface,0.65432
+astral-sh/uv,0.78544
+astral-sh/ruff,0.81203
+ruff-rs/ruff,0.55012
+huggingface/trl,0.74221
+huggingface/datasets,0.79115
+vllm-project/vllm,0.81604
+deepspeedai/deepspeed,0.78831
+EleutherAI/lm-evaluation-harness,0.71223
+microsoft/onnxruntime,0.84012
+NVIDIA/Megatron-LM,0.71455
