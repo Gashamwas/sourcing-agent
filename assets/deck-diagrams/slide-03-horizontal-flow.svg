@@ -1,0 +1,66 @@
+<svg viewBox="0.00 109.00 1640.00 181.00" width="1640.00" height="181.00" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="s3-title s3-desc" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="s3-title">How a run works &#8212; horizontal flow</title>
+  <desc id="s3-desc">A left-to-right flow diagram of six stages: Brief, Search Strategy, Run on Source, Review in Two Passes, Run Record, Market Insight.</desc>
+
+  <defs>
+    <marker id="s3-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0B0B0F"/>
+    </marker>
+  </defs>
+
+  <!--
+    Six rounded rectangles, 210w x 100h, centered vertically at y=200.
+    Horizontal layout on a 1600-wide canvas:
+      - 6 boxes * 210 = 1260
+      - 5 gaps of 60 = 300
+      - total = 1560, outer margin = 20 each side (40 total)
+    Box left-edges:
+       1: x = 20
+       2: x = 20 + 210 + 60 = 290
+       3: x = 290 + 210 + 60 = 560
+       4: x = 560 + 210 + 60 = 830
+       5: x = 830 + 210 + 60 = 1100
+       6: x = 1100 + 210 + 60 = 1370
+    Box centers (for labels):
+       1: 125, 2: 395, 3: 665, 4: 935, 5: 1205, 6: 1475
+  -->
+
+  <!-- Connector arrows between boxes -->
+  <g stroke="#0B0B0F" stroke-width="1.75" fill="none" marker-end="url(#s3-arrow)">
+    <line x1="230"  y1="200" x2="285"  y2="200"/>
+    <line x1="500"  y1="200" x2="555"  y2="200"/>
+    <line x1="770"  y1="200" x2="825"  y2="200"/>
+    <line x1="1040" y1="200" x2="1095" y2="200"/>
+    <line x1="1310" y1="200" x2="1365" y2="200"/>
+  </g>
+
+  <!-- Step 1 (filled accent) -->
+  <rect x="20" y="150" width="210" height="100" rx="10" ry="10" fill="#0F766E"/>
+  <text x="125" y="207" text-anchor="middle" fill="#FFFFFF" font-size="22" font-weight="700">Brief</text>
+
+  <!-- Steps 2&#8212;6 (outlined) -->
+  <g fill="#FAFAF7" stroke="#0B0B0F" stroke-width="1.75">
+    <rect x="290"  y="150" width="210" height="100" rx="10" ry="10"/>
+    <rect x="560"  y="150" width="210" height="100" rx="10" ry="10"/>
+    <rect x="830"  y="150" width="210" height="100" rx="10" ry="10"/>
+    <rect x="1100" y="150" width="210" height="100" rx="10" ry="10"/>
+    <rect x="1370" y="150" width="210" height="100" rx="10" ry="10"/>
+  </g>
+
+  <g fill="#0B0B0F" font-size="20" font-weight="500" text-anchor="middle">
+    <text x="395"  y="194">Search</text>
+    <text x="395"  y="222">Strategy</text>
+
+    <text x="665"  y="194">Run on</text>
+    <text x="665"  y="222">Source</text>
+
+    <text x="935"  y="194">Review in</text>
+    <text x="935"  y="222">Two Passes</text>
+
+    <text x="1205" y="194">Run</text>
+    <text x="1205" y="222">Record</text>
+
+    <text x="1475" y="194">Market</text>
+    <text x="1475" y="222">Insight</text>
+  </g>
+</svg>

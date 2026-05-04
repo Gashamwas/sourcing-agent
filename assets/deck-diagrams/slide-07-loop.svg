@@ -1,0 +1,98 @@
+<svg viewBox="126.00 11.00 1417.00 461.00" width="1417.00" height="461.00" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="s7-title s7-desc" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="s7-title">The run-to-brief compounding loop</title>
+  <desc id="s7-desc">A horizontal loop showing how each run feeds the next. Three waypoints on the loop: Run, Market Insight, and Next Brief, with arrows indicating direction of travel.</desc>
+
+  <defs>
+    <!-- Arrow marker sized for smooth placement on the ellipse -->
+    <marker id="s7-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="10" markerHeight="10" orient="auto">
+      <path d="M0,0 L10,5 L0,10 z" fill="#0F766E"/>
+    </marker>
+  </defs>
+
+  <!--
+    Canvas 1600 x 500. We want room for the labels "Run" (left) and "Next Brief" (right)
+    OUTSIDE the ellipse so nothing clips. Reserve ~180px on each side.
+    Ellipse cx=800, cy=260, rx=560, ry=160.
+      parametric: x = 800 + 560*cos(t), y = 260 + 160*sin(t)  (SVG y grows downward, so sin>0 = below)
+    Waypoints (use math angles, counter-clockwise from +x, then flip for SVG):
+      Run           -> angle 180deg -> (240, 260)      left
+      Market Insight-> angle 270deg in math = top      -> (800, 100)
+        In SVG with y-down, "top" means negative-y direction, so t = 270deg gives y = 260 + 160*sin(270) = 260 - 160 = 100. Good.
+      Next Brief    -> angle 0deg   -> (1360, 260)     right
+
+    Flow direction: on screen we want clockwise motion (Run -> up and right to Market Insight -> down and right to Next Brief -> back along the bottom to Run).
+    Arrow placements: put one arrowhead on the top arc (midpoint between Run and Market Insight), one on the top-right arc (midpoint between Market Insight and Next Brief), and one on the bottom arc (midpoint between Next Brief and Run, pointing left).
+
+    Instead of trying to align arrowheads to path tangents (fiddly), use small straight-segment arrows on the ellipse. Compute tangent direction at the midpoint angles and draw a short segment there.
+
+    Midpoints (math angles): 135deg (between 180 and 90 going via 135 -> upper-left arc), 45deg (upper-right), 270deg (bottom midpoint at -y? careful).
+    Let's re-derive using SVG's actual coordinate system. Parametric ellipse in SVG:
+       x(t) = cx + rx*cos(t)
+       y(t) = cy + ry*sin(t)
+    where t=0 is at (cx+rx, cy) (right), t=pi/2 is at (cx, cy+ry) (bottom), t=pi is (cx-rx, cy) (left), t=3pi/2 is (cx, cy-ry) (top).
+
+    So for our canvas:
+      Run        : t = pi     -> (240, 260)
+      Market Ins.: t = 3pi/2  -> (800, 100)    [top]
+      Next Brief : t = 0 or 2pi -> (1360, 260)
+
+    Clockwise motion (Run -> Market Insight -> Next Brief -> Run) corresponds to t moving from pi -> 3pi/2 -> 2pi. I.e., t increasing. Tangent direction for increasing t:
+      dx/dt = -rx*sin(t)
+      dy/dt =  ry*cos(t)
+    Examples:
+      At t = pi (Run):        (-rx*0, ry*(-1)) = (0, -ry)   -> moving upward
+      At t = 5pi/4 (upper-left midpoint):  (-rx*sin(5pi/4), ry*cos(5pi/4)) = (-rx*(-.707), ry*(-.707)) = (396, -113)   -> moving right and up
+      At t = 3pi/2 (top):     (-rx*(-1), ry*0) = (rx, 0)    -> moving right
+      At t = 7pi/4 (upper-right midpoint): (-rx*(-.707), ry*(.707)) = (396, 113)    -> moving right and down
+      At t = 2pi (Next Brief): (0, ry)    -> moving down
+      At t = pi/2 (bottom):    (-rx*1, 0) = (-rx, 0)    -> moving left
+
+    Place 3 arrows on the ellipse. Best midpoints:
+      Arrow 1: t = 5pi/4 (upper-left midpoint, between Run and Market Insight)
+               position = (800 + 560*cos(5pi/4), 260 + 160*sin(5pi/4))
+                        = (800 + 560*(-0.7071), 260 + 160*(-0.7071))
+                        = (800 - 396.0, 260 - 113.1)
+                        = (404.0, 146.9)
+               tangent direction ~ (+396, -113), normalize and draw short segment
+      Arrow 2: t = 7pi/4 (upper-right midpoint)
+               position = (800 + 560*0.7071, 260 + 160*(-0.7071))
+                        = (1196.0, 146.9)
+               tangent direction ~ (+396, +113)
+      Arrow 3: t = pi/2 (bottom midpoint)
+               position = (800, 420)
+               tangent direction ~ (-560, 0)  -> pointing left
+
+    For each arrow I'll draw a short line segment at the computed position, along the tangent direction, with the marker at the "end" in the direction of travel.
+  -->
+
+  <!-- Loop ellipse -->
+  <ellipse cx="800" cy="260" rx="560" ry="160" fill="none" stroke="#0F766E" stroke-width="2.5"/>
+
+  <!-- Direction arrows embedded on the ellipse, pointing in the flow direction (clockwise).
+       Each arrow is a short line segment tangent to the ellipse at the chosen t, marker-end at the forward point. -->
+  <g stroke="#0F766E" stroke-width="2.5" fill="none" marker-end="url(#s7-arrow)">
+    <!-- Upper-left midpoint: position (404.0, 146.9), tangent dir ~ (+396, -113). Normalize to segment length 18. -->
+    <line x1="389" y1="151" x2="419" y2="143"/>
+    <!-- Upper-right midpoint: position (1196.0, 146.9), tangent dir ~ (+396, +113). -->
+    <line x1="1181" y1="143" x2="1211" y2="151"/>
+    <!-- Bottom midpoint: position (800, 420), tangent dir (-1, 0). -->
+    <line x1="815" y1="420" x2="785" y2="420"/>
+  </g>
+
+  <!-- Waypoint dots -->
+  <g fill="#0F766E">
+    <circle cx="240"  cy="260" r="10"/>
+    <circle cx="800"  cy="100" r="10"/>
+    <circle cx="1360" cy="260" r="10"/>
+  </g>
+
+  <!-- Waypoint labels, positioned outside the ellipse so they don't overlap the curve -->
+  <g fill="#0B0B0F" font-size="26" font-weight="600">
+    <!-- Run label to the LEFT of the Run dot, right-anchored so it ends cleanly before the dot -->
+    <text x="210" y="268" text-anchor="end">Run</text>
+    <!-- Market Insight ABOVE the top dot, centered -->
+    <text x="800" y="70" text-anchor="middle">Market Insight</text>
+    <!-- Next Brief to the RIGHT of the Next Brief dot, left-anchored -->
+    <text x="1390" y="268" text-anchor="start">Next Brief</text>
+  </g>
+</svg>

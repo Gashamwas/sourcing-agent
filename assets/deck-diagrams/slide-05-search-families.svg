@@ -1,0 +1,83 @@
+<svg viewBox="378.00 149.00 878.00 766.00" width="878.00" height="766.00" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="s5-title s5-desc" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="s5-title">Search families with decay rescue</title>
+  <desc id="s5-desc">A central filled node labeled Root search connects with solid lines to four outlined variant nodes (Variant A through D) and with one dashed line to a fifth outlined node labeled Decaying &#8212; adjust.</desc>
+
+  <!--
+    Geometry:
+      root center (800, 450), root radius 140
+      variant centers at radius 330, variant radius 95
+      variant positions (clock + unit vector):
+        A (10 clock): unit (-0.866, -0.500) -> center (514.22, 285.00)
+        B ( 2 clock): unit ( 0.866, -0.500) -> center (1085.78, 285.00)
+        C ( 8 clock): unit (-0.866,  0.500) -> center (514.22, 615.00)
+        D ( 5 clock, slightly right of 6): we want to avoid collision with the decay node at 4 clock.
+           Put D at 7 clock: unit (-0.500, 0.866) -> center (635.00, 735.78). Hmm that's crowded with C.
+           Better: put D at 6 clock: unit (0.000, 1.000) -> center (800, 780).
+
+      Decay node: place at 4 clock, radius 330, but visually a little farther (radius 370) so it reads as slightly separate.
+         unit ( 0.866, 0.500) -> center (800 + 0.866*370, 450 + 0.500*370) = (1120.42, 635.00)
+
+      Connector endpoints:
+        line start = root_center + 140 * unit
+        line end   = variant_center - 95 * unit
+        For decay:
+          line start = root_center + 140 * unit_4clock = (921.24, 520.00)
+          line end   = decay_center - 95 * unit_4clock = (1120.42 - 82.27, 635.00 - 47.50) = (1038.15, 587.50)
+  -->
+
+  <!-- Solid connector lines to variants -->
+  <g stroke="#0B0B0F" stroke-width="1.75" fill="none">
+    <!-- to A (10 clock) -->
+    <line x1="678.76" y1="380.00" x2="596.49" y2="332.50"/>
+    <!-- to B (2 clock)  -->
+    <line x1="921.24" y1="380.00" x2="1003.51" y2="332.50"/>
+    <!-- to C (8 clock)  -->
+    <line x1="678.76" y1="520.00" x2="596.49" y2="567.50"/>
+    <!-- to D (6 clock)  -->
+    <line x1="800.00" y1="590.00" x2="800.00" y2="685.00"/>
+  </g>
+
+  <!-- Dashed connector line to decay node (4 clock, slightly farther) -->
+  <g stroke="#0B0B0F" stroke-width="1.75" fill="none" stroke-dasharray="8 6">
+    <line x1="921.24" y1="520.00" x2="1038.15" y2="587.50"/>
+  </g>
+
+  <!-- Variant nodes (outlined) -->
+  <g fill="#FAFAF7" stroke="#0B0B0F" stroke-width="1.75">
+    <circle cx="514.22"  cy="285.00" r="95"/>
+    <circle cx="1085.78" cy="285.00" r="95"/>
+    <circle cx="514.22"  cy="615.00" r="95"/>
+    <circle cx="800.00"  cy="780.00" r="95"/>
+  </g>
+
+  <!-- Decay node (outlined) -->
+  <circle cx="1120.42" cy="635.00" r="95" fill="#FAFAF7" stroke="#0B0B0F" stroke-width="1.75"/>
+
+  <!-- Variant labels -->
+  <g fill="#0B0B0F" font-size="22" font-weight="500" text-anchor="middle">
+    <text x="514.22"  y="277">Variant</text>
+    <text x="514.22"  y="303">A</text>
+
+    <text x="1085.78" y="277">Variant</text>
+    <text x="1085.78" y="303">B</text>
+
+    <text x="514.22"  y="607">Variant</text>
+    <text x="514.22"  y="633">C</text>
+
+    <text x="800.00"  y="772">Variant</text>
+    <text x="800.00"  y="798">D</text>
+  </g>
+
+  <!-- Decay label, accent-colored to signal state -->
+  <g fill="#0F766E" font-size="22" font-weight="600" text-anchor="middle">
+    <text x="1120.42" y="627">Decaying</text>
+    <text x="1120.42" y="653">&#8212; adjust</text>
+  </g>
+
+  <!-- Root node (drawn last, filled accent) -->
+  <circle cx="800" cy="450" r="140" fill="#0F766E"/>
+  <g fill="#FFFFFF" font-size="30" font-weight="700" text-anchor="middle">
+    <text x="800" y="444">Root</text>
+    <text x="800" y="480">search</text>
+  </g>
+</svg>

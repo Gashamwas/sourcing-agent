@@ -1,0 +1,159 @@
+<svg viewBox="129.00 34.00 1510.00 839.00" width="1510.00" height="839.00" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="s8-title s8-desc" font-family="Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <title id="s8-title">Governed fleet: scheduling and oversight over approved environments</title>
+  <desc id="s8-desc">A three-tier schematic. A top box labeled Scheduling and Oversight connects down to three brief cards (Forward-Deployed Engineer NYC, ML Infra SF, Backend EU), which in turn connect to three lit approved execution environments in a row of six total tiles (three lit, three unlit). A footer caption reads approved, supervised, reviewable.</desc>
+
+  <!--
+    Layout tiers (top to bottom):
+      Tier 1: Scheduling and Oversight box.    centered at (800, 120), 520w x 90h
+      Tier 2: Three brief cards in a row.      centers (400, 330), (800, 330), (1200, 330); 340w x 130h
+      Tier 3: Six environment tiles in a row.  6 tiles of 120w x 120h, centered around x=800 at y=580; gap 30
+              total row width: 6*120 + 5*30 = 870, so first tile left edge = 800 - 870/2 = 365
+              tile centers:
+                1: (425, 640)   <- lit   (below brief FDE NYC)
+                2: (575, 640)   <- lit   (below brief ML Infra SF)
+                3: (725, 640)   <- lit   (below brief Backend EU)
+                4: (875, 640)   <- unlit
+                5: (1025, 640)  <- unlit
+                6: (1175, 640)  <- unlit
+              Wait &#8212; want tiles aligned visually under their briefs. Briefs are at x=400, 800, 1200.
+              Revise: 3 lit tiles below the 3 briefs directly:
+                lit tile 1 center (400, 640)
+                lit tile 2 center (800, 640)
+                lit tile 3 center (1200, 640)
+              Add 3 unlit tiles interleaved/flanking to show available capacity:
+                unlit 1 center (550, 640)
+                unlit 2 center ( 950, 640)   <- slight confusion, hmm
+              Simpler: row of 6 tiles centered around x=800 with equal spacing, and connect top-down lines from briefs to the 3 specific lit tiles (tiles 1, 3, 5 = lit; tiles 2, 4, 6 = unlit).
+              Or: row of 6 tiles, lit = tiles 2, 4, 6 (alternating) to give visual rhythm.
+              Clean choice: 6 tiles, centers at x = 365+60, 365+60+150, ..., i.e., x = 425, 575, 725, 875, 1025, 1175. All at y=640. Lit = 1st, 3rd, 5th (x=425, 725, 1025). Unlit = 2nd, 4th, 6th (x=575, 875, 1175). Briefs at x=400, 800, 1200 then don't align cleanly to any single lit tile column &#8212; connectors will cross.
+
+              Simplest and cleanest: put the 3 lit tiles directly under the 3 briefs (x=400, 800, 1200). Add 3 unlit tiles on the right as extra approved capacity: x=1320, 1420, 1520. Row width still fits inside 1600.
+
+              Final plan:
+                lit tiles: (400, 640), (800, 640), (1200, 640)
+                unlit tiles: (1320, 640), (1420, 640), (1520, 640)  <- these would crowd. Move further right.
+              Canvas is 1600 wide; tiles are 120w. Tile at x=1520 would have right edge at 1580. OK.
+
+              But that uneven distribution reads as "some approved tiles are reserved for active use, others are idle" &#8212; which is exactly the message. Good.
+
+              Simplify: 6 tiles total, centers at:
+                (400, 640) lit
+                (800, 640) lit
+                (1200, 640) lit
+                (1340, 640) unlit
+                (1460, 640) unlit
+              That's only 5. Let me use 6:
+                (400, 640) lit
+                (800, 640) lit
+                (1200, 640) lit
+                (1320, 640) unlit
+                (1440, 640) unlit
+                (1560, 640) unlit
+              Right edge of last tile = 1560 + 60 = 1620 -> overflow. Shrink tiles to 100x100 for the unlit ones? No &#8212; keep all tiles the same size. Let's reposition: shift everything left by 60.
+                (340, 640) lit
+                (740, 640) lit
+                (1140, 640) lit
+                (1260, 640) unlit
+                (1380, 640) unlit
+                (1500, 640) unlit
+              Right edge = 1500 + 60 = 1560. Fits.
+              Brief cards should sit above the 3 lit tiles: shift brief centers to x=340, 740, 1140.
+              Tier 1 box: center x=740 (center of brief row midpoint-ish). Actually, put it centered above the *entire* tile row for visual balance &#8212; row spans x=280..1560, center x=920. Use (920, 120) for Tier 1.
+              Actually, the Scheduling and Oversight box should feel like it "rules" the whole diagram, so centering it over the full row is correct.
+
+    Final coordinates:
+      Tier 1 box:  center (920, 120), width 520, height 90  -> rect x=660, y=75
+      Tier 2 briefs: centers (340, 330), (740, 330), (1140, 330); each 340w x 130h -> rects x=170, 570, 970, y=265
+      Tier 3 tiles: centers (340, 640), (740, 640), (1140, 640) lit;
+                    (1260, 640), (1380, 640), (1500, 640) unlit;
+                    120w x 120h -> left edges 280, 680, 1080, 1200, 1320, 1440
+      Group caption: "Approved environments" centered below the full tile row, at x=920, y=800
+      Footer rule + tagline at y=845..870
+
+    Connectors:
+      Tier 1 -> each brief: vertical lines from bottom-center of Tier 1 box (920, 165) to top-center of each brief (340, 265), (740, 265), (1140, 265). Use L-shaped polylines:
+        (920, 165) -> (920, 215) -> (340, 215) -> (340, 265)
+        (920, 165) -> (920, 215) -> (740, 215) -> (740, 265)  (this one is essentially straight-down + a short jog; OK)
+        (920, 165) -> (920, 215) -> (1140, 215) -> (1140, 265)
+      Actually cleaner: single trunk line from Tier 1 down to a horizontal bus, with three drop lines to each brief.
+        trunk: (920, 165) -> (920, 215)
+        bus:   (340, 215) -> (1140, 215)
+        drops: (340, 215) -> (340, 265); (740, 215) -> (740, 265); (1140, 215) -> (1140, 265)
+
+      Each brief -> its lit tile: straight vertical line from brief bottom (_, 395) down to tile top (_, 580):
+        (340, 395) -> (340, 580)
+        (740, 395) -> (740, 580)
+        (1140, 395) -> (1140, 580)
+  -->
+
+  <!-- Trunk and bus connectors from Tier 1 to briefs -->
+  <g stroke="#0B0B0F" stroke-width="1.75" fill="none">
+    <!-- trunk -->
+    <line x1="920" y1="165" x2="920" y2="215"/>
+    <!-- bus -->
+    <line x1="340" y1="215" x2="1140" y2="215"/>
+    <!-- drops to each brief -->
+    <line x1="340"  y1="215" x2="340"  y2="265"/>
+    <line x1="740"  y1="215" x2="740"  y2="265"/>
+    <line x1="1140" y1="215" x2="1140" y2="265"/>
+    <!-- brief -> lit tile connectors -->
+    <line x1="340"  y1="395" x2="340"  y2="580"/>
+    <line x1="740"  y1="395" x2="740"  y2="580"/>
+    <line x1="1140" y1="395" x2="1140" y2="580"/>
+  </g>
+
+  <!-- Tier 1: Scheduling and Oversight -->
+  <rect x="660" y="75" width="520" height="90" rx="8" ry="8" fill="#FAFAF7" stroke="#0B0B0F" stroke-width="1.75"/>
+  <text x="920" y="128" text-anchor="middle" fill="#0B0B0F" font-size="26" font-weight="700">Scheduling and Oversight</text>
+
+  <!-- Tier 2: three brief cards -->
+  <g fill="#FAFAF7" stroke="#0B0B0F" stroke-width="1.75">
+    <rect x="170"  y="265" width="340" height="130" rx="8" ry="8"/>
+    <rect x="570"  y="265" width="340" height="130" rx="8" ry="8"/>
+    <rect x="970"  y="265" width="340" height="130" rx="8" ry="8"/>
+  </g>
+  <g fill="#6B7280" font-size="14" font-weight="500" text-anchor="middle" letter-spacing="1.5">
+    <text x="340"  y="298">BRIEF</text>
+    <text x="740"  y="298">BRIEF</text>
+    <text x="1140" y="298">BRIEF</text>
+  </g>
+  <g fill="#0B0B0F" font-size="20" font-weight="600" text-anchor="middle">
+    <text x="340"  y="342">Forward-Deployed</text>
+    <text x="340"  y="368">Engineer, NYC</text>
+
+    <text x="740"  y="342">ML Infra,</text>
+    <text x="740"  y="368">SF</text>
+
+    <text x="1140" y="342">Backend,</text>
+    <text x="1140" y="368">EU</text>
+  </g>
+
+  <!-- Tier 3: environment tiles. Lit first (filled accent), then unlit (outlined). -->
+  <g fill="#0F766E">
+    <rect x="280"  y="580" width="120" height="120" rx="8" ry="8"/>
+    <rect x="680"  y="580" width="120" height="120" rx="8" ry="8"/>
+    <rect x="1080" y="580" width="120" height="120" rx="8" ry="8"/>
+  </g>
+  <g fill="#FFFFFF" font-size="20" font-weight="700" text-anchor="middle">
+    <text x="340"  y="648">Env 1</text>
+    <text x="740"  y="648">Env 2</text>
+    <text x="1140" y="648">Env 3</text>
+  </g>
+  <g fill="#FAFAF7" stroke="#0B0B0F" stroke-width="1.75" stroke-dasharray="4 6">
+    <rect x="1240" y="580" width="120" height="120" rx="8" ry="8"/>
+    <rect x="1380" y="580" width="120" height="120" rx="8" ry="8"/>
+    <rect x="1520" y="580" width="80"  height="120" rx="8" ry="8"/>
+  </g>
+  <g fill="#6B7280" font-size="14" font-weight="500" text-anchor="middle" letter-spacing="1">
+    <text x="1300" y="648">idle</text>
+    <text x="1440" y="648">idle</text>
+    <text x="1560" y="648">idle</text>
+  </g>
+
+  <!-- Group label for the full tile row -->
+  <text x="920" y="755" text-anchor="middle" fill="#0B0B0F" font-size="22" font-weight="600">Approved environments</text>
+
+  <!-- Footer rule + tagline -->
+  <line x1="560" y1="795" x2="1280" y2="795" stroke="#6B7280" stroke-width="1" opacity="0.6"/>
+  <text x="920" y="830" text-anchor="middle" fill="#6B7280" font-size="18" font-weight="500" letter-spacing="2">approved &#183; supervised &#183; reviewable</text>
+</svg>
