@@ -1,13 +1,61 @@
-/* Cloris design tokens. Source: docs/cloris-ui-spec.md §5. */
+/* Cloris design tokens.
+   Card-file palette: cream paper, terracotta as emotional accent,
+   baby blue strictly as annotation/utility (Front of File active tab,
+   Card Detail divider, blue-pencil margin marks).
+
+   Three cream tiers go DARKER (cream → cream-deep → cream-deeper) for
+   nested specimen-frame stages; --paper-card is a separate LIGHTER
+   variant for the StateDirRow / file-panel body (warm card-on-paper
+   contrast). */
 :root {
+  /* Paper + ink — three darker tiers + one lighter card variant */
   --cream: #f5efe1;
   --cream-deep: #ebe2cd;
-  --mustard: #d4a53a;
-  --mustard-deep: #b88a28;
+  --cream-deeper: #ddd0b0;
+  --paper-card: #faf8f4;
+
+  /* Wood hairlines + ink type */
   --wood: #6b4a2b;
   --wood-deep: #4a3220;
+  --wood-rule: #d4c4a8;
+  --ink: #2a1f14;
+  --ink-deep: #1a1209;
+  --ink-soft: #5c4a38;
+  --ink-meta: #8a7a68;
+  /* Tier softer than --ink-meta — used by .surface-eyebrow--muted,
+     freshness timestamps, sync warnings, loaders, chapter progress.
+     Lighter on cream paper so secondary copy steps back. Contrast on
+     --cream is ~3.0:1; same WCAG AA Large tier as --ink-meta. */
+  --ink-muted: #9b8a76;
+
+  /* Mustard — warm secondary; governor-limit + recipe-card stamps */
+  --mustard: #d4a53a;
+  --mustard-deep: #b88a28;
+
+  /* Sage — positive feedback (saved candidates, positive deltas) */
+  --sage: #8a9a6e;
+  --sage-deep: #6a7a52;
+
+  /* Terracotta = emotional accent + primary CTA. One family across
+     pulse, hovers, links, alerts, and primary buttons so the visual
+     handoff between "Cloris is highlighting this" and "press this"
+     stays on the same color. Hover for solid-fill primary buttons
+     deepens to --ink (the project's "hover deepens to body ink"
+     idiom — see .onboarding-cta and .btn-card-action). */
   --peach: #e39a76;
   --peach-deep: #c67d5a;
-  --ink: #2a1f14;
-  --ink-soft: #5c4a38;
+
+  /* Baby blue — annotation only. Never a CTA, never a background. */
+  --blue-pencil: #a8c5d8;
+  --blue-pencil-deep: #6f8f9d;
+  --blue-wash: #dbe7e8;
+
+  /* Disabled-state opacity. Single token so disabled buttons, chips,
+     verbs, etc. all read at the same dimming level instead of the
+     prior 0.45/0.5/0.55/0.65 spread. */
+  --opacity-disabled: 0.55;
+
+  /* Active tab high-contrast ink, used only on the Front of File tab
+     when selected. Dark enough on baby-blue for accessible mono caps. */
+  --blue-pencil-ink: #1a2a36;
 }

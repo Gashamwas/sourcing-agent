@@ -30,12 +30,12 @@
   import { get } from "svelte/store";
 
   import AmbientBanner from "./AmbientBanner.svelte";
+  import Learning from "./Learning.svelte";
+  import LinkedInProjectEditor from "./LinkedInProjectEditor.svelte";
   import PageBackLink from "./PageBackLink.svelte";
   import Refining from "./Refining.svelte";
 
   import { currentRoute } from "../lib/router";
-  import { intakeLoadingMessage } from "../lib/copy";
-  import { stickyTrue } from "../lib/minDisplay.svelte";
   import { loaderFadeOut, surfaceFadeIn } from "../lib/transitions";
   import {
     listIntakeSessions,
@@ -47,6 +47,8 @@
     clearActiveSession,
     flushAllPending,
     loadSession,
+    polishBrief,
+    restorePrevDraft,
     startNewSession,
     syncError,
     syncInFlight,
@@ -70,8 +72,8 @@
   // in dev so the bug shows up under tests; soft warn in prod so a
   // backend release with a new phase doesn't hard-crash the wizard
   // for a live recruiter — the editorial null-step path in
-  // chapterForPhase + the "Cloris doesn't recognize this intake
-  // step yet" copy below handle the mismatched state gracefully.
+  // chapterForPhase + the "This page isn't quite ready" copy below
+  // handle the mismatched state gracefully.
   if (import.meta.env.DEV) {
     assertAllPhasesCovered();
   } else {
@@ -96,10 +98,16 @@
   let missingKeys = $state<string[]>([]);
   let invalidKeys = $state<string[]>([]);
 
-  // Min-display gate (4s floor) so the boot loader hunts + finishes
-  // legibly on fast localhost responses. Mirrors Drafts.svelte:42 so
-  // the two surfaces feel consistent rather than asymmetric.
-  const showBoot = stickyTrue(() => !booted);
+  // Phase D Slice D4. Polish + restore in-flight flags. We track these
+  // separately from $syncInFlight (which counts ALL backend syncs
+  // including debounced state patches) because the loader caption
+  // needs to distinguish "polishing your brief" from "restoring previous
+  // draft" — both run the Refining (sewing) graphic, but the operational
+  // copy differs. Both flags also gate the footer Continue CTA so the
+  // recruiter can't race-file the brief mid-polish.
+  let polishing = $state<boolean>(false);
+  let restoring = $state<boolean>(false);
+  let polishError = $state<string | null>(null);
 
   // The 30-minute staleness threshold for the resume cue. Fresh
   // resumes (e.g. an accidental tab close) shouldn't surface
@@ -288,6 +296,25 @@
         ? (whereToLook["target_modules"] as string[])
         : ["linkedin"],
     };
+    // Path 3 trial slice: promote the where_to_look chapter's
+    // linkedin_project_id capture into the canonical
+    // source_config.linkedin path. Only set source_config when the
+    // recruiter actually pasted a URL — an empty source_config dict
+    // would survive `validate_v2_brief` but would muddy the schema
+    // for no benefit.
+    const liProjectId =
+      typeof whereToLook["linkedin_project_id"] === "string"
+        ? (whereToLook["linkedin_project_id"] as string)
+        : "";
+    const liProjectName =
+      typeof whereToLook["linkedin_project_name"] === "string"
+        ? (whereToLook["linkedin_project_name"] as string)
+        : "";
+    if (liProjectId !== "") {
+      const linkedin: Record<string, unknown> = { project_id: liProjectId };
+      if (liProjectName !== "") linkedin.project_name = liProjectName;
+      seeded.source_config = { linkedin };
+    }
     writeV2Draft(seeded);
   }
 
@@ -394,6 +421,93 @@
     // so the recruiter at least knows there's *something* the form
     // doesn't surface. Better than swallowing.
     return key;
+  }
+
+  // ---- polish + restore helpers (Phase D Slice D4) ----
+  //
+  // The polish endpoint reshapes state_json.v2_draft via an LLM cascade.
+  // The restore endpoint walks back the most recent polish via the
+  // one-deep undo buffer at state_json.v2_draft_prev. Both surface
+  // their provenance via state_json.v2_draft_polish_meta (read by the
+  // Reference Slip and the polish button copy).
+
+  type PolishMeta = {
+    source: "llm" | "deterministic" | "empty" | string;
+    confidence: number;
+    polished_at: string;
+  };
+
+  function polishMeta(): PolishMeta | null {
+    const s = $activeSession;
+    if (s === null) return null;
+    const raw = s.state_json["v2_draft_polish_meta"];
+    if (!raw || typeof raw !== "object") return null;
+    const r = raw as Record<string, unknown>;
+    return {
+      source: typeof r.source === "string" ? r.source : "deterministic",
+      confidence: typeof r.confidence === "number" ? r.confidence : 0,
+      polished_at:
+        typeof r.polished_at === "string" ? r.polished_at : "",
+    };
+  }
+
+  function hasPrevDraft(): boolean {
+    const s = $activeSession;
+    if (s === null) return false;
+    const prev = s.state_json["v2_draft_prev"];
+    return (
+      !!prev &&
+      typeof prev === "object" &&
+      "v2_draft" in (prev as Record<string, unknown>)
+    );
+  }
+
+  // Button copy distinction is the recruiter's primary signal for
+  // "did polish actually land or did we cascade-fall-back?". Mapping:
+  //   - meta absent              → "Polish this brief" (never tried)
+  //   - source === "llm"         → "Polish again"      (landed cleanly)
+  //   - source !== "llm"         → "Try polish again"  (cascade fired)
+  // The Reference Slip carries the operator-grade detail (source +
+  // confidence). See plan §"UX call".
+  function polishButtonLabel(): string {
+    const meta = polishMeta();
+    if (meta === null) return "Polish this brief";
+    if (meta.source === "llm") return "Polish again";
+    return "Try polish again";
+  }
+
+  async function onPolishClick(): Promise<void> {
+    if (polishing || restoring || completing) return;
+    polishError = null;
+    polishing = true;
+    try {
+      await polishBrief();
+      // polishBrief sets syncError on failure but doesn't throw; surface
+      // any sync error inline as a polish-specific message so the
+      // recruiter sees it next to the polish button rather than buried
+      // in the footer's generic sync warning.
+      const err = $syncError;
+      if (err !== null) {
+        polishError = describeApiError(err, "Polishing the brief");
+      }
+    } finally {
+      polishing = false;
+    }
+  }
+
+  async function onRestoreClick(): Promise<void> {
+    if (polishing || restoring || completing) return;
+    polishError = null;
+    restoring = true;
+    try {
+      await restorePrevDraft();
+      const err = $syncError;
+      if (err !== null) {
+        polishError = describeApiError(err, "Restoring the previous draft");
+      }
+    } finally {
+      restoring = false;
+    }
   }
 
   // ---- review-chapter editor helpers ----
@@ -546,22 +660,22 @@
 
   <div class="shell-page">
     <section class="onboarding-wizard">
-      {#if showBoot()}
+      {#if !booted}
         <div class="onboarding-loading" out:loaderFadeOut>
-          <Refining size="small" captions={intakeLoadingMessage} />
+          <Learning size="small" />
         </div>
       {:else if bootError !== null}
         <p class="onboarding-boot-error" role="alert" in:surfaceFadeIn>{bootError}</p>
       {:else if $activeSession === null}
         <p class="onboarding-boot-error" role="alert" in:surfaceFadeIn>
-          Cloris couldn't open the intake. Try reloading.
+          Couldn't open the intake. Try reloading.
         </p>
       {:else}
         {@const ch = currentChapter()}
         <div class="onboarding-wizard-content" in:surfaceFadeIn>
         {#if ch === null}
           <p class="onboarding-boot-error" role="alert">
-            Cloris doesn't recognize this intake step yet. Try reloading.
+            This page isn't quite ready. Try reloading — or start a fresh brief.
           </p>
         {:else}
           {@const chIdx = chapterIndex(ch)}
@@ -594,16 +708,11 @@
           <!-- per-chapter editor -->
           <div class="onboarding-chapter-body">
             {#if ch.chapter_id === "welcome"}
-              <p class="onboarding-prose">
-                Cloris will ask you a handful of questions about the
-                role: what it does, what good looks like, who'd
-                thrive. When she's heard enough, she'll read the brief
-                back to you so you can sharpen it before any search
-                starts.
-              </p>
-              <p class="onboarding-prose">
-                <em>You can step away and resume from where you left off.</em>
-              </p>
+              <!-- Plan Finding 15: dropped the welcome body prose. The
+                   chapter deck above ("I'll ask a few questions, then
+                   read it back so you can sharpen it before I start
+                   looking.") carries the same message; the body
+                   paragraphs were a longer restatement. -->
             {:else if ch.chapter_id === "role"}
               <label class="onboarding-field">
                 <span class="onboarding-field-prompt">
@@ -710,6 +819,47 @@
                   <span>LinkedIn</span>
                 </label>
               </fieldset>
+              {#if whereToLookHasModule("linkedin")}
+                <!-- Path 3 trial slice: ask for the Recruiter project URL
+                     at first contact (intake), not at second contact
+                     (launch readiness). Optional — `seedV2DraftFromChapters`
+                     promotes whatever is captured here into
+                     `v2_draft.source_config.linkedin.project_id` when the
+                     recruiter advances to the review chapter. If they
+                     skip this field the readiness blocker on launch
+                     still lets them paste it inline. -->
+                <div class="onboarding-field">
+                  <span class="onboarding-field-prompt">
+                    <em
+                      >Paste your Recruiter project URL — or set it later from the brief
+                      detail.</em
+                    >
+                  </span>
+                  <LinkedInProjectEditor
+                    currentProjectId={chapterField(
+                      "where_to_look",
+                      "linkedin_project_id"
+                    ) || null}
+                    currentProjectName={chapterField(
+                      "where_to_look",
+                      "linkedin_project_name"
+                    ) || null}
+                    onSave={async ({ projectId, projectName }) => {
+                      const s = $activeSession;
+                      if (s === null) return;
+                      const existing = s.state_json["where_to_look"];
+                      const merged: Record<string, unknown> = {
+                        ...((existing && typeof existing === "object"
+                          ? existing
+                          : {}) as Record<string, unknown>),
+                        linkedin_project_id: projectId,
+                        linkedin_project_name: projectName ?? "",
+                      };
+                      await updateStateField("where_to_look", merged);
+                    }}
+                  />
+                </div>
+              {/if}
               <label class="onboarding-field">
                 <span class="onboarding-field-prompt">
                   <em>Anything else I should know before I start looking?</em>
@@ -731,6 +881,50 @@
               <p class="onboarding-prose">
                 <em>This is the brief I'd run with. Edit anything that's off — when it reads true, file it.</em>
               </p>
+
+              <!-- Polish + restore controls. The Polish button button-copy
+                   distinction (Polish this brief / Polish again / Try polish
+                   again) is the recruiter's primary signal for whether the
+                   LLM landed cleanly. The Restore link is hidden until at
+                   least one polish has populated v2_draft_prev. During polish
+                   OR restore, both controls disable and the Refining loader
+                   takes over with operational copy. -->
+              <section class="onboarding-polish-controls">
+                {#if polishing || restoring}
+                  <div class="onboarding-polish-pending">
+                    <Refining
+                      size="small"
+                      captions={polishing
+                        ? "Polishing your brief\u2026"
+                        : "Restoring previous draft\u2026"}
+                    />
+                  </div>
+                {:else}
+                  <button
+                    type="button"
+                    class="onboarding-cta onboarding-cta--polish"
+                    disabled={polishing || restoring || completing}
+                    onclick={onPolishClick}
+                  >
+                    {polishButtonLabel()}
+                  </button>
+                  {#if hasPrevDraft()}
+                    <button
+                      type="button"
+                      class="onboarding-polish-restore-link"
+                      disabled={polishing || restoring || completing}
+                      onclick={onRestoreClick}
+                    >
+                      Restore previous draft
+                    </button>
+                  {/if}
+                {/if}
+                {#if polishError !== null}
+                  <p class="onboarding-polish-error" role="alert">
+                    {polishError}
+                  </p>
+                {/if}
+              </section>
 
               {#if missingKeys.length > 0 || invalidKeys.length > 0}
                 <section class="onboarding-still-needed" role="alert" in:surfaceFadeIn>
@@ -954,6 +1148,41 @@
                   </label>
                 </fieldset>
               </section>
+
+              <!-- Reference Slip — operator-grade affordance for the polish
+                   provenance. Mirrors ReflectionRead.svelte:212-275 in shape:
+                   collapsed-by-default <details> accordion at the bottom of
+                   the chapter, plain field rows under a JetBrains Mono
+                   summary. Reads from state_json.v2_draft_polish_meta so
+                   the recruiter (or operator on the trial) can verify
+                   whether the LLM landed cleanly (source=llm, confidence=100%)
+                   or the deterministic fallback fired (source=deterministic,
+                   confidence per the populated_chapter_fields/7 formula). -->
+              {@const meta = polishMeta()}
+              {#if meta !== null}
+                <details class="onboarding-polish-reference-slip">
+                  <summary class="onboarding-polish-reference-summary">
+                    <span class="onboarding-polish-reference-toggle" aria-hidden="true">+</span>
+                    <span class="onboarding-polish-reference-label">Reference slip</span>
+                  </summary>
+                  <dl class="onboarding-polish-reference-fields">
+                    <div class="onboarding-polish-reference-row">
+                      <dt>polish source</dt>
+                      <dd>{meta.source}</dd>
+                    </div>
+                    <div class="onboarding-polish-reference-row">
+                      <dt>polish confidence</dt>
+                      <dd>{Math.round(meta.confidence * 100)}%</dd>
+                    </div>
+                    {#if meta.polished_at}
+                      <div class="onboarding-polish-reference-row">
+                        <dt>polished at</dt>
+                        <dd>{meta.polished_at}</dd>
+                      </div>
+                    {/if}
+                  </dl>
+                </details>
+              {/if}
             {:else if ch.chapter_id === "completed"}
               <!-- Celebration body intentionally empty: the chapter
                    header already carries the heading + Cloris-voice
@@ -966,7 +1195,7 @@
           <footer class="onboarding-footer">
             {#if $syncError !== null}
               <p class="onboarding-sync-warn">
-                <em>Cloris couldn't sync that change — it'll try again on your next edit.</em>
+                Couldn't save that change. Cloris will retry on your next edit.
               </p>
             {/if}
             {#if completeError !== null}
@@ -977,7 +1206,7 @@
             <button
               type="button"
               class="onboarding-cta"
-              disabled={completing}
+              disabled={completing || polishing || restoring}
               onclick={continueFromCurrent}
             >
               {#if completing}

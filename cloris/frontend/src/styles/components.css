@@ -1,113 +1,8069 @@
-/* Cloris component styles. Editorial, not dashboard.
-   No rounded SaaS chrome, no shadow cards, no left-nav grids. */
+/* Cloris card-file UI.
+   Translation of the v0 page.tsx reference (b_OnN3PNO4P7r) onto the
+   existing Svelte + handwritten CSS frontend. Tailwind utility classes
+   from the v0 reference were not imported; they are translated to plain
+   CSS that consumes the Cloris design tokens (tokens.css) and three-
+   typeface base (base.css). */
 
-button.cloris-btn {
-  padding: 0.5rem 1rem;
-  border: 1px solid var(--ink);
-  background: transparent;
+/* ============ MAIN LAYOUT ============ */
+
+.card-file-layout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 3rem;
+  align-items: start;
+}
+
+@media (max-width: 1100px) {
+  .card-file-layout {
+    grid-template-columns: 1fr;
+    gap: 2.5rem;
+  }
+}
+
+.card-file-side {
+  position: sticky;
+  top: 2rem;
+}
+
+@media (max-width: 1100px) {
+  .card-file-side {
+    position: static;
+  }
+}
+
+/* ============ MASTHEAD ============ */
+
+/* The dark masthead band — wood-deep ground with cream serif mark and
+   peach mono meta. The page's one tonal-range moment (R20: at most one
+   wood-deep surface per page; second dark surfaces forbidden until a
+   settings/about-Cloris view exists). The contrast against all the
+   cream below is what gives the page a printed-publication register —
+   without it everything reads at the same brightness. */
+.masthead {
+  position: relative;
+  background: var(--wood-deep);
+  color: var(--cream);
+  padding: 1.5rem 1.75rem 1.375rem;
+  margin: 0 0 2rem;
+  border-radius: 2px;
+  /* Subtle inset highlight implies letterpress depth; cream at low
+     opacity keeps the band warm rather than flat black. */
+  box-shadow: inset 0 0 0 1px rgba(245, 239, 225, 0.05);
+}
+
+.mark {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: normal;
+  font-size: clamp(2.4rem, 4.5vw, 3rem);
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--cream);
+  margin: 0;
+}
+
+.mark .dot {
+  color: var(--peach);
+}
+
+/* Brand group: wordmark + inline tagline, baseline-aligned. */
+.masthead-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+/* Sub-group: needles + tagline share their own flex context so the
+   needles center against the tagline text, not the tall wordmark. */
+.brand-tagline-group {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+/* Crossed sewing needles: small, warm separator between wordmark
+   and tagline. Sized to roughly match the tagline's x-height. */
+.brand-needles {
+  width: 1.25rem;
+  height: 1.25rem;
+  flex-shrink: 0;
+  opacity: 0.55;
+  transform: rotate(90deg);
+}
+
+/* Tagline-on-dark override: swap ink-deep (cream page) for cream
+   (dark masthead). Pivot peach-deep and SVG stroke stay as-is —
+   they read fine on wood-deep. Size is forced to small. */
+.masthead-brand .strikethrough-tagline {
+  color: var(--cream);
+  font-size: 1.125rem;
+  opacity: 0.7;
+}
+
+.masthead-brand .strikethrough-tagline-pivot {
+  color: var(--peach);
+}
+
+/* Utility nav: MONITOR / TOOLS / SETTINGS — small, upper-right corner,
+   out of the brand line's way. Absolute so it floats independent of the
+   brand baseline. */
+.masthead-util {
+  position: absolute;
+  top: 0.75rem;
+  right: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin: 0;
+}
+
+.masthead-util-link {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-meta);
+  text-decoration: none;
+  transition: color 160ms ease-out;
+}
+
+.masthead-util-link:hover,
+.masthead-util-link:focus-visible {
+  color: var(--peach-deep);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+.masthead-util-link--active {
+  color: var(--peach-deep);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+
+.masthead-util-sep {
+  color: var(--ink-meta);
+  opacity: 0.3;
+  font-size: 0.875rem;
+}
+
+@media (max-width: 600px) {
+  .masthead {
+    padding: 1.25rem 1.25rem 1.125rem;
+  }
+  .masthead-brand {
+    gap: 0.5rem;
+  }
+  .masthead-brand .strikethrough-tagline {
+    font-size: 0.9375rem;
+  }
+  .masthead-util {
+    position: static;
+    margin-top: 0.5rem;
+  }
+}
+
+/* ============ CARD-FILE INVENTORY RIBBON ============ */
+
+.card-ribbon {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+  margin-bottom: 2.5rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+}
+
+.ribbon-cell {
+  white-space: nowrap;
+}
+
+.ribbon-cell--front {
+  color: var(--peach-deep);
+}
+
+/* ============ POLL ERROR ============ */
+
+.poll-error {
+  font-family: "Fraunces", Georgia, serif;
+  margin: -1rem 0 2rem;
+  padding: 0.875rem 0 0;
+  border-top: 1px dotted rgba(74, 50, 32, 0.45);
+  color: var(--wood-deep);
+}
+
+/* ============ FILE-A-NEW-CARD PANEL ============ */
+
+.file-panel {
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  padding: 1.5rem 1.5rem 1.75rem;
+  transition: border-color 220ms ease-out, box-shadow 220ms ease-out;
+}
+
+/* Phase 5 follow-on: brief attention pulse triggered when a verb tile
+   ("Start a search" / "Resume a search") points the user at this
+   panel. The previous focus-only handoff was invisible on a tall
+   homescreen — the panel needed a positive "I'm what you clicked
+   on" cue. The pulse holds for ~900ms then releases via the JS-side
+   timeout in LaunchForm. */
+.file-panel--pulse {
+  border-color: var(--peach-deep);
+  box-shadow:
+    0 0 0 1px var(--peach-deep),
+    0 6px 20px -8px rgba(198, 125, 90, 0.35);
+  animation: file-panel-pulse 900ms ease-out;
+}
+
+@keyframes file-panel-pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(198, 125, 90, 0.55);
+  }
+  60% {
+    box-shadow:
+      0 0 0 6px rgba(198, 125, 90, 0.0),
+      0 6px 20px -8px rgba(198, 125, 90, 0.35);
+  }
+  100% {
+    box-shadow:
+      0 0 0 1px var(--peach-deep),
+      0 6px 20px -8px rgba(198, 125, 90, 0.35);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .file-panel--pulse {
+    animation: none;
+  }
+}
+
+/* ---- Color tier convention for label-family elements ----
+   Mono-caps labels run on three ink tiers, ordered by prominence so a
+   region's hierarchy reads correctly without the eye having to size-
+   compare:
+     --ink-soft   — surface eyebrow / panel header (top of a region)
+     --ink-meta   — nested field label inside a region
+     --ink-muted  — recessed metadata (timestamps, sync warnings, loaders)
+   Surface eyebrow ALWAYS reads more prominent than the field labels
+   nested inside it. Pre-2026-05-03 this was inverted (.panel-eyebrow on
+   --ink-meta, .field-label on --ink-soft) and labels visually shouted
+   over the eyebrow. */
+
+/* ---- Unified surface eyebrow ----
+   Canonical mono-caps eyebrow used across all surfaces. Replaces the
+   per-surface variants below (.homescreen-section-eyebrow,
+   .workspace-source-eyebrow, .candidate-detail-source-eyebrow,
+   .briefs-page-eyebrow, .brief-detail-eyebrow, .markets-page-eyebrow,
+   .market-detail-source-eyebrow, .market-detail-empty-eyebrow,
+   .run-report-source-eyebrow, .run-report-section-eyebrow,
+   .onboarding-eyebrow, .drafts-page-eyebrow,
+   .refresh-brief-page-eyebrow, .monitor-run-eyebrow,
+  .brief-criteria-drawer-eyebrow). All old per-surface class definitions
+  have been removed; all markup now uses .surface-eyebrow directly. */
+.surface-eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-soft);
+  margin: 0 0 0.5rem;
+  }
+
+.surface-eyebrow--peach {
+  color: var(--peach-deep);
+}
+
+.surface-eyebrow--muted {
+  color: var(--ink-muted);
+  letter-spacing: 0.08em;
+}
+
+.panel-eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink-soft);
+  margin: 0 0 1rem;
+}
+
+.field-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-meta);
+  margin: 0 0 0.5rem;
+  display: block;
+}
+
+.brief-input {
+  width: 100%;
+  padding: 0.625rem 0.75rem;
+  /* Cream-deeper for the nested input — third tier of the cream
+     ladder (cream body → cream-deep frame → cream-deeper input). */
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
   color: var(--ink);
+  margin: 0 0 1rem;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+
+.brief-input:focus {
+  border-color: var(--blue-pencil);
+}
+
+.brief-input::placeholder {
+  color: var(--ink-meta);
+}
+
+.brief-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.button-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0 0 1rem;
+}
+
+/* ============ BRIEF PICKER (Phase 4 follow-on) ============ */
+/* Replaces the previous developer-language Brief Path text input in
+   LaunchForm. Each item is a clickable button that surfaces the
+   role_title (Fraunces serif primary) and the linkedin_project
+   (mono-caps subtitle). Selected state is a peach-deep border + tinted
+   background, matching the file-panel pulse aesthetic. */
+
+.brief-picker {
+  margin: 0 0 1rem;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.brief-picker-loading,
+.brief-picker-empty,
+.brief-picker-error {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  font-style: italic;
+  color: var(--ink-meta);
+  margin: 0.5rem 0;
+}
+
+.brief-picker-empty code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-style: normal;
+  font-size: 0.85em;
+  background: var(--cream-deeper);
+  padding: 0.05em 0.35em;
+  border-radius: 0;
+}
+
+.brief-picker-error {
+  color: var(--peach-deep);
+}
+
+.brief-picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.brief-picker-button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.125rem;
+  width: 100%;
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  padding: 0.625rem 0.75rem;
+  margin: 0;
+  cursor: pointer;
+  text-align: left;
+  transition:
+    border-color 160ms ease-out,
+    background 160ms ease-out,
+    transform 160ms ease-out,
+    box-shadow 160ms ease-out;
+}
+
+/* R19 chrome pulse — same lift+shadow vocabulary as buttons. */
+.brief-picker-button:hover {
+  border-color: var(--peach-deep);
+  box-shadow: 0 4px 0 -2px var(--wood);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .brief-picker-button:hover {
+    transform: translateY(-1px);
+  }
+  .brief-picker-button:active {
+    transform: translateY(1px);
+    box-shadow: none;
+  }
+}
+
+.brief-picker-button:focus-visible {
+  outline: 2px solid var(--blue-pencil);
+  outline-offset: 2px;
+}
+
+.brief-picker-button--selected {
+  border-color: var(--peach-deep);
+  background: var(--cream-deeper);
+  box-shadow: inset 3px 0 0 0 var(--peach-deep);
+}
+
+.brief-picker-primary {
   font-family: "Fraunces", Georgia, serif;
   font-size: 1rem;
+  line-height: 1.2;
+  color: var(--ink);
+}
+
+.brief-picker-subtitle {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-meta);
+}
+
+.brief-picker-resume-hint {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+  margin: 0 0 0.75rem;
+}
+
+.brief-picker-selected {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+  margin: 0.5rem 0 1rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--cream-deeper);
+  border-left: 3px solid var(--peach-deep);
+}
+
+.brief-picker-selected strong {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+/* ============ LAUNCH READINESS PRE-FLIGHT (Phase D, slice D9) ============ */
+/* Editorial register per the slice spec — italic prose remediation, NOT
+   red form-error chips. Sits between the brief-picker-selected confirmation
+   and the launch button; the recruiter reads it as "Cloris is checking what
+   she needs," not as "you broke a form rule." */
+
+.launch-readiness {
+  margin: 0.75rem 0 1rem;
+  padding: 0.75rem 0.875rem;
+  background: var(--paper-deeper, var(--cream-deeper));
+  border-radius: 6px;
+}
+
+.launch-readiness-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  /* R17 floor — mono-caps must render at ≥14px. */
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-meta);
+  margin: 0 0 0.5rem;
+}
+
+/* Phase F Slice F5: per-module readiness block. One per selected
+   module so the recruiter can see which module is blocked rather than
+   collapsing several readiness sources into one yes/no. */
+
+.launch-readiness-module {
+  padding-top: 0.625rem;
+  margin-top: 0.625rem;
+  border-top: 1px solid var(--wood-rule);
+}
+
+.launch-readiness-module:first-of-type {
+  padding-top: 0;
+  margin-top: 0;
+  border-top: 0;
+}
+
+.launch-readiness-module-eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+  margin: 0 0 0.375rem;
+}
+
+/* Phase F Slice F5: module picker chips. Sits between brief-picker
+   confirmation and the readiness pre-flight; the recruiter sees Cloris
+   asking "where to look" before "what's blocking the start." */
+
+.launch-modules {
+  margin: 0.75rem 0 0.5rem;
+}
+
+.launch-modules-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-meta);
+  margin: 0 0 0.25rem;
+}
+
+.launch-modules-help {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0 0 0.5rem;
+}
+
+.launch-modules-empty {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--peach-deep);
+  margin: 0.5rem 0 0;
+}
+
+.launch-modules-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.launch-module-chip {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  padding: 0.375rem 0.75rem;
+  border: 1px solid var(--wood-rule);
+  border-radius: 999px;
+  /* Cream-deeper for the unselected chip BG so it reads as a distinct
+     control against the panel's --paper-card surface. The previous
+     bare var(--paper) reference resolved to inherited / unset and the
+     chip vanished into the panel. */
+  background: var(--cream-deeper);
+  color: var(--ink-soft);
   cursor: pointer;
-  letter-spacing: 0.01em;
+  transition: background 0.12s ease, border-color 0.12s ease,
+    color 0.12s ease, transform 0.18s ease, box-shadow 0.18s ease;
 }
 
-button.cloris-btn:hover:not([disabled]) {
+/* R19 chrome pulse — same lift+shadow vocabulary as buttons. */
+.launch-module-chip:hover:not(.is-disabled) {
+  border-color: var(--wood-deep);
+  color: var(--ink);
+  box-shadow: 0 4px 0 -2px var(--wood);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .launch-module-chip:hover:not(.is-disabled) {
+    transform: translateY(-1px);
+  }
+  .launch-module-chip:active:not(.is-disabled) {
+    transform: translateY(1px);
+    box-shadow: none;
+  }
+}
+
+.launch-module-chip.is-selected {
+  background: var(--ink);
+  border-color: var(--ink);
+  /* Light cream text on dark ink for the high-contrast selected
+     state. The previous bare var(--paper) reference resolved to the
+     inherited --ink-soft, rendering ink-on-ink and erasing the
+     "I picked this module" signal. */
+  color: var(--paper-card);
+}
+
+.launch-module-chip.is-disabled {
+  opacity: var(--opacity-disabled);
+  cursor: not-allowed;
+}
+
+.launch-readiness-probing,
+.launch-readiness-ready,
+.launch-readiness-error,
+.launch-readiness-force-active {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.launch-readiness-ready {
+  color: var(--sage-deep);
+}
+
+.launch-readiness-error {
+  color: var(--peach-deep);
+}
+
+.launch-readiness-force-active {
+  margin-top: 0.5rem;
+  color: var(--ink-meta);
+}
+
+.launch-readiness-blockers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.launch-readiness-blocker {
+  padding-left: 0.625rem;
+  border-left: 2px solid var(--wood-rule);
+}
+
+.launch-readiness-blocker--auth {
+  border-left-color: var(--peach-deep);
+}
+
+.launch-readiness-blocker--config {
+  border-left-color: var(--blue-pencil-deep);
+}
+
+.launch-readiness-blocker--net {
+  border-left-color: var(--wood-deep);
+}
+
+.launch-readiness-blocker-message {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0 0 0.125rem;
+  line-height: 1.3;
+}
+
+.launch-readiness-blocker-remediation {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+  margin: 0;
+  line-height: 1.4;
+}
+
+/* Buttons get the chrome pulse ��� 1px lift on hover with a wood-deep
+   shadow that reads like the button is sitting on a small block of
+   shadow, just lifted. Press settles to translateY(1px). Lab .btn:hover
+   pattern (lines 208-209 of cloris-components.html). R19 tier-1
+   pulse; ubiquitous, never absent. Reduced-motion drops translate but
+   keeps the shadow so hover still feels responsive. */
+.btn-file-card,
+.btn-pull-resume {
+  width: 100%;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  padding: 0.625rem 0.875rem;
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-file-card {
+  background: var(--peach-deep);
+  color: var(--cream);
+  border: 1px solid var(--peach-deep);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn-file-card:hover:not([disabled]),
+  .btn-pull-resume:hover:not([disabled]) {
+    transform: translateY(-1px);
+  }
+  .btn-file-card:active:not([disabled]),
+  .btn-pull-resume:active:not([disabled]) {
+    transform: translateY(1px);
+    box-shadow: none;
+  }
+}
+
+.btn-file-card:hover:not([disabled]) {
+  background: var(--ink);
+  color: var(--cream-deeper);
+  border-color: var(--ink);
+  box-shadow: 0 4px 0 -2px var(--wood-deep);
+}
+
+.btn-pull-resume {
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--wood-rule);
+}
+
+.btn-pull-resume:hover:not([disabled]) {
+  background: var(--cream);
+  border-color: var(--ink-soft);
+  color: var(--ink);
+  box-shadow: 0 4px 0 -2px var(--wood);
+}
+
+.btn-file-card[disabled],
+.btn-pull-resume[disabled] {
+  opacity: var(--opacity-disabled);
+  cursor: not-allowed;
+}
+
+.file-panel-status {
+  margin-top: 1rem;
+}
+
+.file-panel-status .ok,
+.file-panel-status .error {
+  font-family: "Fraunces", Georgia, serif;
+  margin: 0;
+  font-size: 0.9375rem;
+}
+
+.file-panel-status .error {
+  color: var(--wood-deep);
+}
+
+/* ============ TAB RAIL (drawer tabs) ============ */
+/* Inline horizontal selector. Tabs are subordinate to the section title
+   that follows them; active state is a thin underline in the
+   appropriate accent (peach for front, wood for back). No backgrounds. */
+
+.tab-rail {
+  display: flex;
+  flex-direction: row;
+  gap: 1.5rem;
+  margin: 0 0 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--wood-rule);
+}
+
+.tab-button {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.25rem 0;
+  background: transparent;
+  border: none;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-meta);
+  cursor: pointer;
+  transition: color 0.12s ease, box-shadow 0.12s ease;
+  text-align: left;
+}
+
+.tab-button:hover {
+  color: var(--ink);
+}
+
+.tab-count {
+  color: var(--ink-meta);
+  font-weight: 500;
+}
+
+.tab-button:hover .tab-count {
+  color: var(--peach-deep);
+}
+
+/* Front of File active = peach underline accent. Blue is gone from the
+   tab fill; the only blue that survives is annotation-class (focus,
+   selection, divider). */
+.tab-button--active-front {
+  color: var(--ink);
+  font-weight: 500;
+  box-shadow: inset 0 -2px 0 var(--peach-deep);
+}
+
+.tab-button--active-front .tab-count {
+  color: var(--peach-deep);
+}
+
+/* Filed Away active = wood-deep underline. Sibling shape to active-front,
+   different accent so the active state is visually unambiguous. */
+.tab-button--active-back {
+  color: var(--ink);
+  font-weight: 500;
+  box-shadow: inset 0 -2px 0 var(--wood-deep);
+}
+
+.tab-button--active-back .tab-count {
+  color: var(--ink);
+}
+
+/* ============ CARD STACK PANE ============ */
+
+.card-file {
+  min-width: 0;
+}
+
+.card-stack-pane {
+  min-width: 0;
+}
+
+.card-stack-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0 0 1.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--wood);
+}
+
+.card-stack-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 2rem;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0;
+}
+
+/* Phase 3B: tl;dr line under the FiledAway page title. R10 — lead with
+   the answer; lets the recruiter skip the scroll. Voice-quiet: serif,
+   ink-soft, no italic. */
+.card-stack-tldr {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink-soft);
+  margin: 0;
+  font-style: italic;
+}
+
+/* Phase 3B: GroupedList primitive styles. */
+.grouped-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.grouped-list-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.grouped-list-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--wood-rule);
+  padding: 0.5rem 0;
+  margin: 0;
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+
+.grouped-list-toggle:hover {
+  color: var(--peach-deep);
+}
+
+.grouped-list-group-label {
+  text-transform: uppercase;
+  flex: 1 1 auto;
+}
+
+.grouped-list-group-count {
+  color: var(--ink-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.grouped-list-group-chevron {
+  color: var(--ink-meta);
+  width: 1ch;
+  text-align: center;
+}
+
+.grouped-list-items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.grouped-list-show-all {
+  align-self: flex-start;
+  background: transparent;
+  border: 0;
+  padding: 0.5rem 0;
+  margin: 0.25rem 0 0;
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.02em;
+  color: var(--peach-deep);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.grouped-list-show-all:hover {
+  color: var(--ink);
+}
+
+.card-stack-count {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+  white-space: nowrap;
+}
+
+.find-card-bar {
+  margin: 0 0 1.5rem;
+}
+
+.find-card-input {
+  width: 100%;
+  padding: 0.5rem 0;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--wood-rule);
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink);
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease;
+}
+
+.find-card-input:focus {
+  border-bottom-color: var(--blue-pencil);
+}
+
+.find-card-input::placeholder {
+  color: var(--ink-meta);
+  font-style: italic;
+}
+
+/* ============ CARD STACK ============ */
+
+.card-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+/* The card itself. Position relative for the source rail; padding sits
+   in .card-body so the rail can run flush to the edge. */
+.card {
+  position: relative;
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  cursor: pointer;
+  transition: transform 0.18s ease, border-color 0.18s ease,
+    background 0.18s ease, box-shadow 0.18s ease;
+  outline: none;
+}
+
+/* Active-state peach rail: cards in flight (working / stalled / lost-
+   track / interrupted) get a subtle peach inset on the left, replacing
+   the source-coding rail that R16 forbids. The visual cue tells the
+   reader "this card is alive right now" without any text reading. */
+.card[data-state-kind="working"]:not(.card--selected),
+.card[data-state-kind="lost-track"]:not(.card--selected),
+.card[data-state-kind="interrupted"]:not(.card--selected) {
+  box-shadow: inset 3px 0 0 var(--peach);
+}
+
+/* Stalled cards get a slightly more attentional rail (deeper peach). */
+.card[data-state-kind="stalled"]:not(.card--selected) {
+  box-shadow: inset 3px 0 0 var(--peach-deep);
+}
+
+/* Hover lifts the card 1px and casts a small wood-deep shadow — the
+   chrome pulse from the lab .btn:hover pattern. Reduced-motion drops
+   the translate but keeps the shadow so hover still reads. The
+   active-rail inset is preserved on hover so it doesn't strobe in/out
+   when the user moves over an in-flight card. */
+.card:hover {
+  border-color: var(--wood);
+  box-shadow: 0 4px 0 -2px var(--wood);
+}
+
+.card[data-state-kind="working"]:not(.card--selected):hover,
+.card[data-state-kind="lost-track"]:not(.card--selected):hover,
+.card[data-state-kind="interrupted"]:not(.card--selected):hover {
+  box-shadow: inset 3px 0 0 var(--peach), 0 4px 0 -2px var(--wood);
+}
+
+.card[data-state-kind="stalled"]:not(.card--selected):hover {
+  box-shadow: inset 3px 0 0 var(--peach-deep), 0 4px 0 -2px var(--wood);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .card:hover {
+    transform: translateY(-1px);
+  }
+  .card:active {
+    transform: translateY(1px);
+    box-shadow: none;
+  }
+}
+
+.card:focus-visible {
+  border-color: var(--blue-pencil);
+  box-shadow: 0 0 0 1px var(--blue-pencil);
+}
+
+/* Selected card uses a left peach rule to mark it as open, plus a
+   slightly stronger border. No more translateX shift — the rule is
+   the marker. */
+.card--selected {
+  border-color: var(--wood);
+  background: var(--paper-card);
+  box-shadow: inset 4px 0 0 var(--peach-deep);
+}
+
+.card--selected:hover {
+  background: var(--paper-card);
+  box-shadow: inset 4px 0 0 var(--peach-deep), 0 4px 0 -2px var(--wood);
+}
+
+/* Source rail removed (R16: blue is annotation only — never a
+   continuous structural background). The mono-caps LINKEDIN / GITHUB
+   eyebrow at .card-source-line below identifies the source on its
+   own. The rail's 4px width margin is no longer needed; .card-body
+   sits flush with the card border. */
+
+.card-body {
+  padding: 1rem 1.25rem;
+}
+
+/* ============ CARD HEADER (Two-Register layout) ============ */
+/* The card face has two registers: a metadata line (source + disambiguator
+   + drift diamond + pill) and a title line (role title + action hint).
+   Both use flex row layout with space-between. */
+
+.card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+/* Line 1: metadata segments left, status pill right */
+.card-meta-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.card-meta-segments {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+}
+
+.card-source-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-meta);
+}
+
+.card-meta-sep {
+  color: var(--ink-meta);
+  opacity: 0.6;
+  font-size: 0.875rem;
+}
+
+.card-meta-disambiguator {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  color: var(--ink-meta);
+  overflow-wrap: anywhere;
+}
+
+/* Small filled diamond indicating the brief was modified since the
+   last run. Inline in the metadata line — quiet enough to not disrupt
+   the rhythm but visible enough to catch the eye on a scan. */
+.card-meta-drift {
+  color: var(--peach-deep);
+  font-size: 0.875rem;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+/* Line 2: title left, action hint right */
+.card-title-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.card-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.25rem;
+  font-weight: 400;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0;
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+
+/* Peach-deep mono action verb on the collapsed face ("Resume →",
+   "Investigate →"). Visually quiet — no border, no background — but
+   clearly clickable via color + hover underline. */
+.card-action-hint {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  color: var(--peach-deep);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: text-decoration 120ms ease;
+}
+
+.card-action-hint:hover,
+.card-action-hint:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+.card-action-hint:disabled {
+  opacity: 0.6;
+  cursor: default;
+  text-decoration: none;
+}
+
+/* Card status pill — proper pill treatment (tinted background, hairline
+   border in current color, mono-caps padding). Replaces the previous
+   color-only text approach so each Cloris-state kind reads as a
+   distinct *pill*, not just a tinted label. Lab .pill / .pill-sage /
+   .pill-peach / .pill-wood (lines 265-271 of cloris-components.html)
+   are the model. The 250ms transition (S3.M4) carries the pill across
+   state changes (e.g. WORKING → LIMIT REACHED) instead of snapping. */
+.card-status {
+  display: inline-block;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  /* Sentence-case at 14px parses better than mono-caps at this scale
+     (R22). The labels in lib/state.ts already ship as "Working" /
+     "Limit reached" / "Stalled" — let them render as-written. */
+  letter-spacing: 0.04em;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  color: var(--ink-meta);
+  background: rgba(138, 122, 104, 0.08);
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition:
+    background-color 250ms ease,
+    color 250ms ease,
+    border-color 250ms ease,
+    box-shadow 250ms ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-status {
+    transition: none;
+  }
+}
+
+/* Cloris-state pill colors. Keys mirror the ClorisStateKind union in
+   lib/state.ts. The five-band taxonomy: peach (working / in-flight),
+   mustard (limit / policy), wood (held / completed neutral), sage
+   (saved / positive — reserved for future SAVED state), peach + wood
+   underline (stalled / error). */
+.card-status--working {
+  color: var(--peach-deep);
+  background: rgba(227, 154, 118, 0.18);
+}
+
+/* Stalled is louder than working: keeps the wood-deep underline as a
+   visual distinguisher so the pill reads as "she's stuck, your call"
+   instead of dissolving into the in-motion lane. */
+.card-status--stalled {
+  color: var(--peach-deep);
+  background: rgba(227, 154, 118, 0.12);
+  box-shadow: inset 0 -2px 0 var(--wood-deep);
+}
+
+.card-status--lost-track {
+  color: var(--peach-deep);
+  background: rgba(227, 154, 118, 0.12);
+}
+
+.card-status--interrupted {
+  color: var(--peach-deep);
+  background: rgba(227, 154, 118, 0.10);
+}
+
+.card-status--limit-reached {
+  color: var(--mustard-deep);
+  background: rgba(212, 165, 58, 0.14);
+}
+
+.card-status--completed {
+  color: var(--wood);
+  background: rgba(107, 74, 43, 0.08);
+}
+
+.card-status--away {
+  color: var(--ink-meta);
+  background: rgba(138, 122, 104, 0.08);
+}
+
+.card-status--no-record {
+  color: var(--ink-meta);
+  background: rgba(138, 122, 104, 0.06);
+}
+
+.card-status--unknown {
+  color: var(--ink-meta);
+  background: rgba(138, 122, 104, 0.06);
+}
+
+/* Reserved for the future SAVED state-kind (S2.M3 follow-on; needs
+   lib/state.ts ClorisStateKind union extension). The pill class is
+   ready so callsites can adopt it without a CSS change later. */
+.card-status--saved {
+  color: var(--sage-deep);
+  background: rgba(138, 154, 110, 0.14);
+}
+
+.card-status--held {
+  color: var(--wood);
+  background: rgba(107, 74, 43, 0.10);
+}
+
+/* ============ CARD FIELDS (WORKER / RESUME — detail only) ============ */
+/* Two-Register redesign: these fields moved from the collapsed face
+   into the expanded detail section. Two columns (Cloris + Pull). */
+
+.card-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+  margin: 0 0 0.75rem;
+}
+
+.card-field {
+  margin: 0;
+  min-width: 0;
+}
+
+.card-field-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-meta);
+  margin: 0 0 0.25rem;
+}
+
+.card-field-value {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.875rem;
+  color: var(--ink);
+  line-height: 1.35;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.card-field-value--alert {
+  color: var(--peach-deep);
+}
+
+/* ============ CARD FOOTER ============ */
+/* Two-Register redesign: footer only renders on working/stalled cards.
+   No border-top — it sits directly below the title line as a quiet
+   third register for recency. */
+
+.card-footer {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  margin-top: 0.25rem;
+}
+
+.card-last-mark {
+  color: var(--ink-meta);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 600px) {
+  .card-footer {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+}
+
+/* ============ CARD DETAIL (expanded) ============ */
+
+.card-detail {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--blue-pencil);
+}
+
+/* The blue-pencil divider: a thin baby-blue rule with the words
+   "Card Detail" set in mono caps centered on it. This is the v0
+   "blue pencil annotation line" treatment. */
+.card-detail-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+
+.card-detail-divider::before,
+.card-detail-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--blue-pencil);
+}
+
+.card-detail-divider-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--blue-pencil-deep);
+}
+
+.card-stop-reason {
+  margin: 0 0 1rem;
+  padding: 0.625rem 0.75rem;
+  background: var(--cream);
+  border-left: 2px solid var(--peach-deep);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.card-stop-reason-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+}
+
+.card-stop-reason-value {
+  color: var(--ink-soft);
+}
+
+/* Stall banner: same shape as the stop-reason block but louder, since
+   stalled means "you need to look at this." */
+.card-stall-reason {
+  margin: 0 0 1rem;
+  padding: 0.625rem 0.75rem;
   background: var(--cream-deep);
+  border-left: 3px solid var(--peach-deep);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
 }
 
-button.cloris-btn[disabled] {
+.card-stall-reason-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--peach-deep);
+  font-weight: 600;
+}
+
+.card-stall-reason-value {
+  color: var(--ink);
+}
+
+/* Work-unit progress strip. The bar is intentionally thin and quiet —
+   the user's job is to watch the count, not the bar. */
+.card-progress {
+  margin: 0 0 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.card-progress-line {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+}
+
+.card-progress-line strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.card-progress-bar {
+  position: relative;
+  height: 4px;
+  background: var(--cream-deep);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.card-progress-bar-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--peach);
+  transition: width 0.4s cubic-bezier(0.4, 0, 0.6, 1);
+}
+
+/* Attempt-health summary lines inside the Reference Slip. Two stacked
+   rows: last success time, dominant failure-kind histogram. Mono caps
+   to match the rest of the slip. */
+.card-attempt-health {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.card-attempt-health-line {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  color: var(--ink-soft);
+  letter-spacing: 0.05em;
+}
+
+.card-attempt-health-line strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* .card-brief-drift removed — Two-Register redesign replaced the
+   prose brief-drift line with an inline ◆ diamond (.card-meta-drift)
+   in the metadata line. */
+
+/* Last-mark timestamp inside the expanded detail section (for cards
+   whose collapsed face doesn't show the footer). */
+.card-detail-last-mark {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  color: var(--ink-meta);
+  margin: 0 0 0.75rem;
+}
+
+/* Read-the-report link inside the Card Detail. Sits above the action
+   buttons; visually quiet but clearly clickable via the dotted peach
+   underline. */
+.card-read-report-link {
+  display: inline-block;
+  margin: 0 0 1rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--peach-deep);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--peach);
+  padding-bottom: 1px;
+}
+
+.card-read-report-link:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.card-detail-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 1.5rem;
+  margin: 0 0 1rem;
+}
+
+@media (max-width: 720px) {
+  .card-detail-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card-detail-field {
+  margin: 0;
+  min-width: 0;
+}
+
+.card-detail-field-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-meta);
+  margin: 0 0 0.25rem;
+}
+
+.card-detail-field-value {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.875rem;
+  color: var(--ink);
+  line-height: 1.4;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.card-detail-field-value--mono {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  color: var(--ink-soft);
+}
+
+/* ============ CARD ACTIONS ============ */
+
+.card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem;
+  margin-top: 0.5rem;
+}
+
+.btn-card-action {
+  flex: 1 1 auto;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  padding: 0.625rem 0.875rem;
+  background: transparent;
+  color: var(--ink-soft);
+  border: 1px solid var(--wood-rule);
+  cursor: pointer;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+  white-space: nowrap;
+}
+
+.btn-card-action:hover:not([disabled]) {
+  background: var(--cream);
+  border-color: var(--ink-soft);
+  color: var(--ink);
+  box-shadow: 0 4px 0 -2px var(--wood);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .btn-card-action:hover:not([disabled]) {
+    transform: translateY(-1px);
+  }
+  .btn-card-action:active:not([disabled]) {
+    transform: translateY(1px);
+    box-shadow: none;
+  }
+}
+
+.btn-card-action[disabled] {
   opacity: 0.4;
   cursor: not-allowed;
 }
 
-button.cloris-btn + button.cloris-btn {
-  margin-left: 0.75rem;
+.btn-card-action--primary {
+  background: var(--peach-deep);
+  color: var(--cream);
+  border-color: var(--peach-deep);
 }
 
-input.cloris-input {
-  border: 0;
-  border-bottom: 1px solid var(--ink-soft);
+.btn-card-action--primary:hover:not([disabled]) {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--cream-deeper);
+}
+
+.btn-card-action--quiet {
+  flex: 0 0 auto;
+}
+
+.card-action-error {
+  font-family: "Fraunces", Georgia, serif;
+  margin: 0.625rem 0 0;
+  color: var(--wood-deep);
+  font-size: 0.875rem;
+}
+
+.card-action-note {
+  font-family: "Fraunces", Georgia, serif;
+  margin: 0.625rem 0 0;
+  color: var(--ink-soft);
+  font-size: 0.875rem;
+}
+
+/* ============ REFERENCE SLIP ============ */
+
+/* The Reference Slip is a folded technical addendum at the bottom of the
+   open card detail. Collapsed by default. Only catalog/source/state_key/
+   raw status/raw stop_reason/last observed time are surfaced inside it.
+   No PIDs, no state_dir, no filesystem paths. */
+.reference-slip {
+  margin-top: 1rem;
+  border-top: 1px dashed var(--wood-rule);
+  padding-top: 0.75rem;
+}
+
+.reference-slip-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 0.375rem 0;
   background: transparent;
-  padding: 0.5rem 0;
+  border: none;
+  cursor: pointer;
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.875rem;
-  width: 100%;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink-meta);
+  text-align: left;
+}
+
+.reference-slip-toggle:hover {
+  color: var(--ink-soft);
+}
+
+.reference-slip-label {
+  display: inline-block;
+}
+
+.reference-slip-chevron {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  line-height: 1;
+  color: var(--ink-meta);
+}
+
+.reference-slip-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.625rem 1.25rem;
+  margin: 0.625rem 0 0;
+  padding: 0.75rem 0.875rem;
+  background: var(--cream);
+  border: 1px solid var(--wood-rule);
+}
+
+@media (max-width: 720px) {
+  .reference-slip-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.reference-slip-field {
+  margin: 0;
+  min-width: 0;
+}
+
+.reference-slip-field-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-meta);
+  margin: 0 0 0.125rem;
+}
+
+.reference-slip-field-value {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.875rem;
+  color: var(--ink-soft);
+  margin: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+
+.reference-slip-field-value--mono {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  color: var(--ink-soft);
+}
+
+/* ============ EMPTY CARD SLOT ============ */
+
+.empty-card-slot {
+  border: 1px dashed var(--wood-rule);
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+}
+
+/* Ambient variant: hosts the CrochetStage motion graphic. The stage owns
+   its own visual frame so the dashed slot border would compete; we drop
+   the border and lean on the stage's cream-deep ground instead. */
+.empty-card-slot--ambient {
+  border: none;
+  padding: 2.5rem 1.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.empty-card-note {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--ink-meta);
+  margin: 0;
+}
+
+/* ============ ENTRANCE ============ */
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(0.5rem);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.masthead,
+.card-ribbon,
+.card-file-layout {
+  animation: rise 0.5s ease-out both;
+}
+
+.card-ribbon {
+  animation-delay: 0.05s;
+}
+
+.card-file-layout {
+  animation-delay: 0.12s;
+}
+
+/* ============ MOBILE ============ */
+
+@media (max-width: 720px) {
+  .card-fields {
+    grid-template-columns: 1fr 1fr;
+  }
+  .card-fields .card-field:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 600px) {
+  .card-stack-title {
+    font-size: 1.625rem;
+  }
+  .card-title {
+    font-size: 1.0625rem;
+  }
+}
+
+/* ============ HOMESCREEN VERB GRID ============ */
+/* Five tiles describing the things Cloris can do. Layout is two columns
+   on desktop, single column on narrow viewports. Each tile reuses the
+   card hairline-on-paper treatment so the homescreen reads as a card-
+   file index page rather than a SaaS dashboard. */
+
+.homescreen-ambient {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1.125rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  margin: 0 0 2rem;
+  max-width: 60ch;
+}
+
+/* Section deck — italic-accented prose paragraph that sits directly
+   below a DisplayTitle. The article subtitle. Multi-sentence allowed;
+   <em> fragments toggle to Instrument Serif italic in --wood-deep
+   (matches the lab .section-deck at line 101 of cloris-components.html).
+   The accent typeface deliberately does NOT use peach — peach is
+   reserved for the DisplayTitle accent (R7 one register per region). */
+.section-deck {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  max-width: 62ch;
+  margin: 0.875rem 0 1.5rem;
+}
+
+.section-deck em {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--wood-deep);
+  font-weight: 400;
+}
+
+/* R26 — Cloris editorial byline. Instrument Serif italic in --ink-meta,
+   single line, dated. Frames the surface as Cloris's dispatch.
+   The --card modifier tightens bottom margin for card-stack density. */
+.cloris-byline {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.875rem;
+  color: var(--ink-meta);
+  margin: 0 0 0.75rem;
+}
+
+.cloris-byline.cloris-byline--card {
+  margin: 0 0 0.25rem;
+}
+
+/* Short section divider hairline — 56px × 1px, sits between a
+   DisplayTitle and its section-deck. Mirrors the lab .section-rule
+   at line 100. Visually quieter than a full-width hairline; behaves
+   like a typeset rule. */
+.section-rule {
+  width: 56px;
+  height: 1px;
+  background: var(--wood-rule);
+  margin: 0.875rem 0 0.75rem;
+  border: none;
+}
+
+/* Marginalia layout for section heads. Eyebrow (`.section-num`) sits
+   to the LEFT of the title at baseline, like a marginalia note in a
+   printed book — not stacked above. Mirrors lab `.section-head` at
+   line 96 of cloris-components.html. The eyebrow is mono-caps in
+   --peach-deep; the title is rendered by <DisplayTitle> (Fraunces +
+   Instrument Serif italic accent). */
+.section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1.125rem;
+  margin: 0;
+}
+
+/* Padding-top compensates for serif Fraunces baseline metrics so the
+   tiny mono-caps eyebrow visually aligns with the larger title's
+   baseline rather than its descender. Tuned by eye against Fraunces
+   2rem head + JetBrains Mono 0.8125rem eyebrow. */
+.section-num {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--peach-deep);
+  padding-top: 0.375rem;
+  flex-shrink: 0;
+  margin: 0;
+}
+
+@media (max-width: 720px) {
+  .section-head {
+    gap: 0.875rem;
+  }
+}
+
+/* Unified → .surface-eyebrow .surface-eyebrow--peach */
+.homescreen-section-eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--peach-deep);
+  margin: 0 0 0.75rem;
+}
+
+/* Running Folio — slim mono-caps verb strip. Replaces the prior 2x3
+   verb-tile grid as the homescreen's chapter-header. The strip is
+   hairlined above and below so it reads as its own editorial band
+   between the masthead and the body content. */
+.folio-strip {
+  margin: 0 0 2.25rem;
+}
+
+.folio-rule {
+  border: 0;
+  border-top: 1px solid var(--wood-rule);
+  margin: 0;
+}
+
+.running-folio {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  padding: 0.875rem 1rem;
+}
+
+/* Separators are rendered via ::before on every verb except the first.
+   Keeping the dot in CSS (rather than as a sibling DOM node) keeps the
+   markup lean, gives screen readers a clean nav of buttons, and avoids
+   Svelte each-block edge cases when DOM siblings of different element
+   types share an iteration. */
+.folio-verb {
+  position: relative;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
   color: var(--ink);
+  background: transparent;
+  border: 0;
+  padding: 0.25rem 0.875rem;
+  cursor: pointer;
+  transition: color 160ms ease-out;
   outline: none;
 }
 
-input.cloris-input:focus {
+.folio-verb:not(:first-child)::before {
+  content: "·";
+  position: absolute;
+  left: -0.0625rem;
+  color: var(--ink-meta);
+  letter-spacing: 0;
+  pointer-events: none;
+}
+
+.folio-verb:hover:not(.folio-verb--disabled) {
+  color: var(--peach-deep);
+}
+
+.folio-verb:focus-visible {
+  color: var(--peach-deep);
+  outline: 2px solid var(--blue-pencil);
+  outline-offset: 3px;
+}
+
+.folio-verb--disabled {
+  color: var(--ink-meta);
+  cursor: default;
+  opacity: var(--opacity-disabled);
+}
+
+@media (max-width: 640px) {
+  .running-folio {
+    gap: 0.875rem;
+    padding: 0.75rem 0.5rem;
+  }
+  .folio-strip {
+    margin-bottom: 1.75rem;
+  }
+}
+
+.homescreen-in-motion {
+  margin: 0 0 1rem;
+}
+
+.homescreen-look-through {
+  display: inline-block;
+  margin-top: 1rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--peach-deep);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--peach);
+  padding-bottom: 1px;
+}
+
+.homescreen-look-through:hover {
+  color: var(--ink);
   border-bottom-color: var(--ink);
 }
 
-label.cloris-input-label {
-  display: block;
+/* PageBackLink — page-chrome navigation primitive. Sits at the top of
+   non-home routes with a generous breathing strip below it, so the
+   following content card reads as a distinct visual unit instead of
+   being crowded by the back-nav. Mono-caps small text + a peach
+   chevron that nudges left on hover. */
+.page-back-strip {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: 1.25rem 1.5rem 2.5rem;
+}
+
+.page-back-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.5rem;
   font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.75rem;
-  letter-spacing: 0.08em;
-  color: var(--ink-soft);
+  /* R17 floor: mono-caps must be ≥ 14px; the audit caught the prior
+     0.8125rem rendering at 13px across every non-home surface. */
+  font-size: 0.875rem;
   text-transform: uppercase;
-  margin-bottom: 0.25rem;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+  text-decoration: none;
+  border: 0;
+  padding: 0.25rem 0;
 }
 
-.launch-actions {
-  margin-top: 1.25rem;
+.page-back-link-chevron {
+  color: var(--peach-deep);
+  font-size: 0.95rem;
+  line-height: 1;
+  transition: transform 180ms ease-out;
+  display: inline-block;
 }
 
-.launch-status {
-  margin-top: 1rem;
+.page-back-link:hover {
+  color: var(--ink);
 }
 
-.launch-status .ok {
+.page-back-link:hover .page-back-link-chevron {
+  transform: translateX(-3px);
+  color: var(--ink);
+}
+
+.page-back-link:focus-visible {
+  outline: 2px solid var(--blue-pencil);
+  outline-offset: 4px;
+}
+
+/* ============ RUN REPORT PAGE ============ */
+/* Editorial layout: prose-width sections, hairlines, mono metadata. The
+   page reads as a printed report — sections stacked, no dashboard
+   widgets. Cloris does NOT speak in this surface; she's the subject
+   elsewhere, but the report itself is plain operational. */
+
+.run-report-page {
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+/* Page-level loading container — centers the (large) GlassesFinder
+   horizontally and adds vertical breathing room so the magnifier
+   hunt reads as a real moment rather than a tiny widget tucked
+   under the back link. */
+.run-report-loading {
+  display: flex;
+  justify-content: center;
+  padding: 4rem 1rem 5rem;
+}
+
+.run-report-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1.5rem;
+  margin: 1.25rem 0 2rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--wood);
+}
+
+.run-report-heading {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.run-report-title {
   font-family: "Fraunces", Georgia, serif;
+  font-size: clamp(1.75rem, 4vw, 2.5rem);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--ink);
+  margin: 0.25rem 0 0;
+}
+
+/* Phase 2A: subtitle under the run-report H1 when the title resolver
+   falls back to "<Source> search" + #<state_key>. */
+.run-report-title-subtitle {
+  font-family: "JetBrains Mono", Menlo, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-meta);
+  margin: 0.5rem 0 0;
+}
+
+.run-report-body {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.125rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  margin: 0.75rem 0 0;
+  max-width: 60ch;
+}
+
+/* Phase G L13: linkout from the editorial Attempt Health sentence
+   to the operational Live Monitor view. Subtle on the run-report;
+   recruiters who want depth find it here. */
+.run-report-monitor-linkout {
+  margin: 0.5rem 0 0;
+  font-size: 0.9375rem;
+}
+
+.run-report-monitor-link {
+  color: var(--ink-meta);
+  text-decoration: none;
+  font-style: italic;
+  font-family: "Instrument Serif", Georgia, serif;
+}
+
+.run-report-monitor-link:hover,
+.run-report-monitor-link:focus {
+  color: var(--ink-soft);
+  text-decoration: underline;
+}
+
+.run-report-notfound {
+  margin: 2rem 0;
+}
+
+.run-report-section {
+  margin: 0 0 2.5rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--wood-rule);
+}
+
+.run-report-section:last-child {
+  border-bottom: none;
+}
+
+/* Section titles (R7): serif sentence-case so the page has one uppercase
+   register at a time. Field labels inside the section stay mono-caps,
+   but the title itself reads as a real H2. */
+.run-report-section-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.5rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+  color: var(--ink);
+  margin: 0 0 1.25rem;
+}
+
+/* Phase C-bis 0.6b: section eyebrow above the saves list, signaling
+   "this is one run's contribution" so the workspace CTA above it reads
+   as the primary destination. R17-compliant 14px mono-caps. */
+/* Phase C-bis 0.6b follow-up: "+N more saves. Open the workspace…"
+   footer beneath the truncated saves preview. Editorial italic prose,
+   not a list row, so the eye recognizes it as instruction rather than
+   another candidate. */
+.run-report-saves-overflow {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1.0625rem;
+  color: var(--ink-soft);
+  margin: 0.875rem 0 0;
+  line-height: 1.5;
+}
+
+.run-report-saves-overflow-link {
+  color: var(--peach-deep);
+  text-decoration: none;
+  border-bottom: 1px solid var(--peach-deep);
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+
+.run-report-saves-overflow-link:hover,
+.run-report-saves-overflow-link:focus-visible {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+/* Phase C-bis 0.6b: workspace funnel CTA sitting between header and the
+   saves list. Peach-deep underline + serif type so it reads as the
+   primary affordance, not a chrome link. */
+.run-report-workspace-cta {
+  margin: 0 0 2.5rem;
+}
+
+/* Phase F Slice F6: italic editorial prose framing the workspace CTA
+   as the place to ACT on these candidates. ≤14px so it doesn't compete
+   with the link itself; sits visually as a quiet receipt. */
+.run-report-editorial-banner {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.875rem;
+  color: var(--ink-meta);
+  margin: 0 0 0.5rem;
+}
+
+.run-report-workspace-link {
+  display: inline-block;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: var(--peach-deep);
+  text-decoration: none;
+  border-bottom: 2px solid var(--peach-deep);
+  padding: 0 0 0.125rem;
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+
+.run-report-workspace-link:hover,
+.run-report-workspace-link:focus-visible {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.run-report-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1.5rem;
   margin: 0;
 }
 
-.launch-status .error {
-  font-family: "Fraunces", Georgia, serif;
+.run-report-fields--inline {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.625rem 1.75rem;
+}
+
+@media (max-width: 720px) {
+  .run-report-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.run-report-field {
   margin: 0;
-  color: var(--wood-deep);
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
 }
 
-.poll-error {
+.run-report-field dt {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-meta);
+  font-weight: 500;
+}
+
+.run-report-field dd {
   font-family: "Fraunces", Georgia, serif;
-  margin: 0.5rem 0 0 0;
-  color: var(--wood-deep);
+  font-size: 1.0625rem;
+  color: var(--ink);
+  line-height: 1.4;
+  margin: 0;
+  word-break: break-word;
 }
 
-/* State dir rows. Hairline rules between rows; no card grid. */
+.run-report-mono {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.9375rem;
+}
 
-.state-row {
-  border-top: 1px solid var(--ink-soft);
-  padding: 1.25rem 0;
+.run-report-link {
+  color: var(--peach-deep);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--peach);
+}
+
+.run-report-link:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.run-report-empty {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1.0625rem;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.run-report-candidate-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.run-report-candidate {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.75rem 1.5rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px dotted var(--wood-rule);
+  align-items: baseline;
+}
+
+.run-report-candidate:last-child {
+  border-bottom: none;
+}
+
+.run-report-candidate-name {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.1875rem;
+  color: var(--ink);
+  font-weight: 500;
+  min-width: 0;
+  word-break: break-word;
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-bottom-color 160ms ease-out;
+}
+
+a.run-report-candidate-name:hover {
+  border-bottom-color: var(--peach-deep);
+  color: var(--peach-deep);
+}
+
+a.run-report-candidate-name:focus-visible {
+  outline: 2px solid var(--blue-pencil);
+  outline-offset: 2px;
+}
+
+.run-report-candidate-decision {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+}
+
+.run-report-candidate-confidence {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  color: var(--peach-deep);
+  white-space: nowrap;
+}
+
+.run-report-truncated-note {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 1rem 0 0;
+}
+
+/* Tl;dr line directly under the title. Italic instrument-serif so it
+   reads as Cloris narrating, not as a metadata field. */
+.run-report-tldr {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1.3125rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+  margin: 0.625rem 0 0;
+  max-width: 56ch;
+}
+
+/* "Where to start" headline — recruiter-facing answer in serif. */
+.run-report-where-to-start {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.1875rem;
+  line-height: 1.5;
+  color: var(--ink);
+  margin: 0 0 1.25rem;
+}
+
+/* Decision-class group headers — small mono-caps name + count + chevron
+   for collapsed groups. Saves and Borderline render without a button
+   (always visible); rejects/filtered/in-progress render with a click
+   target. */
+.run-report-group {
+  margin: 0 0 1.25rem;
+}
+
+.run-report-group:last-child {
+  margin-bottom: 0;
+}
+
+.run-report-group-header,
+.run-report-group-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 0.625rem;
+  width: 100%;
+  padding: 0.5rem 0;
+  border-bottom: 1px dotted var(--wood-rule);
+  margin: 0 0 0.5rem;
+  background: transparent;
+  border-top: none;
+  border-left: none;
+  border-right: none;
+  cursor: default;
+  text-align: left;
+}
+
+.run-report-group-toggle {
+  cursor: pointer;
+  transition: color 0.12s ease;
+}
+
+.run-report-group-toggle:hover .run-report-group-name,
+.run-report-group-toggle:hover .run-report-group-chevron {
+  color: var(--ink);
+}
+
+.run-report-group-name {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--peach-deep);
+  font-weight: 500;
+  flex: 1 1 auto;
+}
+
+.run-report-group--saves .run-report-group-name {
+  color: var(--peach-deep);
+}
+
+.run-report-group--borderline .run-report-group-name {
+  color: var(--mustard-deep);
+}
+
+.run-report-group--rejects .run-report-group-name,
+.run-report-group--filtered .run-report-group-name,
+.run-report-group--in-progress .run-report-group-name {
+  color: var(--ink-meta);
+}
+
+.run-report-group-count {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.125rem;
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.run-report-group-chevron {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 1.125rem;
+  color: var(--ink-meta);
+  width: 1ch;
+  text-align: right;
+}
+
+.run-report-group-expand {
+  display: inline-block;
+  margin: 0.625rem 0 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--peach-deep);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  border-bottom: 1px dotted var(--peach);
+}
+
+.run-report-group-expand:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+/* Reference Slip footer: same toggle + field-grid pattern as the
+   StateDirRow reference slip, scoped to the run-report page. */
+.run-report-reference-slip-section {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.run-report-reference-slip-toggle {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0.5rem 0;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink-meta);
+}
+
+.run-report-reference-slip-toggle:hover {
+  color: var(--ink);
+}
+
+.run-report-reference-slip-fields {
+  margin: 0.75rem 0 0;
+  padding: 1rem 1.25rem;
+  background: var(--cream-deep);
+  border-radius: 2px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1.5rem;
+}
+
+@media (max-width: 720px) {
+  .run-report-reference-slip-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Output / state-dir paths that occupy the wide cell so they don't
+   wrap inside a 50% column. */
+.run-report-reference-slip-wide {
+  grid-column: 1 / -1;
+}
+
+/* ============ CANDIDATE DETAIL (Phase C, slice C1) ============ */
+/* Per-candidate page rendered at #/candidate/<source>/<state_key>/<id>.
+   Reuses SpecimenFrame + DisplayTitle + the run-report reference-slip
+   field grid. The remainder is candidate-specific layout. */
+
+.candidate-detail-brief-subtitle {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-meta);
+  margin: 0.5rem 0 0;
+}
+
+.candidate-detail-save-reason {
+  margin: 1.5rem 0 1.25rem;
+}
+
+.candidate-detail-save-reason-body {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--ink);
+  margin: 0.5rem 0 0;
+}
+
+.candidate-detail-empty-line {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 1rem 0;
+}
+
+/* Phase F Slice F6: Cross-source evidence section. One row per OTHER
+   source aggregated under this person via F3's identity resolver.
+   Editorial register — Fraunces section title, mono-caps eyebrow per
+   source row, italic Instrument Serif describe. F8 will refactor the
+   row body to use EvidenceRenderer.svelte; F6 ships the inline-prose
+   first cut. */
+.candidate-detail-cross-source {
+  margin: 1.5rem 0;
+}
+
+.candidate-detail-section-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.0625rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0 0 0.75rem;
+  letter-spacing: -0.005em;
+}
+
+.candidate-detail-cross-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.candidate-detail-cross-source-row {
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--wood-rule);
+}
+
+.candidate-detail-cross-source-eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+  margin: 0 0 0.25rem;
+}
+
+.candidate-detail-cross-source-name {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  margin: 0 0 0.25rem;
+}
+
+.candidate-detail-cross-source-link {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--wood-rule);
+  transition: border-color 0.18s ease;
+}
+
+.candidate-detail-cross-source-link:hover,
+.candidate-detail-cross-source-link:focus-visible {
+  border-color: var(--ink);
+}
+
+.candidate-detail-cross-source-describe {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0;
+}
+
+/* Phase F Slice F8 / Ledger L10: EvidenceRenderer substrate. Renders
+   one row per Evidence item with a per-source mono-caps eyebrow.
+   Image / video kinds render placeholder rows until Phase 2's
+   multimodal modules ship. */
+.evidence-renderer {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.evidence-row {
+  padding-left: 0.75rem;
+  border-left: 2px solid var(--wood-rule);
+}
+
+.evidence-row-eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+  margin: 0 0 0.25rem;
+}
+
+.evidence-row-text {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink);
+  margin: 0;
+}
+
+.evidence-row-cite {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0.25rem 0 0;
+}
+
+.evidence-row-link {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  margin: 0;
+}
+
+.evidence-row-link-anchor {
+  color: var(--ink);
+  text-decoration: none;
+  border-bottom: 1px solid var(--wood-rule);
+  transition: border-color 0.18s ease;
+}
+
+.evidence-row-link-anchor:hover,
+.evidence-row-link-anchor:focus-visible {
+  border-color: var(--ink);
+}
+
+.evidence-row-placeholder {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0;
+}
+
+.candidate-detail-fields {
+  margin: 1rem 0 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1.5rem;
+}
+
+@media (max-width: 720px) {
+  .candidate-detail-fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+.candidate-detail-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+}
+
+.candidate-detail-field--profile {
+  grid-column: 1 / -1;
+}
+
+.candidate-detail-field-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-soft);
+}
+
+.candidate-detail-field-value {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1.4;
+  color: var(--ink);
+  word-break: break-word;
+}
+
+.candidate-detail-profile-link {
+  color: var(--peach-deep);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--peach);
+}
+
+.candidate-detail-profile-link:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.candidate-detail-reference-slip {
+  margin: 1.5rem 0 0;
+}
+
+.candidate-detail-reference-slip-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--ink-meta);
+  margin: 0 0 0.75rem;
+}
+
+.candidate-detail-reference-slip-grid {
+  margin: 0;
+  padding: 1rem 1.25rem;
+  background: var(--cream-deep);
+  border-radius: 2px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem 1.5rem;
+}
+
+@media (max-width: 720px) {
+  .candidate-detail-reference-slip-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.candidate-detail-reference-slip-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.candidate-detail-reference-slip-row-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-soft);
+}
+
+.candidate-detail-reference-slip-row-value {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  /* Phase C-bis 0.6a: legacy rows may still carry pre-cleaning URLs
+     even after the 0.4 backfill. Overflow is handled by break-word
+     rather than break-all to maintain typographic rhythm per R13. */
+  word-break: break-word;
+}
+
+/* Phase C-bis 0.6a: candidate-detail Reference Slip toggle shares the
+   `.reference-slip-toggle` block with the run-report variant; this
+   variant flag carries any candidate-specific spacing. */
+.candidate-detail-reference-slip-toggle {
+  margin-bottom: 0.5rem;
+}
+
+.candidate-detail-display-name {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 2rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  color: var(--ink);
+  margin: 0;
+}
+
+.candidate-detail-name-row {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.875rem;
+}
+
+.candidate-detail-flagged {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--paper-card);
+  background: var(--peach-deep);
+  padding: 0.25rem 0.625rem;
+  border-radius: 2px;
+}
+
+/* ============ STATUS TOGGLE (Phase C, slice C3) ============ */
+/* Recruiter-overridden status switcher. Lives next to Cloris's
+   terminal_decision; setting an override flips the displayed primary
+   status. */
+
+.status-toggle {
+  margin: 1.25rem 0 1.5rem;
+}
+
+.status-toggle-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-soft);
+  margin: 0 0 0.625rem;
+}
+
+.status-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.status-toggle-button {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink);
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  padding: 0.4rem 0.875rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 160ms ease-out,
+    border-color 160ms ease-out,
+    color 160ms ease-out;
+}
+
+.status-toggle-button:hover:not(:disabled) {
+  border-color: var(--peach-deep);
+  color: var(--peach-deep);
+}
+
+.status-toggle-button--active {
+  background: var(--peach-deep);
+  border-color: var(--peach-deep);
+  color: var(--paper-card);
+}
+
+.status-toggle-button:focus-visible {
+  outline: 2px solid var(--blue-pencil);
+  outline-offset: 2px;
+}
+
+.status-toggle-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.status-toggle-clear {
+  margin-top: 0.5rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  /* R17 floor — mono-caps must render at ≥14px. */
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+  background: transparent;
+  border: 0;
+  padding: 0.25rem 0;
+  cursor: pointer;
+  border-bottom: 1px dotted var(--ink-meta);
+}
+
+.status-toggle-clear:hover:not(:disabled) {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.status-toggle-cloris-call {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0.625rem 0 0;
+}
+
+/* Phase C-bis 0.3: failed-state explanatory line. Shown next to the
+   disabled status pill toggle when Cloris failed to evaluate the
+   candidate. Italic Instrument Serif keeps it in the editorial register
+   without competing with the operational pill labels above. */
+.status-toggle-disabled-note {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0.625rem 0 0;
+}
+
+.status-toggle-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.875rem;
+  color: var(--peach-deep);
+  margin: 0.5rem 0 0;
+}
+
+/* ============ BRIEF LIBRARY (Phase D, slice D1) ============ */
+/* Editorial card stack at `#/briefs`. Each card is a click-through to
+   the brief's workspace. Reuses `card-status` from StateDirRow's pill
+   treatment (CSS-only; defined in components.css elsewhere). */
+
+.briefs-page {
+  max-width: 880px;
+  margin: 0 auto;
+}
+
+.briefs-page-header {
+  margin: 0 0 1.5rem;
+}
+
+.briefs-page-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 2.25rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0 0 0.5rem;
+}
+
+.briefs-page-loading,
+.briefs-page-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--ink-meta);
+  margin: 1rem 0;
+}
+
+.briefs-empty {
+  margin: 2rem 0;
+  padding: 1.5rem;
+  background: var(--cream-deeper);
+  border-radius: 6px;
+  text-align: center;
+}
+
+.briefs-empty-line {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 1.125rem;
+  color: var(--ink-soft);
+  margin: 0 0 0.75rem;
+}
+
+.briefs-empty-cta {
+  margin: 0;
+}
+
+.briefs-empty-link {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--peach-deep);
+  text-decoration: none;
+  border-bottom: 1px solid var(--peach-deep);
+  padding-bottom: 0.125rem;
+}
+
+.briefs-stack {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.briefs-card-wrap {
+  margin: 0;
+}
+
+.briefs-card {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  border-radius: 8px;
+  padding: 1rem 1.25rem;
+  transition:
+    border-color 160ms ease-out,
+    transform 120ms ease-out,
+    box-shadow 160ms ease-out;
+}
+
+.briefs-card:hover,
+.briefs-card:focus-visible {
+  border-color: var(--peach-deep);
+  outline: none;
+}
+
+.briefs-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
+.briefs-card-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+  min-width: 0;
+}
+
+.briefs-card-source-eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-soft);
+}
+
+.briefs-card-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.375rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0;
+}
+
+.briefs-card-subtitle {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0;
+}
+
+.briefs-card-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1.5rem;
+  margin: 0.875rem 0 0;
+}
+
+.briefs-card-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+
+.briefs-card-field-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+}
+
+.briefs-card-field-value {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink);
+  margin: 0;
+}
+
+/* Status pill kind for "no runs yet" — neutral wood-rule tint, distinct
+   from the active-state pills inherited from StateDirRow. */
+.card-status--no-runs {
+  background: var(--cream-deeper);
+  color: var(--ink-meta);
+  border-color: var(--wood-rule);
+}
+
+/* ============ BRIEF DETAIL (Phase D, slice D2) ============ */
+/* Editorial display of a brief at `#/brief/<brief_id>`. Read-only in
+   D2; edit affordance lands in a follow-up. The deprecated-keys drawer
+   at the bottom carries a count badge (architectural-fit critique catch
+   — recruiters won't expand zero-affordance disclosure). */
+
+.brief-detail-page {
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.brief-detail-header {
+  margin: 0 0 2rem;
+}
+
+.brief-detail-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 2.25rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0 0 0.5rem;
+}
+
+.brief-detail-was-flat-note {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0.5rem 0;
+}
+
+.brief-detail-actions {
+  margin: 1rem 0 0;
+}
+
+.brief-detail-action-link {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--peach-deep);
+  text-decoration: none;
+  border-bottom: 1px solid var(--peach-deep);
+}
+
+.brief-detail-loading,
+.brief-detail-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--ink-meta);
+  margin: 2rem auto;
+  max-width: 720px;
+}
+
+.brief-detail-empty {
+  max-width: 600px;
+  margin: 4rem auto;
+  padding: 0 2rem;
+}
+
+.brief-detail-empty-line {
+  font-family: "Instrument Serif", Georgia, serif;
+  color: var(--ink-meta);
+}
+
+.brief-detail-section {
+  margin: 0 0 2rem;
+}
+
+.brief-detail-section-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0 0 0.875rem;
+}
+
+.brief-detail-capability-list {
+  list-style: decimal;
+  padding-left: 1.5rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.brief-detail-capability {
+  margin: 0;
+}
+
+.brief-detail-capability-name {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0 0 0.25rem;
+}
+
+.brief-detail-capability-description {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink-soft);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.brief-detail-depth {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  margin: 0;
+}
+
+.brief-detail-depth-row {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.brief-detail-depth-row dt {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+}
+
+.brief-detail-depth-row dd {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.brief-detail-nfp-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 
-.state-row:last-of-type {
-  border-bottom: 1px solid var(--ink-soft);
+.brief-detail-nfp {
+  font-family: "Instrument Serif", Georgia, serif;
+  color: var(--ink);
+  line-height: 1.4;
 }
 
-.state-row .state-row-header {
-  font-family: "JetBrains Mono", ui-monospace, monospace;
-  font-size: 0.875rem;
+.brief-detail-nfp-why {
   color: var(--ink-soft);
-  letter-spacing: 0.04em;
+  font-style: italic;
 }
 
-.state-row .state-row-line {
-  font-family: "Fraunces", Georgia, serif;
+.brief-detail-target-modules {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.9375rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink);
   margin: 0;
 }
 
-.state-row .state-row-actions {
+/* Phase F Slice F2 — "Where Cloris saves" section. Read-only in F2's
+   first cut; renders one row per module in target_modules with a
+   passive italic cue when a destination is missing. */
+
+.brief-detail-destinations {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.brief-detail-destination-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+}
+
+.brief-detail-destination-row {
+  display: grid;
+  grid-template-columns: 8rem 1fr;
+  gap: 1rem;
+  align-items: baseline;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--wood-rule);
+}
+
+.brief-detail-destination-row:last-child {
+  border-bottom: none;
+}
+
+.brief-detail-destination-source {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+}
+
+.brief-detail-destination-value {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.0625rem;
+  color: var(--ink);
+  margin: 0;
+}
+
+.brief-detail-destination-id {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.9375rem;
+  color: var(--ink);
+}
+
+.brief-detail-destination-name {
+  color: var(--ink-muted);
+  font-size: 0.9375rem;
+  margin-left: 0.5rem;
+}
+
+.brief-detail-destination-missing {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--peach-deep);
+}
+
+.brief-detail-destination-note {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--ink-muted);
+}
+
+/* ============ LinkedIn project editor (Path 3) ============
+   Reused across BriefDetail "Where Cloris saves," LaunchForm inline
+   readiness blocker, and OnboardingFlow where_to_look chapter. The
+   editor has two modes (display + form); both follow the editorial
+   register established by .brief-detail-destination-* and
+   .onboarding-input. The `--compact` variant tightens spacing for
+   the LaunchForm inline placement where the editor sits inside an
+   existing readiness-blocker <li>. */
+.linkedin-project-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.linkedin-project-editor-display {
+  margin: 0;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.0625rem;
+  color: var(--ink);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.linkedin-project-editor-id {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.9375rem;
+  color: var(--ink);
+}
+
+.linkedin-project-editor-name {
+  color: var(--ink-muted);
+  font-size: 0.9375rem;
+}
+
+.linkedin-project-editor-change {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  background: transparent;
+  border: none;
+  color: var(--ink-soft);
+  padding: 0;
+  margin-left: auto;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.linkedin-project-editor-change:hover,
+.linkedin-project-editor-change:focus-visible {
+  color: var(--ink);
+}
+
+.linkedin-project-editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.linkedin-project-editor-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.linkedin-project-editor-prompt {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.linkedin-project-editor-input {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+  padding: 0.5rem 0.625rem;
+  border-radius: 0;
+}
+
+.linkedin-project-editor-input:focus {
+  outline: 2px solid var(--peach-deep);
+  outline-offset: 1px;
+}
+
+.linkedin-project-editor-input:disabled {
+  color: var(--ink-muted);
+  cursor: not-allowed;
+}
+
+.linkedin-project-editor-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--peach-deep);
+  margin: 0;
+  line-height: 1.4;
+}
+
+.linkedin-project-editor-actions {
+  display: flex;
+  gap: 0.625rem;
+  align-items: center;
+}
+
+.linkedin-project-editor-save {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0.4375rem 0.875rem;
+  background: var(--wood-deep);
+  color: var(--cream);
+  border: none;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.linkedin-project-editor-save:hover:not(:disabled),
+.linkedin-project-editor-save:focus-visible:not(:disabled) {
+  background: var(--ink);
+}
+
+.linkedin-project-editor-save:disabled {
+  background: var(--wood-rule);
+  color: var(--ink-muted);
+  cursor: not-allowed;
+}
+
+.linkedin-project-editor-cancel,
+.linkedin-project-editor-clear {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 0.4375rem 0.625rem;
+  background: transparent;
+  color: var(--ink-soft);
+  border: none;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.linkedin-project-editor-cancel:hover:not(:disabled),
+.linkedin-project-editor-clear:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.linkedin-project-editor--compact .linkedin-project-editor-prompt {
+  font-size: 0.875rem;
+}
+
+.linkedin-project-editor--compact .linkedin-project-editor-input {
+  font-size: 0.9375rem;
+  padding: 0.4375rem 0.5625rem;
+}
+
+.linkedin-project-editor--compact .linkedin-project-editor-display {
+  font-size: 0.9375rem;
+}
+
+.brief-detail-versions,
+.brief-detail-deprecated {
+  margin-top: 2rem;
+  padding: 1rem 1.25rem;
+  background: var(--cream-deeper);
+  border-radius: 6px;
+}
+
+.brief-detail-versions-summary {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.brief-detail-versions-count {
+  font-weight: 600;
+  color: var(--ink);
+  margin-left: 0.25rem;
+}
+
+.brief-detail-versions-list {
+  list-style: none;
+  margin: 0.875rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.brief-detail-version {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.75rem;
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink);
+  align-items: baseline;
+}
+
+.brief-detail-version-when {
+  font-style: italic;
+}
+
+.brief-detail-version-size {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  color: var(--ink-soft);
+}
+
+.brief-detail-deprecated-summary {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+  cursor: pointer;
+  user-select: none;
+}
+
+.brief-detail-deprecated-count {
+  font-weight: 600;
+  color: var(--ink);
+  margin-left: 0.25rem;
+}
+
+.brief-detail-deprecated-body {
+  margin-top: 0.875rem;
+}
+
+.brief-detail-deprecated-line {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+  margin: 0 0 0.5rem;
+}
+
+.brief-detail-deprecated-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.875rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.brief-detail-deprecated-key {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  padding: 0.2rem 0.5rem;
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  border-radius: 4px;
+  color: var(--ink);
+}
+
+  /* ============ VIEW BRIEF CRITERIA AFFORDANCE (Phase D, slice D7) ============ */
+  /* Mono-caps peach-deep link below the section-rule, above the status
+  toggle. Positioned after the candidate name so the H1 is the
+  unchallenged first read. */
+  
+> .candidate-detail-view-criteria {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--peach-deep);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  margin: 0 0 1rem;
+  cursor: pointer;
+  border-bottom: 1px dotted var(--peach-deep);
+  display: inline-block;
+  }
+
+.candidate-detail-view-criteria:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+/* ============ BRIEF CRITERIA DRAWER (Phase D, slice D7) ============ */
+
+.brief-criteria-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(20, 16, 12, 0.35);
+  z-index: 90;
+}
+
+.brief-criteria-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(480px, 100vw);
+  background: var(--paper-card);
+  box-shadow: -4px 0 20px rgba(20, 16, 12, 0.18);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.brief-criteria-drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--wood-rule);
+}
+
+.brief-criteria-drawer-close {
+  font-size: 1.25rem;
+  background: transparent;
+  border: 0;
+  color: var(--ink-meta);
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+}
+
+.brief-criteria-drawer-close:hover {
+  color: var(--ink);
+}
+
+.brief-criteria-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.5rem;
+}
+
+.brief-criteria-drawer-loading,
+.brief-criteria-drawer-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink-meta);
+}
+
+.brief-criteria-drawer-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0 0 1.5rem;
+}
+
+.brief-criteria-drawer-section {
+  margin: 0 0 1.5rem;
+}
+
+.brief-criteria-drawer-section-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0 0 0.625rem;
+}
+
+.brief-criteria-drawer-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.brief-criteria-drawer-list li {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink);
+  line-height: 1.45;
+}
+
+.brief-criteria-drawer-area-description {
+  color: var(--ink-soft);
+  font-style: italic;
+}
+
+.brief-criteria-drawer-depth {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  margin: 0;
+}
+
+.brief-criteria-drawer-depth div {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 0.625rem;
+  align-items: baseline;
+}
+
+.brief-criteria-drawer-depth dt {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-soft);
+}
+
+.brief-criteria-drawer-depth dd {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink);
+  margin: 0;
+  line-height: 1.45;
+}
+
+.brief-criteria-drawer-footer {
+  margin: 1.5rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--wood-rule);
+}
+
+.brief-criteria-drawer-footer a {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--peach-deep);
+  text-decoration: none;
+  border-bottom: 1px solid var(--peach-deep);
+}
+
+/* ============ JUDGMENT-ACCURACY TOGGLE (Phase D, slice D6) ============ */
+/* Closed-loop calibration signal switcher. Distinct REGISTER from
+   .status-toggle above — the status toggle is peach (pipeline action);
+   the judgment toggle is sage (calibration / editorial). The two
+   schemas are also distinct (Phase C-bis 0.5 substrate); the visual
+   register reinforces the perceptual distinction so the recruiter
+   reads them as orthogonal signals, not redundant pills. */
+
+.judgment-toggle {
+  margin: 1.25rem 0 1.5rem;
+}
+
+.judgment-toggle-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-soft);
+  margin: 0 0 0.25rem;
+}
+
+/* Editorial italic deck — explains *why* the recruiter would calibrate.
+   Distinguishes the toggle from a pure form field. R7-compliant: italic
+   register sits below the mono-caps label without stacking uppercase. */
+.judgment-toggle-help {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0 0 0.625rem;
+}
+
+.judgment-toggle-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.judgment-toggle-button {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink);
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  padding: 0.4rem 0.875rem;
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    background 160ms ease-out,
+    border-color 160ms ease-out,
+    color 160ms ease-out;
+}
+
+.judgment-toggle-button:hover:not(:disabled) {
+  border-color: var(--sage-deep);
+  color: var(--sage-deep);
+}
+
+.judgment-toggle-button--active {
+  background: var(--sage-deep);
+  border-color: var(--sage-deep);
+  color: var(--paper-card);
+}
+
+.judgment-toggle-button:focus-visible {
+  outline: 2px solid var(--blue-pencil);
+  outline-offset: 2px;
+}
+
+.judgment-toggle-button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.judgment-toggle-clear {
+  margin-top: 0.5rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  /* R17 floor — mono-caps must render at ≥14px. */
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+  background: transparent;
+  border: 0;
+  padding: 0.25rem 0;
+  cursor: pointer;
+  border-bottom: 1px dotted var(--ink-meta);
+}
+
+.judgment-toggle-clear:hover:not(:disabled) {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+.judgment-toggle-disabled-note {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0.625rem 0 0;
+}
+
+.judgment-toggle-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.875rem;
+  color: var(--peach-deep);
+  margin: 0.5rem 0 0;
+}
+
+/* ============ NOTES COMPOSE (Phase C, slice C3) ============ */
+/* Recruiter-authored note log on the candidate-detail page. Append-only;
+   reverse-chrono. */
+
+.notes-compose {
+  margin: 1.5rem 0;
+}
+
+.notes-compose-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-soft);
+  margin: 0 0 0.625rem;
+}
+
+.notes-compose-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.notes-compose-textarea {
+  width: 100%;
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+  padding: 0.75rem 0.875rem;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1.45;
+  color: var(--ink);
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 160ms ease-out;
+}
+
+.notes-compose-textarea:focus {
+  border-color: var(--blue-pencil);
+}
+
+.notes-compose-textarea:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.notes-compose-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.notes-compose-submit {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--cream);
+  background: var(--peach-deep);
+  border: 1px solid var(--peach-deep);
+  padding: 0.5rem 1rem;
+  cursor: pointer;
+  transition:
+    background 160ms ease-out,
+    border-color 160ms ease-out,
+    color 160ms ease-out,
+    transform 180ms ease-out;
+}
+
+.notes-compose-submit:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--cream-deeper);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .notes-compose-submit:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+}
+
+.notes-compose-submit:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.notes-compose-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.875rem;
+  color: var(--peach-deep);
+  margin: 0.5rem 0 0;
+}
+
+.notes-compose-empty {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 1rem 0 0;
+}
+
+.notes-compose-list {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+}
+
+.notes-compose-entry {
+  padding: 0.75rem 1rem;
+  background: var(--cream-deep);
+  border-left: 3px solid var(--peach-deep);
+  border-radius: 2px;
+}
+
+.notes-compose-entry-body {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink);
+  margin: 0;
+}
+
+.notes-compose-entry-stamp {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  color: var(--ink-meta);
+  margin: 0.375rem 0 0;
+}
+
+.candidate-detail-loading,
+.candidate-detail-empty {
+  max-width: 720px;
+  margin: 4rem auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.candidate-detail-empty h1 {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.75rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0 0 0.75rem;
+}
+
+.candidate-detail-empty p {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+/* ============ WORKSPACE (Phase C, slice C2) ============ */
+/* Per-brief candidate workspace at #/workspace/<source>/<state_key>.
+   Recipe-card stats above a CandidateCard grid. The grid responds to
+   viewport: 2 columns at desktop, 1 column under 720px. */
+
+.workspace-page {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem 2rem 4rem;
+}
+
+.workspace-brief-subtitle {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.125rem;
+  font-style: italic;
+  color: var(--ink-soft);
+  margin: 0.5rem 0 0;
+}
+
+.workspace-loading,
+.workspace-empty {
+  max-width: 720px;
+  margin: 4rem auto;
+  padding: 2rem;
+  text-align: center;
+}
+
+.workspace-empty h1 {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.75rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0 0 0.75rem;
+}
+
+.workspace-empty p {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.workspace-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1rem 1.5rem;
+  margin: 1rem 0 2rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--cream-deep);
+  border-radius: 2px;
+}
+
+@media (max-width: 960px) {
+  .workspace-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 480px) {
+  .workspace-stats {
+    grid-template-columns: 1fr;
+  }
+}
+
+.workspace-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.workspace-stat-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-meta);
+}
+
+.workspace-stat-value {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.5rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.workspace-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem 1.25rem;
+  margin: 0 0 2rem;
+}
+
+@media (max-width: 720px) {
+  .workspace-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.workspace-empty-grid {
+  margin: 2rem 0;
+  padding: 2rem 1rem;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+
+.workspace-empty-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.25rem;
+  color: var(--ink);
+  margin: 0;
+}
+
+.workspace-run-link {
+  text-align: right;
+  margin: 1.5rem 0 0;
+}
+
+.workspace-run-link a {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--peach-deep);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--peach);
+  padding-bottom: 1px;
+}
+
+.workspace-run-link a:hover {
+  color: var(--ink);
+  border-bottom-color: var(--ink);
+}
+
+/* ============ CANDIDATE CARD (Phase C, slice C2) ============ */
+/* One tile in the Workspace grid. The whole card is a link; clicks land
+   on the candidate-detail page. Recipe-card layout: decision + confidence
+   in the header, name in serif, save reason as italic prose, last-touched
+   stamp in the footer. */
+
+.candidate-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 1.25rem 1.25rem 1.125rem;
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  border-radius: 2px;
+  text-decoration: none;
+  color: var(--ink);
+  transition:
+    border-color 180ms ease-out,
+    box-shadow 180ms ease-out,
+    transform 180ms ease-out;
+}
+
+.candidate-card:hover {
+  border-color: var(--peach-deep);
+  box-shadow: 0 4px 0 -2px var(--peach-deep);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .candidate-card:hover {
+    transform: translateY(-1px);
+  }
+  .candidate-card:active {
+    transform: translateY(1px);
+    box-shadow: none;
+  }
+}
+
+.candidate-card:focus-visible {
+  outline: 2px solid var(--blue-pencil);
+  outline-offset: 2px;
+}
+
+.candidate-card-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.candidate-card-decision {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  /* R17: mono-caps must be ≥ 14px floor. */
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--peach-deep);
+}
+
+.candidate-card-user-status {
+  font-family: "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--paper-card);
+  background: var(--peach-deep);
+  padding: 0.125rem 0.625rem;
+  border-radius: 999px;
+  text-transform: capitalize;
+}
+
+.candidate-card-confidence {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  /* R17: mono-caps label is ≥14px; the value (sentence-case) inherits. */
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  color: var(--ink-meta);
+  display: inline-flex;
+  gap: 0.375rem;
+  align-items: baseline;
+}
+
+.candidate-card-confidence-label {
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+}
+
+.candidate-card-confidence-value {
+  color: var(--ink);
+}
+
+.candidate-card-name {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.25rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.2;
+  color: var(--ink);
+  margin: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+/* Phase F Slice F6: source-pill stack. CandidateCard renders one pill
+   per source aggregated under this person — primary-source first,
+   cross-source pills appended in read-model order. The container is a
+   flex row so multi-pill stacks wrap naturally on small cards.
+   Originated as the D10 single-pill bridge UI; expanded for F6. */
+.candidate-card-source-pills {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  flex-shrink: 0;
+}
+
+.candidate-card-source-pill {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  /* R17 floor �� mono-caps must render at ≥14px. */
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  /* Tighten relative to body so the pill sits visually subordinate
+     to the Fraunces display name. */
+  line-height: 1;
+  padding: 0.2rem 0.4rem;
+  border-radius: 4px;
+  background: var(--cream-deeper);
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+.candidate-card-source-pill--linkedin {
+  background: var(--peach-wash, color-mix(in srgb, var(--peach) 22%, var(--paper-card)));
+  color: var(--peach-deep);
+}
+
+.candidate-card-source-pill--github {
+  background: color-mix(in srgb, var(--sage) 22%, var(--paper-card));
+  color: var(--sage-deep);
+}
+
+.candidate-card-save-reason {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.candidate-card-save-reason-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  /* R17 floor — mono-caps must render at ≥14px. */
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-soft);
+}
+
+.candidate-card-save-reason-body {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1rem;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+
+.candidate-card-footer {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  margin: 0;
+  padding-top: 0.5rem;
+  border-top: 1px dotted var(--wood-rule);
+}
+
+.candidate-card-footer-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  /* R17 floor. */
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-meta);
+}
+
+.candidate-card-footer-value {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  color: var(--ink);
+}
+
+/* ============ CROCHET STAGE (motion graphic) ============ */
+
+
+/* ============ ROTATING CAPTION ============ */
+/* Used by both loader stages (CrochetStage, GlassesFinder). A soft cross-
+   fade between caption strings so a long operation reads as a moment with
+   Cloris instead of a frozen label. The fade duration is exposed as a
+   CSS custom property so the component can pass through whatever value
+   it was created with. */
+
+.rotating-caption {
+  display: inline-block;
+  opacity: 1;
+  transition: opacity var(--rotating-caption-fade-ms, 380ms) ease;
+}
+
+.rotating-caption--hidden {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rotating-caption {
+    transition: none;
+    opacity: 1;
+  }
+}
+
+/* ============ DISPLAY TITLE ============ */
+/* Section title typographic duo. Lifted from the brand-spec component
+   lab where every section is "head + italic-accent" (e.g., "She's *at
+   work*", "When she *says* something"). The italic word toggles to
+   Instrument Serif (different typeface family) in --peach-deep — that
+   color+typeface shift is what gives the lab its literary register.
+   R15 in docs/cloris-surface-design-rules.md tracks this primitive. */
+
+.display-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 2rem;
+  font-weight: 400;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  margin: 0;
+  /* Allow the accent's italic to sit on the same baseline without
+     forcing the head's tracking to wrap awkwardly when the accent
+     is a long word. */
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.3em;
+}
+
+.display-title-head {
+  /* Inherits Fraunces sentence-case from .display-title. */
+  font-style: normal;
+}
+
+.display-title-accent {
+  /* Phase 5 follow-on: opened letter-spacing from -0.01em to +0.025em
+     and bumped optical size from 1.05em to 1.15em. The previous
+     treatment read as cramped against the Fraunces head — Instrument
+     Serif italic is a light face (only weight 400 ships in the woff2
+     bundle, see base.css), so we recover perceived weight via larger
+     optical size + open tracking rather than a fake bolder weight that
+     the browser would have to synthesize unevenly. */
+  font-family: "Instrument Serif", "Fraunces", Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--peach-deep);
+  font-size: 1.15em;
+  letter-spacing: 0.025em;
+}
+
+@media (max-width: 720px) {
+  .display-title {
+    font-size: 1.625rem;
+  }
+}
+
+/* ============ COLOR-CODED AMOUNTS ============ */
+/* Semantic numerical-amount classes for ledger entries, ribbon
+   counts, decision histograms, candidate confidence numbers, etc.
+   Lab pattern: positive in sage-deep, attention in peach-deep, neutral
+   in ink-soft, warning in mustard-deep. The recipe-card stat note
+   from specimen 13: "negatives are peach, not red — nobody died." */
+
+.amount-positive {
+  color: var(--sage-deep);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+.amount-attention {
+  color: var(--peach-deep);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+.amount-neutral {
+  color: var(--ink-soft);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+.amount-warning {
+  color: var(--mustard-deep);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ============ SPECIMEN FRAME ============ */
+/* Typeset-publication wrapper. Lifted from the brand-spec component lab
+   at /Users/sam.vangelos/Downloads/cloris-components.html lines 107-131.
+   The defining move is the label that protrudes through the top border
+   with a cream-colored cutout patch — same as a museum specimen card or
+   a typography specimen sheet. R15 in docs/cloris-surface-design-
+   rules.md tracks this primitive. */
+
+.specimen-frame {
+  background: var(--cream-deep);
+  border: 1px solid var(--wood);
+  border-radius: 2px;
+  position: relative;
+  margin: 0 0 1.75rem;
+  padding: 0;
+}
+
+/* The label patch. Absolute-positioned 9px above the top edge, with a
+   cream background that visually cuts the wood hairline behind it. The
+   horizontal padding gives the cutout some room to breathe so the
+   "knife-cut" reads cleanly. */
+.specimen-frame-label {
+  position: absolute;
+  top: -9px;
+  left: 1.25rem;
+  background: var(--cream);
+  padding: 0 0.5rem;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-soft);
+  line-height: 1;
+}
+
+.specimen-frame-stage {
+  padding: 2.25rem;
+}
+
+@media (max-width: 720px) {
+  .specimen-frame-stage {
+    padding: 1.5rem;
+  }
+}
+
+/* Dotted footer rule + footnote slot. Italic Instrument Serif Cloris-
+   voice on the left, right-aligned mono-caps tag on the right. The
+   dotted top border reads more "lined notebook" than a solid hairline
+   would (the rest of the build uses solid; dotted is the lab's tell). */
+.specimen-frame-note {
+  border-top: 1px dotted var(--wood);
+  padding: 0.875rem 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin: 0;
+}
+
+.specimen-frame-footnote {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--wood);
+  font-size: 0.9375rem;
+  line-height: 1.4;
+}
+
+.specimen-frame-tag {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--ink-soft);
+  flex-shrink: 0;
+}
+
+/* ============ ONBOARDING PAGE (Phase 4) ============ */
+/* Designed-placeholder for the brief-authoring flow. Wraps in a
+   SpecimenFrame so the page reads as a typeset specimen, mirroring
+   the homescreen aesthetic. The page lives at #/brief/new until the
+   full intake-session UI lands in the inventory plan's Phase D. */
+
+.onboarding-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.onboarding-example {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+  padding: 1rem 1.25rem;
+  margin: 1rem 0 0;
+  white-space: pre-wrap;
+  overflow-x: auto;
+  border-radius: 0;
+}
+
+.onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.onboarding-guide-link {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--peach-deep);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.onboarding-guide-link:hover {
+  color: var(--ink);
+}
+
+/* ============ ONBOARDING WIZARD (Phase D Slice D3) ============ */
+/* Real intake wizard. Replaces the Phase 4 placeholder. Per-chapter
+   editorial register: mono-caps eyebrow → Fraunces heading →
+   Instrument Serif italic deck → fields → sticky CTA. Mirrors
+   BriefDetail.svelte's section-title / section-deck pattern so the
+   intake reads as the same editorial voice as the rest of Cloris. */
+
+.onboarding-wizard {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+}
+
+.onboarding-loading,
+.onboarding-boot-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--ink-muted);
+  font-size: 1.125rem;
+}
+
+.onboarding-boot-error {
+  color: var(--peach-deep);
+}
+
+.onboarding-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.onboarding-heading {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 2.25rem;
+  font-weight: 500;
+  line-height: 1.15;
+  color: var(--ink);
+  margin: 0;
+}
+
+.onboarding-resume-cue {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--ink-muted);
+  margin: 0.25rem 0 0;
+  font-size: 1rem;
+}
+
+.onboarding-progress {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  /* R17 mono-caps floor: 14px (0.875rem). */
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  margin: 0.5rem 0 0;
+}
+
+.onboarding-chapter-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.onboarding-prose {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--ink);
+  margin: 0;
+}
+
+.onboarding-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.onboarding-field-prompt {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 1.125rem;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.onboarding-input,
+.onboarding-textarea {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+  padding: 0.625rem 0.75rem;
+  border-radius: 0;
+}
+
+.onboarding-textarea {
+  resize: none;
+  overflow: hidden;
+  min-height: 4rem;
+}
+
+.onboarding-input:focus,
+.onboarding-textarea:focus {
+  outline: 2px solid var(--peach-deep);
+  outline-offset: 1px;
+}
+
+.onboarding-fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.onboarding-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.onboarding-checkbox--disabled {
+  color: var(--ink-muted);
+}
+
+.onboarding-checkbox-note {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--ink-muted);
+  font-size: 0.9375rem;
+}
+
+.onboarding-review-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--wood-rule);
+}
+
+/* Editorial "still-needed" block — surfaces the structured 422
+   detail from POST /api/intake/sessions/{id}/complete in the
+   recruiter's vocabulary, sitting at the top of the review chapter
+   body so it's the first thing they read after a failed file. */
+.onboarding-still-needed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.875rem 1rem;
+  background: var(--cream-deeper);
+  border-left: 2px solid var(--peach-deep);
+}
+
+.onboarding-still-needed-lede {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1.0625rem;
+  color: var(--peach-deep);
+  margin: 0;
+}
+
+.onboarding-still-needed-list {
+  list-style: disc;
+  padding-left: 1.25rem;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink);
+}
+
+.onboarding-review-h2 {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0;
+}
+
+.onboarding-review-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 1rem;
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+}
+
+.onboarding-add-link,
+.onboarding-remove-link {
+  align-self: flex-start;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--peach-deep);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.onboarding-add-link:hover,
+.onboarding-remove-link:hover {
+  color: var(--ink);
+}
+
+.onboarding-remove-link {
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+}
+
+.onboarding-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.75rem 0 1rem;
+  border-top: 1px solid var(--wood-rule);
+  /* Stick to viewport bottom so the "File this brief" CTA stays in
+     reach on the review chapter, which has 12+ form regions. The
+     wizard's ancestor chain (.cloris-shell, body) has no
+     overflow:hidden, so sticky resolves to the page viewport. */
+  position: sticky;
+  bottom: 0;
+  background: var(--cream-deep);
+}
+
+.onboarding-cta {
+  align-self: flex-start;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: var(--cream);
+  background: var(--peach-deep);
+  border: 1px solid var(--peach-deep);
+  padding: 0.625rem 1.25rem;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.onboarding-cta:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--cream-deeper);
+}
+
+.onboarding-cta:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.onboarding-sync-warn,
+.onboarding-complete-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  margin: 0;
+}
+
+.onboarding-sync-warn {
+  color: var(--ink-muted);
+}
+
+.onboarding-complete-error {
+  color: var(--peach-deep);
+}
+
+.onboarding-sync-hint {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+/* Polish controls (Phase D Slice D4). Polish button + Restore link
+   sit above the still-needed alert in the review chapter so the
+   recruiter sees the LLM-ify entry point first thing. The Refining
+   loader takes over the same row during polish/restore so the layout
+   doesn't jump. */
+.onboarding-polish-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+
+.onboarding-cta--polish {
+  /* Slightly de-emphasized vs the primary File-this-brief CTA: the
+     polish button is a secondary action ("optionally let Cloris
+     reshape this") and shouldn't visually compete with the primary
+     "File this brief" footer CTA. */
+  background: var(--cream-deeper);
+  color: var(--ink);
+  border-color: var(--wood-rule);
+}
+
+.onboarding-cta--polish:hover:not(:disabled) {
+  background: var(--ink);
+  color: var(--cream-deeper);
+}
+
+.onboarding-polish-restore-link {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-muted);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.onboarding-polish-restore-link:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.onboarding-polish-restore-link:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.onboarding-polish-pending {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-height: 2.75rem;
+}
+
+.onboarding-polish-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--peach-deep);
+  margin: 0;
+}
+
+/* Polish Reference Slip — operator-grade affordance at the bottom of
+   the review chapter. Mirrors .reflection-reference-slip in shape so
+   the operator visual register is consistent across surfaces. */
+.onboarding-polish-reference-slip {
+  border-top: 1px solid var(--wood-rule);
+  padding-top: 1rem;
+  margin-top: 1rem;
+}
+
+.onboarding-polish-reference-slip[open] {
+  padding-bottom: 1rem;
+}
+
+.onboarding-polish-reference-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+}
+
+.onboarding-polish-reference-summary::-webkit-details-marker {
+  display: none;
+}
+
+.onboarding-polish-reference-toggle {
+  display: inline-block;
+  width: 1rem;
+  font-size: 0.875rem;
+}
+
+.onboarding-polish-reference-fields {
+  margin: 0.75rem 0 0;
+  display: grid;
+  grid-template-columns: minmax(8rem, max-content) 1fr;
+  gap: 0.5rem 1rem;
+}
+
+.onboarding-polish-reference-row {
+  display: contents;
+}
+
+.onboarding-polish-reference-row dt {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+  align-self: start;
+  padding-top: 0.125rem;
+}
+
+.onboarding-polish-reference-row dd {
+  margin: 0;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+  word-break: break-word;
+}
+
+.onboarding-header-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin: 0.5rem 0 0;
+  flex-wrap: wrap;
+}
+
+.onboarding-drafts-link {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--peach-deep);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.onboarding-drafts-link:hover {
+  color: var(--ink);
+}
+
+/* ============ DRAFTS LIST (Phase D Slice D4) ============ */
+/* Sibling to the brief library; lists in-flight intake sessions
+   so the recruiter can resume a specific draft or discard a stale
+   one. Card stack mirrors .briefs-* register so the brief-related
+   surfaces feel like a coherent set. */
+
+.drafts-page {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem 4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.drafts-page-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.drafts-page-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 2.25rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0;
+}
+
+.drafts-loading,
+.drafts-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--ink-muted);
+  font-size: 1.125rem;
+}
+
+.drafts-error {
+  color: var(--peach-deep);
+}
+
+/* Drafts mutation error — an inline dismissable banner above the
+   list. Distinct from .drafts-error (which replaces the list when
+   loading itself fails) so a discard-network-blip never wipes the
+   recruiter's other in-flight drafts. */
+.drafts-mutation-error {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  padding: 0.625rem 0.875rem;
+  margin: 0;
+  background: var(--cream-deeper);
+  border-left: 2px solid var(--peach-deep);
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--peach-deep);
+  font-size: 1rem;
+}
+
+.drafts-mutation-dismiss {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+.drafts-mutation-dismiss:hover {
+  color: var(--peach-deep);
+}
+
+.drafts-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.drafts-empty-line {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.0625rem;
+  color: var(--ink);
+  margin: 0;
+}
+
+.drafts-empty-link {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--peach-deep);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.drafts-empty-link:hover {
+  color: var(--ink);
+}
+
+.drafts-stack {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.drafts-card-wrap {
+  list-style: none;
+}
+
+.drafts-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 1.25rem;
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+}
+
+.drafts-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  /* Required so .drafts-card-title can ellipsis-truncate inside the
+     flex container — flex children default to min-width: auto, which
+     prevents shrinking below the title's intrinsic width. */
+  min-width: 0;
+}
+
+.drafts-card-header > * {
+  min-width: 0;
+}
+
+.drafts-card-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.375rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+.drafts-card-when {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  /* R17 mono-caps floor: 14px (0.875rem). */
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex: 0 0 auto;
+}
+
+.drafts-card-progress {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--ink-muted);
+  margin: 0;
+  font-size: 1rem;
+}
+
+.drafts-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
   margin-top: 0.5rem;
 }
 
-.empty-state {
+.drafts-card-resume-link {
   font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--peach-deep);
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.drafts-card-resume-link:hover {
+  color: var(--ink);
+}
+
+.drafts-card-discard {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.875rem;
+  color: var(--ink-muted);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.drafts-card-discard:hover:not(:disabled) {
+  color: var(--peach-deep);
+}
+
+.drafts-card-discard:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.onboarding-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+
+/* Phase E Slice E1: Market viewer styling. Mirrors the Briefs page
+   recipe-card pattern (shared section header, card stack, mono-caps
+   eyebrow, recipe-card stats) so the recruiter reads markets the same
+   way they read briefs. R17: mono-caps ≥14px (we use 0.875rem). */
+
+.markets-page {
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 4rem;
+}
+
+.markets-page-header {
+  margin-bottom: 1.5rem;
+}
+
+.markets-page-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 2rem;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0 0 0.25rem;
+}
+
+.markets-page-loading,
+.markets-page-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--ink-meta);
+  margin: 1rem 0;
+}
+
+.markets-empty {
+  padding: 2rem 0;
+}
+
+/* Plan Finding 7: the markets empty state collapsed from a Learning
+   loader rotator to a single editorial line. Italic Cloris-voice prose,
+   centered with breathing room. */
+.markets-empty-line {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1.125rem;
+  line-height: 1.55;
   color: var(--ink-soft);
-  margin: 1rem 0 0 0;
+  text-align: center;
+  margin: 4rem auto;
+  max-width: 36rem;
+}
+
+.markets-stack {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.markets-card-wrap {
+  list-style: none;
+}
+
+.markets-card {
+  display: block;
+  padding: 1rem 1.25rem;
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  border-radius: 6px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.18s ease, transform 0.18s ease;
+}
+
+.markets-card:hover,
+.markets-card:focus-visible {
+  border-color: var(--ink);
+}
+
+.markets-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.markets-card-eyebrow {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+  margin: 0 0 0.25rem;
+}
+
+.markets-card-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.125rem;
+  font-weight: 500;
+  margin: 0;
+  color: var(--ink);
+}
+
+.markets-card-stamp {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.875rem;
+  color: var(--ink-meta);
+}
+
+.markets-card-fields {
+  display: flex;
+  gap: 1.5rem;
+  margin: 0.75rem 0 0;
+}
+
+.markets-card-field {
+  display: flex;
+  flex-direction: column;
+}
+
+.markets-card-field-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+}
+
+.markets-card-field-value {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink);
+  margin: 0.125rem 0 0;
+}
+
+/* Market detail. The "Cloris's read" stanza is the editorial payoff —
+   Instrument Serif italic prose, NOT a table, NOT bullets. R1 + R21. */
+
+.market-detail-loading,
+.market-detail-empty {
+  font-family: "Instrument Serif", Georgia, serif;
+  color: var(--ink-meta);
+  margin: 1rem 0;
+}
+
+.market-detail-empty-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.5rem;
+  font-weight: 400;
+  margin: 0 0 0.5rem;
+  color: var(--ink);
+}
+
+.market-detail-empty-body {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--ink-meta);
+}
+
+.market-detail-header {
+  margin-bottom: 1rem;
+}
+
+.market-detail-tldr {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 1.0625rem;
+  color: var(--ink-soft);
+  margin: 0.5rem 0;
+}
+
+.market-detail-cta-section {
+  margin: 1rem 0 1.75rem;
+}
+
+.market-detail-refresh-cta {
+  display: inline-block;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  font-weight: 500;
+  color: var(--peach-deep);
+  text-decoration: none;
+  border-bottom: 2px solid var(--peach-deep);
+  padding: 0 0 0.125rem;
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+
+.market-detail-refresh-cta:hover,
+.market-detail-refresh-cta:focus-visible {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.market-detail-section {
+  margin: 1.75rem 0;
+}
+
+.market-detail-section-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0 0 0.875rem;
+  letter-spacing: -0.005em;
+}
+
+.market-detail-lanes,
+.market-detail-pools {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.market-detail-lane,
+.market-detail-pool {
+  padding-left: 0.875rem;
+  border-left: 2px solid var(--wood-rule);
+}
+
+.market-detail-lane-header,
+.market-detail-pool-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.market-detail-lane-title,
+.market-detail-pool-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.0625rem;
+  font-weight: 500;
+  margin: 0;
+  color: var(--ink);
+}
+
+/* Lane-status pills — distinct from run-state card-status pills.
+   Lane semantics: Producing (actively finding saves), Tested (ran
+   enough to measure), Quiet (exhausted or stale). These use the
+   same base pill layout as .card-status but their own color bands. */
+.lane-status {
+  display: inline-block;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  padding: 0.15rem 0.65rem 0.2rem;
+  border-radius: 3px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.lane-status--producing {
+  color: var(--sage-deep);
+  background: rgba(138, 154, 110, 0.14);
+}
+
+.lane-status--tested {
+  color: var(--ink-meta);
+  background: rgba(138, 122, 104, 0.08);
+}
+
+.lane-status--quiet {
+  color: var(--wood);
+  background: rgba(107, 74, 43, 0.08);
+}
+
+.market-detail-lane-why,
+.market-detail-pool-evidence {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+  margin: 0.375rem 0;
+}
+
+.market-detail-lane-stats {
+  display: flex;
+  gap: 1.5rem;
+  margin: 0.5rem 0;
+}
+
+.market-detail-lane-stat {
+  display: flex;
+  flex-direction: column;
+}
+
+.market-detail-lane-stat dt {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+  margin: 0;
+}
+
+.market-detail-lane-stat dd {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink);
+  margin: 0.125rem 0 0;
+}
+
+.market-detail-lane-action {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+  margin: 0.375rem 0 0;
+}
+
+.market-detail-lane-action-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-meta);
+  margin-right: 0.375rem;
+}
+
+.market-detail-pool-strength {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-meta);
+}
+
+.market-detail-thesis {
+  border-left: 0;
+  padding-left: 0;
+}
+
+.market-detail-thesis-summary {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.125rem;
+  line-height: 1.55;
+  color: var(--ink);
+  margin: 0 0 0.875rem;
+}
+
+.market-detail-thesis-paragraph {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  margin: 0.5rem 0;
+}
+
+/* Phase E Slice E2: refresh-brief surface. Side-by-side diff with
+   recruiter-toggleable acceptance per entry. */
+
+.refresh-brief-page {
+  width: 100%;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 4rem;
+}
+
+.refresh-brief-page-header {
+  margin-bottom: 1.5rem;
+}
+
+.refresh-brief-page-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 2rem;
+  font-weight: 400;
+  margin: 0 0 0.25rem;
+  color: var(--ink);
+}
+
+.refresh-brief-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--peach-deep);
+  margin: 0.5rem 0;
+}
+
+.refresh-brief-success {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  color: var(--sage-deep);
+  margin: 0.5rem 0;
+}
+
+.refresh-brief-empty {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink-meta);
+  margin: 1rem 0;
+}
+
+.refresh-brief-section-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.125rem;
+  font-weight: 500;
+  margin: 1rem 0 0.875rem;
+  color: var(--ink);
+}
+
+.refresh-brief-entries {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.refresh-brief-entry {
+  padding: 0.875rem 1rem;
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  border-radius: 6px;
+}
+
+.refresh-brief-entry-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  cursor: pointer;
+  margin-bottom: 0.5rem;
+}
+
+.refresh-brief-entry-field {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  color: var(--ink);
+}
+
+.refresh-brief-entry-rationale {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0 0 0.5rem;
+}
+
+.refresh-brief-entry-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.875rem;
+}
+
+@media (max-width: 720px) {
+  .refresh-brief-entry-pair {
+    grid-template-columns: 1fr;
+  }
+}
+
+.refresh-brief-entry-side {
+  padding: 0.5rem 0.625rem;
+  background: var(--cream-deeper);
+  border-radius: 4px;
+}
+
+.refresh-brief-entry-side-label {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-meta);
+  margin: 0 0 0.25rem;
+}
+
+.refresh-brief-entry-side-body {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink);
+  margin: 0;
+}
+
+.refresh-brief-entry-side-body del {
+  text-decoration: line-through;
+  color: var(--ink-meta);
+}
+
+.refresh-brief-entry-side-body ins {
+  text-decoration: none;
+}
+
+.refresh-brief-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin: 1.5rem 0 0;
+}
+
+/* R12 cap on RefreshBrief diff entries — "Show all N" expand link.
+   Quieter than a primary CTA: italic Instrument Serif, --ink-muted,
+   button-as-link styling so it reads as an editorial affordance
+   rather than a hard control. Mirrors the Drafts list expand pattern. */
+.refresh-brief-show-all {
+  margin: 0.75rem 0 0;
+}
+
+.refresh-brief-show-all-link {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-muted);
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--wood-rule);
+  text-underline-offset: 0.25em;
+}
+
+.refresh-brief-show-all-link:hover {
+  color: var(--ink);
+  text-decoration-color: currentColor;
+}
+
+/* Phase E Slice E4 (Ledger L6): editorial italicization for the
+   `INFERENTIAL_SAVE` decision so the recruiter reads it as a distinct
+   register from `SAVE`. Applied via `decisionLabelClass()` to the
+   three call sites: CandidateCard, StatusPillToggle, RunReportPage.
+   No new color tokens — just font-style + family. */
+
+.candidate-card-decision.is-inferential,
+.run-report-candidate-decision.is-inferential,
+.status-toggle-cloris-call.is-inferential {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+}
+
+/* Phase E Slice E5 (Ledger L7): Next Run Learning seed beneath the
+   rejects + filtered group toggles. Low-emphasis italic prose so it
+   reads as Cloris-voice context, not chrome. ≤14px per R17 floor. */
+
+.run-report-group-hint {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.875rem;
+  color: var(--ink-meta);
+  margin: 0.25rem 0 0.5rem 0.25rem;
+}
+
+/* Phase G Slice G2: Identity reconciliation surface — recruiter-driven
+   merge / keep-separate review of F3's pending_merge_decisions queue.
+   Editorial register matches Workspace cards. Operational density on
+   the action buttons (mono-caps ≥14px) per R17. */
+
+.identity-page {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 4rem;
+}
+
+.identity-empty,
+.identity-loading {
+  margin: 2rem auto;
+  max-width: 720px;
+  text-align: center;
+}
+
+.identity-deck {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.0625rem;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  margin: 1rem 0 0;
+}
+
+.identity-deck em {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+}
+
+.identity-decisions {
+  list-style: none;
+  margin: 2rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+.identity-decision {
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+  border-radius: 4px;
+  padding: 1.5rem;
+}
+
+.identity-decision[aria-busy="true"] {
+  opacity: 0.6;
+}
+
+.identity-signal-summary {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1rem;
+  color: var(--ink-meta);
+  margin: 0 0 1rem;
+}
+
+.identity-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin: 0 0 1.25rem;
+}
+
+@media (max-width: 720px) {
+  .identity-pair {
+    grid-template-columns: 1fr;
+  }
+}
+
+.identity-person {
+  background: var(--cream);
+  border: 1px solid var(--wood-rule);
+  border-radius: 4px;
+  padding: 1rem;
+}
+
+.identity-person-name {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.125rem;
+  margin: 0;
+  color: var(--ink-deep);
+}
+
+.identity-person-handle {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  color: var(--ink-meta);
+  margin: 0.25rem 0 0.5rem;
+}
+
+.identity-source-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  gap: 0.375rem;
+  flex-wrap: wrap;
+}
+
+.identity-source-pill {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.125rem 0.5rem;
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+  border-radius: 2px;
+  color: var(--ink-soft);
+}
+
+.identity-actions {
+  display: flex;
+  gap: 0.75rem;
+  margin: 0.75rem 0 0;
+}
+
+.identity-action {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.5rem 1rem;
+  border: 1px solid var(--wood-rule);
+  border-radius: 2px;
+  cursor: pointer;
+  background: var(--cream);
+  color: var(--ink-deep);
+  transition: background-color 0.12s ease;
+}
+
+.identity-action:hover:not(:disabled) {
+  background: var(--cream-deeper);
+}
+
+.identity-action--merge {
+  background: var(--peach-deep);
+  color: var(--cream);
+  border-color: var(--peach-deep);
+}
+
+.identity-action--merge:hover:not(:disabled) {
+  background: var(--peach-deep);
+  filter: brightness(0.95);
+}
+
+.identity-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.identity-error {
+  margin-top: 1.5rem;
+  font-family: "Instrument Serif", Georgia, serif;
+  color: var(--peach-deep);
+}
+
+/* Phase G Slice G2: Workspace eyebrow link to the identity reconciliation
+   surface. Renders only when persons_total > 0 (guard in component).
+   Subtle italic so it doesn't compete with the workspace recipe-card
+   stats. */
+
+.workspace-identity-eyebrow {
+  margin: 0.75rem 0 0;
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+}
+
+.workspace-identity-eyebrow a {
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+
+.workspace-identity-eyebrow a:hover,
+.workspace-identity-eyebrow a:focus {
+  text-decoration: underline;
+}
+
+/* Phase G Slice G3: Live Monitor — operational depth surface.
+   REGISTER EXCEPTION: Monitor is operational, not editorial. Mono-caps
+   table headers, raw enums, dense rows are correct here. The 18 R-rules
+   that bind editorial surfaces still bind R17 (≥14px floor) here. */
+
+.monitor-page,
+.monitor-run-page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 4rem;
+}
+
+.monitor-empty,
+.monitor-loading {
+  margin: 2rem auto;
+  max-width: 720px;
+  text-align: center;
+}
+
+.monitor-deck {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink-soft);
+  margin: 1rem 0 0;
+}
+
+.monitor-deck em {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+}
+
+.monitor-table,
+.monitor-attempt-health,
+.monitor-failure-histogram,
+.monitor-attempts-table,
+.monitor-events-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1.5rem 0 0;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+}
+
+.monitor-table th,
+.monitor-attempts-table th,
+.monitor-events-table th,
+.monitor-failure-histogram th {
+  text-align: left;
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid var(--wood-rule);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  background: var(--cream);
+  color: var(--ink-deep);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.monitor-table td,
+.monitor-attempts-table td,
+.monitor-events-table td,
+.monitor-failure-histogram td,
+.monitor-attempt-health th,
+.monitor-attempt-health td {
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--wood-rule);
+  color: var(--ink-soft);
+  vertical-align: top;
+}
+
+.monitor-attempt-health th[scope="row"] {
+  background: var(--cream);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  width: 16rem;
+}
+
+.monitor-source-pill {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.125rem 0.5rem;
+  background: var(--cream);
+  border: 1px solid var(--wood-rule);
+  border-radius: 2px;
+  color: var(--ink-soft);
+}
+
+.monitor-row-link {
+  color: var(--ink-deep);
+  text-decoration: none;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+}
+
+.monitor-row-link:hover,
+.monitor-row-link:focus {
+  text-decoration: underline;
+}
+
+.monitor-run-header {
+  margin: 1rem 0 1.5rem;
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--wood-rule);
+  background: var(--cream-deeper);
+}
+
+.monitor-run-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.5rem;
+  margin: 0.25rem 0 0;
+  color: var(--ink-deep);
+}
+
+.monitor-run-status {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 0.5rem 0 0;
+  color: var(--ink-soft);
+}
+
+.monitor-run-stop {
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--ink-meta);
+}
+
+.monitor-run-link {
+  margin: 0.5rem 0 0;
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+}
+
+.monitor-run-link a {
+  color: var(--ink-meta);
+  text-decoration: none;
+}
+
+.monitor-run-link a:hover,
+.monitor-run-link a:focus {
+  color: var(--ink-soft);
+  text-decoration: underline;
+}
+
+.monitor-section {
+  margin: 1.5rem 0 0;
+}
+
+.monitor-section-title {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-deep);
+  margin: 0 0 0.5rem;
+}
+
+.monitor-subsection-title {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  margin: 1rem 0 0.5rem;
+}
+
+.monitor-empty-line {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0.5rem 0 0;
+}
+
+.monitor-events-payload {
+  max-width: 480px;
+  word-break: break-word;
+}
+
+/* Phase G Slice G4: Tools index — recruiter and operator scripts that
+   live alongside the editorial surfaces. Editorial register on the
+   pitches; mono-caps for tier eyebrows + CLI commands. */
+
+.tools-page {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 4rem;
+}
+
+/* Unified → .section-deck */
+.tools-deck {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink-soft);
+  margin: 1rem 0 0;
+  }
+
+.tools-deck em {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+}
+
+.tools-empty,
+.tools-loading {
+  margin: 2rem auto;
+  max-width: 720px;
+  text-align: center;
+}
+
+.tools-list {
+  list-style: none;
+  margin: 2rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.tools-card {
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+  border-radius: 4px;
+  padding: 1.25rem 1.5rem;
+}
+
+.tools-tier {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  color: var(--ink-meta);
+  margin: 0;
+}
+
+.tools-label {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.25rem;
+  margin: 0.25rem 0 0;
+  color: var(--ink-deep);
+}
+
+.tools-pitch {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink-soft);
+  margin: 0.5rem 0 0;
+  max-width: 60ch;
+}
+
+.tools-cli {
+  margin: 0.75rem 0 0;
+  font-size: 0.875rem;
+}
+
+.tools-cli code {
+  font-family: "JetBrains Mono", monospace;
+  background: var(--cream);
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--wood-rule);
+  border-radius: 2px;
+  color: var(--ink-soft);
+}
+
+.tools-form {
+  margin: 1rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.tools-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+}
+
+.tools-form-label {
+  letter-spacing: 0.04em;
+  color: var(--ink-meta);
+  text-transform: lowercase;
+}
+
+.tools-form-input {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  padding: 0.375rem 0.5rem;
+  border: 1px solid var(--wood-rule);
+  background: var(--cream);
+  border-radius: 2px;
+  color: var(--ink-deep);
+}
+
+.tools-run-button {
+  align-self: flex-start;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  padding: 0.5rem 1rem;
+  background: var(--peach-deep);
+  color: var(--cream);
+  border: 1px solid var(--peach-deep);
+  border-radius: 2px;
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+
+.tools-run-button:hover:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+.tools-run-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.tools-result {
+  margin: 0.75rem 0 0;
+  background: var(--cream);
+  border: 1px solid var(--wood-rule);
+  border-radius: 2px;
+  padding: 0.75rem 1rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  color: var(--ink-soft);
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* Phase G Slice G5: Settings transparency surface — read-only operational
+   snapshot. Editorial register: ≥14px throughout, italic Cloris-voice
+   explainers under each row, mono-caps for credential keys + governor
+   names. */
+
+.settings-page {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 1.5rem 1.5rem 4rem;
+}
+
+.settings-empty,
+.settings-loading {
+  margin: 2rem auto;
+  max-width: 720px;
+  text-align: center;
+}
+
+/* Unified → .section-deck */
+.settings-deck {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink-soft);
+  margin: 1rem 0 0;
+  }
+
+.settings-deck em {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+}
+
+.settings-section {
+  margin: 2rem 0 0;
+}
+
+.settings-section-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 1.5rem;
+  margin: 0 0 0.5rem;
+  color: var(--ink-deep);
+}
+
+.settings-section-deck {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0 0 1rem;
+}
+
+.settings-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.settings-row {
+  display: flex;
+  gap: 0.875rem;
+  padding: 0.875rem 1rem;
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+  border-radius: 4px;
+}
+
+.settings-mark {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.25rem;
+  font-weight: 600;
+  flex-shrink: 0;
+  width: 1.5rem;
+  text-align: center;
+}
+
+.settings-mark--ok {
+  color: var(--ink-deep);
+}
+
+.settings-mark--missing {
+  color: var(--peach-deep);
+}
+
+.settings-row-body {
+  flex: 1;
+}
+
+.settings-row-label {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 600;
+  font-size: 1rem;
+  margin: 0;
+  color: var(--ink-deep);
+}
+
+.settings-row-label a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.settings-row-label a:hover {
+  text-decoration: underline;
+}
+
+.settings-row-value {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+  font-weight: 400;
+}
+
+.settings-row-pitch {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0.25rem 0 0;
+}
+
+.settings-row-pitch code {
+  font-family: "JetBrains Mono", monospace;
+  font-style: normal;
+  background: var(--cream);
+  padding: 0.125rem 0.375rem;
+  border-radius: 2px;
+  border: 1px solid var(--wood-rule);
+  font-size: 0.875rem;
+}
+
+.settings-cdp-url {
+  margin: 0.75rem 0 0;
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+}
+
+.settings-cdp-url code {
+  font-family: "JetBrains Mono", monospace;
+  font-style: normal;
+  font-size: 0.875rem;
+  color: var(--ink-soft);
+}
+
+/* Phase 0 disclosure slice: relational framing paragraph that closes
+   the "Cloris's hands" section. Editorial register matching the
+   welcome surface's disclosure block — body Fraunces with italic
+   Instrument-Serif, on a faint cream-deep slab so it reads as a
+   distinct beat from the credential ✓/✗ list above. */
+.settings-relational-framing {
+  margin: 1.25rem 0 0;
+  padding: 1rem;
+  background: var(--cream-deep);
+  border-left: 2px solid var(--wood);
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.settings-relational-framing em {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+}
+
+/* ============================================================
+   Phase G follow-up — motion+tagline system from Gemini's
+   synthesis. Five new components: StrikethroughTagline (master
+   tagline, V4-A canon) + four loaders (Finding / Refining /
+   Learning / Monitoring) replacing GlassesFinder + CrochetStage
+   and adding two net-new states.
+   ============================================================ */
+
+/* ============ STRIKETHROUGH TAGLINE ============ */
+/* Master tagline: "Just like Grandma used to ~~make~~ source."
+   System-level only — splash + homescreen empty state. NOT a
+   per-loader caption. The strike SVG path is V4-A: a single
+   confident hand-drawn ink pass in peach-deep. */
+
+.strikethrough-tagline {
+  font-family: "Fraunces", Georgia, serif;
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  color: var(--ink-deep);
+  margin: 0;
+  line-height: 1.15;
+  display: inline;
+}
+
+.strikethrough-tagline-head {
+  /* The lead-in is plain Fraunces (matches body text register). */
+}
+
+.strikethrough-tagline-strike {
+  position: relative;
+  display: inline-block;
+  margin: 0;
+  }
+
+.strikethrough-tagline-strike .strike-x {
+  position: absolute;
+  left: -0.15em;
+  top: -0.05em;
+  width: calc(100% + 0.3em);
+  height: calc(100% + 0.1em);
+  pointer-events: none;
+  overflow: visible;
+}
+
+.strikethrough-tagline-pivot {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: normal;
+  color: var(--peach-deep);
+  margin-left: 0.15em;
+}
+
+.strikethrough-tagline-tail {
+  margin-left: 0.05em;
+}
+
+.strikethrough-tagline--small {
+  font-size: 1.5rem;
+}
+
+.strikethrough-tagline--medium {
+  font-size: 2.25rem;
+}
+
+.strikethrough-tagline--large {
+  font-size: 3.5rem;
+}
+
+@media (max-width: 720px) {
+  .strikethrough-tagline--medium {
+    font-size: 1.75rem;
+  }
+  .strikethrough-tagline--large {
+    font-size: 2.25rem;
+  }
+}
+
+/* ============ SHARED LOADER STAGE STYLES ============ */
+/* The four loaders share the same figure / frame / caption
+   vocabulary so they read as a family. Per-loader specifics
+   (SVG sizing, animation classes) follow below. */
+
+.finding-stage,
+.refining-stage,
+.learning-stage,
+.monitoring-stage {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.875rem;
+  margin: 0;
+  padding: 0;
+}
+
+.finding-frame,
+.refining-frame,
+.learning-frame,
+.monitoring-frame {
+  background: var(--cream-deep);
+  border: 1px solid var(--wood-rule);
+  border-radius: 2px;
+  padding: 1rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.finding-caption,
+.refining-caption,
+.learning-caption,
+.monitoring-caption {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1rem;
+  line-height: 1.4;
+  color: var(--ink-soft);
+  text-align: center;
+  max-width: 28ch;
+  min-height: 1.4em;
+  margin: 0;
+}
+
+.finding-stage--small .finding-caption,
+.refining-stage--small .refining-caption,
+.learning-stage--small .learning-caption,
+.monitoring-stage--small .monitoring-caption {
+  font-size: 0.875rem;
+}
+
+.finding-stage--large .finding-caption,
+.refining-stage--large .refining-caption,
+.learning-stage--large .learning-caption,
+.monitoring-stage--large .monitoring-caption {
+  font-size: 1.5rem;
+  max-width: 40ch;
+  margin-top: 1.5rem;
+}
+
+/* ============ LOADER SIZE SYSTEM ============
+   Three tiers with shared widths. Heights honor each SVG's natural
+   aspect (Finding 5:3, Refining 11:7, Learning 8:7, Monitoring 5:4)
+   so the loaders feel like a family without distorting any one of
+   them. The previous taxonomy had a 12�� area gap between medium and
+   large that read as inconsistent.
+     - small  (~160 wide)  drawer / sidebar / decorative
+     - medium (~320 wide)  page-main loader (DEFAULT)
+     - large  (~540 wide)  splash + run-report headline
+*/
+
+/* ============ FINDING (Glasses) ============ */
+
+.finding-stage--small .finding-frame {
+  width: 160px;
+  height: 96px;
+  padding: 0.5rem;
+}
+.finding-stage--medium .finding-frame {
+  width: 320px;
+  height: 192px;
+  padding: 1rem;
+}
+.finding-stage--large .finding-frame {
+  width: 540px;
+  height: 324px;
+  padding: 1.5rem;
+  max-width: 92vw;
+}
+
+.finding-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* Magnifier hunt — tactile cubic-bezier with linger waypoints.
+   The four hold beats (15-30%, 30-45%, etc.) make the motion
+   read as intention rather than a smooth sweep. Loop period 4s
+   matches the rest of the loader family (Refining, Learning,
+   Monitoring) so they breathe at the same pace. */
+.finding-magnifier {
+  animation: finding-hunt 4s cubic-bezier(0.5, 0, 0.2, 1) infinite;
+  transform-origin: 20px 20px;
+}
+
+.finding-target {
+  animation: finding-reveal 4s cubic-bezier(0.25, 1, 0.5, 1) infinite;
+}
+
+@keyframes finding-hunt {
+  0% { transform: translate(10px, 10px) rotate(-10deg); }
+  15% { transform: translate(140px, 20px) rotate(15deg); }
+  30% { transform: translate(140px, 20px) rotate(15deg); }
+  45% { transform: translate(50px, 60px) rotate(-5deg); }
+  60% { transform: translate(50px, 60px) rotate(-5deg); }
+  80% { transform: translate(115px, 55px) rotate(-10deg); }
+  100% { transform: translate(115px, 55px) rotate(-10deg); }
+}
+
+@keyframes finding-reveal {
+  0%, 75% { opacity: 0; transform: scale(0.95); }
+  80%, 100% { opacity: 1; transform: scale(1); }
+}
+
+/* ============ FINDING — KETTLE variant ============ */
+
+.finding-svg--kettle {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.steam-fill {
+  fill: var(--cream-deep);
+  stroke: none;
+  transform: translate(3px, 2px);
+}
+
+.steam-line {
+  fill: none;
+  stroke: var(--wood);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.steam-puff {
+  animation: steam-puff-rise 4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  transform-origin: bottom center;
+  opacity: 0;
+}
+
+.steam-puff:nth-child(2) {
+  animation-delay: 1.2s;
+}
+
+.steam-puff:nth-child(3) {
+  animation-delay: 2.4s;
+}
+
+@keyframes steam-puff-rise {
+  0%   { transform: translateY(10px) scale(0.5); opacity: 0; }
+  20%  { opacity: 0.8; }
+  80%  { transform: translateY(-30px) scale(1.5) rotate(5deg); opacity: 0.5; }
+  100% { transform: translateY(-40px) scale(1.8) rotate(10deg); opacity: 0; }
+}
+
+/* ============ FINDING — SEWING variant ============ */
+
+.finding-svg--sewing {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.sewing-yarn {
+  stroke-dasharray: 60 180;
+  stroke-dashoffset: 240;
+  animation: sewing-pull 2.5s cubic-bezier(0.6, -0.28, 0.735, 0.045) infinite;
+}
+
+.sewing-needle-1 {
+  animation: sewing-clack 2.5s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+  transform-origin: 70px 50px;
+}
+
+.sewing-needle-2 {
+  animation: sewing-clack-alt 2.5s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+  transform-origin: 90px 50px;
+  animation-delay: 0.1s;
+}
+
+@keyframes sewing-pull {
+  0%        { stroke-dashoffset: 240; }
+  50%, 100% { stroke-dashoffset: 0; }
+}
+
+@keyframes sewing-clack {
+  0%, 100% { transform: rotate(0deg); }
+  20%      { transform: rotate(-8deg); }
+  40%      { transform: rotate(2deg); }
+}
+
+@keyframes sewing-clack-alt {
+  0%, 100% { transform: rotate(0deg) translate(0, 0); }
+  20%      { transform: rotate(6deg) translate(2px, -2px); }
+  40%      { transform: rotate(-1deg) translate(0, 0); }
+}
+
+/* ============ FINDING — TV (CRT) variant ============ */
+
+.finding-svg--tv {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.crt-screen-fill {
+  fill: var(--mustard);
+  animation: crt-flicker 4s infinite alternate;
+}
+
+.crt-scanline {
+  animation: crt-scan 3s linear infinite;
+}
+
+.crt-phosphor {
+  fill: var(--cream);
+  opacity: 0.15;
+  animation: crt-noise 0.2s steps(2) infinite;
+}
+
+@keyframes crt-scan {
+  0%   { transform: translateY(-20px); }
+  100% { transform: translateY(60px); }
+}
+
+@keyframes crt-flicker {
+  0%, 90%, 95% { opacity: 1; }
+  92%, 97%     { opacity: 0.85; }
+  100%         { opacity: 0.9; }
+}
+
+@keyframes crt-noise {
+  0%   { transform: translate(0, 0); }
+  100% { transform: translate(1px, -1px); }
+}
+
+/* ============ FINDING — reduced motion for all variants ============ */
+
+@media (prefers-reduced-motion: reduce) {
+  .steam-puff,
+  .sewing-yarn,
+  .sewing-needle-1,
+  .sewing-needle-2,
+  .crt-screen-fill,
+  .crt-scanline,
+  .crt-phosphor,
+  .finding-magnifier,
+  .finding-target {
+    animation: none !important;
+  }
+  .steam-puff { opacity: 0.6; transform: translateY(-10px) scale(1); }
+  .finding-target { opacity: 1; transform: scale(1); }
+  .finding-magnifier { transform: translate(115px, 55px) rotate(-10deg); }
+}
+
+/* ============ FINDING — finishing state for all variants ============ */
+
+.finding-stage--finishing .steam-puff {
+  animation-play-state: paused;
+  opacity: 0.6;
+}
+
+.finding-stage--finishing .sewing-needle-1,
+.finding-stage--finishing .sewing-needle-2,
+.finding-stage--finishing .sewing-yarn {
+  animation-play-state: paused;
+}
+
+.finding-stage--finishing .crt-screen-fill {
+  animation: none;
+  opacity: 1;
+}
+
+.finding-stage--finishing .crt-scanline,
+.finding-stage--finishing .crt-phosphor {
+  animation-play-state: paused;
+}
+
+/* ============ REFINING (Needles) ============ */
+
+.refining-stage--small .refining-frame {
+  width: 160px;
+  height: 102px;
+  padding: 0.5rem;
+}
+.refining-stage--medium .refining-frame {
+  width: 320px;
+  height: 204px;
+  padding: 1rem;
+}
+.refining-stage--large .refining-frame {
+  width: 540px;
+  height: 344px;
+  padding: 1.5rem;
+  max-width: 92vw;
+}
+
+.refining-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Yarn pull — dasharray cycle creates the "pulling taut" beat
+   with each row. Loop period 4s aligns with the loader family
+   (slowed from the previous 2.5s — meditative knit, not frantic). */
+.refining-yarn {
+  stroke-dasharray: 60 180;
+  stroke-dashoffset: 240;
+  animation: refining-pull 4s cubic-bezier(0.6, -0.28, 0.735, 0.045) infinite;
+}
+
+/* Click-clack: two needles, opposite jiggles, bezier with a
+   slight overshoot bounce so the motion has weight. */
+.refining-needle-1 {
+  animation: refining-clack 4s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+  transform-origin: 70px 50px;
+}
+.refining-needle-2 {
+  animation: refining-clack-alt 4s cubic-bezier(0.34, 1.56, 0.64, 1) infinite;
+  transform-origin: 90px 50px;
+  animation-delay: 0.16s;
+}
+
+@keyframes refining-pull {
+  0% { stroke-dashoffset: 240; }
+  50%, 100% { stroke-dashoffset: 0; }
+}
+@keyframes refining-clack {
+  0%, 100% { transform: rotate(0deg); }
+  20% { transform: rotate(-8deg); }
+  40% { transform: rotate(2deg); }
+}
+@keyframes refining-clack-alt {
+  0%, 100% { transform: rotate(0deg) translate(0, 0); }
+  20% { transform: rotate(6deg) translate(2px, -2px); }
+  40% { transform: rotate(-1deg) translate(0, 0); }
+}
+
+/* ============ LEARNING (Kettle) ============ */
+
+.learning-stage--small .learning-frame {
+  width: 160px;
+  height: 140px;
+  padding: 0.5rem;
+}
+.learning-stage--medium .learning-frame {
+  width: 320px;
+  height: 280px;
+  padding: 1rem;
+}
+.learning-stage--large .learning-frame {
+  width: 540px;
+  height: 472px;
+  padding: 1.5rem;
+  max-width: 92vw;
+}
+
+.learning-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Steam puffs rising. Three staggered animation-delays so the
+   cloud billows continuously rather than pulsing in lockstep. */
+.learning-steam-puff {
+  animation: learning-puff-rise 4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  transform-origin: bottom center;
+  opacity: 0;
+}
+.learning-steam-puff--2 {
+  animation-delay: 1.2s;
+}
+.learning-steam-puff--3 {
+  animation-delay: 2.4s;
+}
+
+.learning-steam-fill {
+  fill: var(--cream-deep);
+  stroke: none;
+  transform: translate(3px, 2px);
+}
+
+.learning-steam-line {
+  fill: none;
+  stroke: var(--wood);
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+@keyframes learning-puff-rise {
+  0% { transform: translateY(10px) scale(0.5); opacity: 0; }
+  20% { opacity: 0.8; }
+  80% { transform: translateY(-30px) scale(1.5) rotate(5deg); opacity: 0.5; }
+  100% { transform: translateY(-40px) scale(1.8) rotate(10deg); opacity: 0; }
+}
+
+/* ============ MONITORING (Zenith) ============ */
+
+.monitoring-stage--small .monitoring-frame {
+  width: 160px;
+  height: 128px;
+  padding: 0.5rem;
+}
+.monitoring-stage--medium .monitoring-frame {
+  width: 320px;
+  height: 256px;
+  padding: 1rem;
+}
+.monitoring-stage--large .monitoring-frame {
+  width: 540px;
+  height: 432px;
+  padding: 1.5rem;
+  max-width: 92vw;
+}
+
+.monitoring-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+.monitoring-screen {
+  fill: var(--mustard);
+  animation: monitoring-flicker 4s infinite alternate;
+}
+
+.monitoring-scanline {
+  animation: monitoring-scan 3s linear infinite;
+}
+
+.monitoring-phosphor {
+  fill: var(--cream);
+  opacity: 0.15;
+  animation: monitoring-noise 0.2s steps(2) infinite;
+}
+
+@keyframes monitoring-scan {
+  0% { transform: translateY(-20px); }
+  100% { transform: translateY(60px); }
+}
+@keyframes monitoring-flicker {
+  0%, 90%, 95% { opacity: 1; }
+  92%, 97% { opacity: 0.85; }
+  100% { opacity: 0.9; }
+}
+@keyframes monitoring-noise {
+  0% { transform: translate(0, 0); }
+  100% { transform: translate(1px, -1px); }
+}
+
+/* ============ REDUCED MOTION ============ */
+/* Pause every animation but keep the composition visible. The
+   user still sees Cloris's loader; nothing strobes for the sake
+   of motion. */
+@media (prefers-reduced-motion: reduce) {
+  .finding-magnifier,
+  .finding-target,
+  .steam-puff,
+  .sewing-yarn,
+  .sewing-needle-1,
+  .sewing-needle-2,
+  .crt-screen-fill,
+  .crt-scanline,
+  .crt-phosphor,
+  .refining-yarn,
+  .refining-needle-1,
+  .refining-needle-2,
+  .learning-steam-puff,
+  .monitoring-screen,
+  .monitoring-scanline,
+  .monitoring-phosphor {
+    animation: none;
+  }
+  /* Park the magnifier on the glasses; show the target at full opacity. */
+  .finding-magnifier {
+    transform: translate(115px, 55px) rotate(-10deg);
+  }
+  .finding-target {
+    opacity: 1;
+  }
+  /* Hold steam mid-rise so the kettle reads as alive without
+     animating. */
+  .steam-puff,
+  .learning-steam-puff {
+    opacity: 0.5;
+  }
+}
+
+/* Finding terminal pose. When the consumer passes `finishing={true}`
+   (typically `finishing={!loading}` so the prop flips the moment the
+   load completes), the magnifier snaps to the "found" position over
+   the glasses and the target is at full opacity. The surrounding
+   `out:loaderFadeOut` then fades that resolution tableau as the page
+   appears beneath. Same parked transform as the reduced-motion fallback
+   above — single source of truth for "where the magnifier rests." */
+.finding-stage--finishing .finding-magnifier {
+  animation: none;
+  transform: translate(115px, 55px) rotate(-10deg);
+}
+.finding-stage--finishing .finding-target {
+  animation: none;
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* Phase G follow-up: homescreen empty-state hint sits between the
+   StrikethroughTagline and the static Refining graphic. Italic,
+   ≤14px, low-emphasis — the tagline carries the brand weight, this
+   line is functional context. */
+.homescreen-empty-hint {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-meta);
+  margin: 0.75rem 0 1rem;
+  text-align: center;
+  }
+
+/* Cleared-queue empty state — recruiter has used the system but
+   nothing currently needs attention. Quiet resting state: no tagline,
+   no loader, just a one-liner. */
+.homescreen-empty-cleared {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1.0625rem;
+  color: var(--ink-soft);
+  margin: 0;
+  padding: 3rem 1rem;
+  text-align: center;
+}
+
+/* Post-G loader gap-wire bundle (2026-05-02). Centering rules for the
+   wrapper <div>s that now contain a Finding/Refining/Learning loader
+   instead of a flat-string <p>. The existing class rules above carry
+   typography for the matching `*-error` / `*-empty` siblings; these
+   rules just supply layout when the wrapper has a loader child. */
+.brief-picker-loading,
+.briefs-page-loading,
+.drafts-loading,
+.brief-detail-loading,
+.brief-criteria-drawer-loading,
+.onboarding-loading,
+.market-detail-loading,
+.markets-page-loading,
+.refresh-brief-loading {
+  display: flex;
+  justify-content: center;
+  padding: 1.5rem 0;
+}
+
+/* The brief-criteria-drawer is narrower than a page; ease the padding
+   so the small loader doesn't bloat the drawer body. */
+.brief-criteria-drawer-loading {
+  padding: 1rem 0;
+}
+
+/* ============================================================
+   The Reflection — HITL Market Intelligence
+   ============================================================ */
+
+/* Outer surface frame for every reflection sub-state. The page lives
+   inside .shell-page (provides the column constraint); .reflection-
+   surface owns the vertical rhythm + sticky-footer flex container.
+   Each sub-component (Read / Reading / Diff) attaches a
+   .reflection-surface--<phase> modifier so the CSS can vary spacing
+   per phase if needed. */
+.reflection-surface {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  gap: 1.5rem;
+}
+
+/* Boot loader stage — mirrors .drafts-loading. Centered on the page
+   while we resolve the session. */
+.reflection-boot {
+  display: flex;
+  justify-content: center;
+  padding: 3rem 0;
+}
+
+/* Editorial header stack. Inherits from BriefDetail.svelte's article
+   register: surface-eyebrow → cloris-byline → H1 (Fraunces) →
+   section-rule → section-deck. */
+.reflection-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.reflection-heading {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.875rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0.25rem 0;
+  line-height: 1.2;
+}
+
+/* Body region — prose-width column for the editorial briefing,
+   intentions, and steering input. Stays narrower than full shell so
+   the long-form reading experience stays comfortable. */
+.reflection-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  max-width: 42rem;
+}
+
+/* The Read — Cloris's editorial briefing paragraph. Set in Fraunces
+   so it reads as substantive prose rather than UI text. */
+.reflection-briefing {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.0625rem;
+  line-height: 1.6;
+  color: var(--ink);
+  margin: 0;
+}
+
+/* Refinement cue — appears below the briefing when the recruiter has
+   steered the plan. Italic Instrument Serif so it reads as Cloris's
+   ack of the input rather than a system message. */
+.reflection-iteration-cue {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+/* Empty intentions — Cloris has no specific research focus to
+   surface. Rendered as muted italic so it still reads as voice. */
+.reflection-intentions-empty,
+.reflection-empty {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-muted);
+  margin: 0;
+}
+
+/* The intentions list — what Cloris wants to find out. */
+.reflection-intentions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.reflection-intentions-label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-meta);
+  margin: 0;
+}
+
+.reflection-intentions-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.reflection-intention {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink);
+  padding-left: 1rem;
+  border-left: 2px solid var(--wood-rule);
+}
+
+/* Priority accents on intentions. High-priority items get the peach
+   accent; medium uses the default wood-rule; low fades toward the
+   muted ink. */
+.reflection-intention--high {
+  border-left-color: var(--peach-deep);
+}
+.reflection-intention--medium {
+  border-left-color: var(--wood-rule);
+}
+.reflection-intention--low {
+  border-left-color: var(--ink-muted);
+  color: var(--ink-soft);
+}
+
+/* The Steering input. Mirrors .onboarding-textarea posture (Fraunces,
+   no rounded corners, bordered with --wood-rule) so the typing
+   experience matches the wizard. */
+.reflection-steering {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--wood-rule);
+}
+
+.reflection-steering-label {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1rem;
+  color: var(--ink-soft);
+}
+
+.reflection-steering-input {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  border-radius: 0;
+  padding: 0.625rem 0.75rem;
+  resize: vertical;
+  min-height: 4rem;
+}
+
+.reflection-steering-input:focus {
+  outline: none;
+  border-color: var(--ink);
+}
+
+.reflection-steering-input:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.reflection-steering-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin: 0;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8125rem;
+  color: var(--ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.reflection-steering-submit {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--peach-deep);
+  background: transparent;
+  border: 1px solid var(--peach-deep);
+  padding: 0.375rem 0.875rem;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.reflection-steering-submit:hover:not(:disabled) {
+  background: var(--peach-deep);
+  color: var(--cream);
+}
+
+.reflection-steering-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.reflection-steering-capped {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 1rem;
+  color: var(--ink-soft);
+  margin: 0;
+  padding-top: 0.5rem;
+}
+
+/* Action error — operational, not voice. Plain Fraunces, peach
+   accent so it reads as something needing attention. */
+.reflection-action-error {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--peach-deep);
+  margin: 0;
+}
+
+.reflection-research-error {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--peach-deep);
+  margin: 0.75rem 0 1rem;
+  line-height: 1.5;
+}
+
+/* Reference Slip. Inherits collapsed-by-default + plus/minus toggle
+   from .run-report-reference-slip and .reference-slip patterns. */
+.reflection-reference-slip {
+  border-top: 1px solid var(--wood-rule);
+  padding-top: 1rem;
+  margin-top: 1rem;
+}
+
+.reflection-reference-slip[open] {
+  padding-bottom: 1rem;
+}
+
+.reflection-reference-summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+}
+
+.reflection-reference-summary::-webkit-details-marker {
+  display: none;
+}
+
+.reflection-reference-toggle {
+  display: inline-block;
+  width: 1rem;
+  font-size: 0.875rem;
+}
+
+.reflection-reference-fields {
+  margin: 0.75rem 0 0;
+  display: grid;
+  grid-template-columns: minmax(8rem, max-content) 1fr;
+  gap: 0.5rem 1rem;
+}
+
+.reflection-reference-row {
+  display: contents;
+}
+
+.reflection-reference-row dt {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-muted);
+  align-self: start;
+  padding-top: 0.125rem;
+}
+
+.reflection-reference-row dd {
+  margin: 0;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+  word-break: break-word;
+}
+
+.reflection-reference-pre pre {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  line-height: 1.4;
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  padding: 0.75rem;
+  overflow-x: auto;
+  margin: 0;
+  color: var(--ink);
+}
+
+.reflection-reference-errors {
+  list-style: disc;
+  margin: 0;
+  padding-left: 1.25rem;
+  color: var(--peach-deep);
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.875rem;
+}
+
+/* Sticky footer — mirrors .onboarding-footer pattern. The diff variant
+   adds a summary bar above the buttons. */
+.reflection-footer {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.875rem 0 1rem;
+  border-top: 1px solid var(--wood-rule);
+  background: var(--cream-deep);
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+}
+
+.reflection-footer--diff {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.5rem;
+}
+
+.reflection-footer-summary {
+  margin: 0;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-meta);
+}
+
+.reflection-footer-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 0.75rem;
+}
+
+/* CTA buttons. Primary mirrors .onboarding-cta exactly; ghost is a
+   bordered text button for secondary / discard actions. */
+.reflection-cta {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  font-weight: 500;
+  padding: 0.5625rem 1.125rem;
+  cursor: pointer;
+  border-radius: 0;
+  text-decoration: none;
+  display: inline-block;
+  text-align: center;
+}
+
+.reflection-cta--primary {
+  color: var(--cream);
+  background: var(--peach-deep);
+  border: 1px solid var(--peach-deep);
+}
+
+.reflection-cta--primary:hover:not(:disabled) {
+  background: var(--ink);
+  border-color: var(--ink);
+  color: var(--cream-deeper);
+}
+
+.reflection-cta--ghost {
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--wood-rule);
+}
+
+.reflection-cta--ghost:hover:not(:disabled) {
+  background: var(--paper-card);
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.reflection-cta:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Reading state — the in-between. Centered loader stage. */
+.reflection-reading-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+  padding: 2rem 0;
+}
+
+.reflection-reading-leave-safe {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-muted);
+  margin: 0;
+  text-align: center;
+}
+
+.reflection-error-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+/* Boot error / collision / discarded screens. */
+.reflection-boot-error,
+.reflection-collision,
+.reflection-discarded,
+.reflection-committed {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1.5rem 0;
+  max-width: 42rem;
+}
+
+.reflection-error-heading,
+.reflection-committed-heading {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.625rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0.5rem 0;
+  line-height: 1.2;
+}
+
+.reflection-error-detail {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin: 0;
+}
+
+.reflection-committed-actions {
+  display: flex;
+  flex-direction: row;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+
+/* Diff body — bulk controls + hunk stack + all-skipped editorial cue. */
+.reflection-bulk-controls {
+  display: flex;
+  flex-direction: row;
+  gap: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--wood-rule);
+  margin-bottom: 0.5rem;
+}
+
+.reflection-bulk-btn {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8125rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-meta);
+  background: transparent;
+  border: 1px solid var(--wood-rule);
+  padding: 0.3125rem 0.75rem;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.reflection-bulk-btn:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.reflection-bulk-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.reflection-all-skipped {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--peach-deep);
+  margin: 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--wood-rule);
+}
+
+/* Hunk stack — list of HunkCards. */
+.hunk-stack {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.hunk-stack-item {
+  margin: 0;
+}
+
+/* HunkCard. Editorial card body with a left rule that mirrors the
+   approve/skip state — peach for approved, muted for skipped. */
+.hunk-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+  padding: 0.875rem 1rem;
+  background: var(--paper-card);
+  border: 1px solid var(--wood-rule);
+  border-left: 3px solid var(--peach-deep);
+  transition: opacity 120ms ease, border-color 120ms ease;
+}
+
+.hunk-card--skipped {
+  border-left-color: var(--ink-muted);
+  opacity: 0.55;
+}
+
+.hunk-card-header {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+}
+
+.hunk-card-kind {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0.125rem 0.5rem;
+  background: var(--peach-deep);
+  color: var(--cream);
+}
+
+.hunk-card-kind--modify {
+  background: var(--wood);
+}
+
+.hunk-card-kind--remove {
+  background: var(--ink-muted);
+}
+
+.hunk-card-section {
+  /* Demoted from mono-caps to sentence-case Fraunces — R7: one
+     uppercase register per region. The kind badge above already
+     carries the mono-caps signal; stacking another mono-caps element
+     here breaks visual hierarchy. */
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  font-style: italic;
+  color: var(--ink-meta);
+  flex: 1;
+  min-width: 0;
+}
+
+.hunk-card-toggle {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.875rem;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--wood-rule);
+  padding: 0.25rem 0.625rem;
+  cursor: pointer;
+  border-radius: 0;
+}
+
+.hunk-card-toggle:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.hunk-card-toggle:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.hunk-card-block-label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.6875rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--ink-muted);
+  margin: 0 0 0.125rem;
+}
+
+.hunk-card-prose {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink);
+  margin: 0;
+}
+
+.hunk-card-prose--before {
+  color: var(--ink-meta);
+  text-decoration: line-through;
+  text-decoration-color: var(--ink-muted);
+}
+
+.hunk-card-tag {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink);
+  background: var(--cream);
+  padding: 0.375rem 0.625rem;
+  display: inline-block;
+  margin: 0;
+  border: 1px solid var(--wood-rule);
+  /* Long values (60-char additional_search_terms, multi-clause
+     employer_signal_rules) wrap rather than overflow. min-width: 0
+     on the parent + word-break here means a tag with no spaces still
+     wraps cleanly. */
+  max-width: 100%;
+  word-break: break-word;
+}
+
+.hunk-card-tag--before {
+  color: var(--ink-meta);
+  text-decoration: line-through;
+  text-decoration-color: var(--ink-muted);
+}
+
+.hunk-card-rationale {
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--wood-rule);
+}
+
+.hunk-card-rationale-prose {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+/* Run-report secondary CTA — "Reflect with me before the next run".
+   Lives below the existing workspace CTA. Quieter visual register so
+   the workspace link stays the primary affordance. */
+.run-report-reflect-link {
+  display: inline-block;
+  margin-top: 0.5rem;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--peach-deep);
+  text-decoration: none;
+  border-bottom: 1px solid currentColor;
+  padding-bottom: 1px;
+}
+
+.run-report-reflect-link:hover {
+  color: var(--ink);
+}
+
+/* Workspace pickup card — surfaces an active reflection back to the
+   recruiter when they're on the workspace. Quieter than a full
+   section; more present than a line link. */
+.workspace-reflection-pickup {
+  margin: 1.25rem 0 0;
+  padding: 1rem 1.25rem;
+  background: var(--paper-card);
+  border-left: 3px solid var(--peach-deep);
+  border-top: 1px solid var(--wood-rule);
+  border-right: 1px solid var(--wood-rule);
+  border-bottom: 1px solid var(--wood-rule);
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  max-width: 32rem;
+}
+
+.workspace-reflection-pickup--researching {
+  border-left-color: var(--wood);
+}
+
+.workspace-reflection-pickup-heading {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.125rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0;
+}
+
+.workspace-reflection-pickup-deck {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.workspace-reflection-pickup-link {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--peach-deep);
+  text-decoration: none;
+  margin-top: 0.25rem;
+  align-self: flex-start;
+  border-bottom: 1px solid currentColor;
+  padding-bottom: 1px;
+}
+
+.workspace-reflection-pickup-link:hover {
+  color: var(--ink);
+}
+
+/* Mutation error / dismiss — used by the all-skipped state and other
+   inline error surfaces to keep the surrounding content readable. */
+.reflection-mutation-error {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--peach-deep);
+  margin: 0;
+}
+
+/* ============ WELCOME (Phase 0 apikey-ui + disclosure) ============
+
+   First-launch surface gating Cloris on Anthropic API key entry +
+   the recipient's acknowledgment of the LinkedIn-Recruiter
+   operational surface. Editorial register, single column, prose
+   width — deliberately not the dashboard or the wizard. */
+
+.welcome-shell {
+  /* The welcome surface owns the whole viewport — no AmbientBanner
+     means no top chrome; the page sits on its own cream paper. */
+  min-height: 100vh;
+  background: var(--cream);
+}
+
+.welcome-page {
+  max-width: 36rem;
+  margin: 0 auto;
+  padding: 4rem 2rem 6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 2.25rem;
+}
+
+.welcome-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.625rem;
+}
+
+.welcome-headline {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 2.5rem;
+  font-weight: 400;
+  color: var(--ink);
+  margin: 0;
+  line-height: 1.1;
+}
+
+.welcome-headline em {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  color: var(--peach-deep);
+}
+
+.welcome-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--wood-rule);
+}
+
+.welcome-section-title {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1.5rem;
+  font-weight: 500;
+  color: var(--ink);
+  margin: 0;
+}
+
+.welcome-section-deck {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 1.0625rem;
+  color: var(--ink-soft);
+  margin: 0;
+  line-height: 1.45;
+}
+
+.welcome-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.welcome-field-prompt {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 1.125rem;
+  color: var(--ink);
+}
+
+.welcome-input {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--cream-deeper);
+  border: 1px solid var(--wood-rule);
+  padding: 0.625rem 0.75rem;
+  border-radius: 0;
+}
+
+.welcome-input:focus {
+  outline: 2px solid var(--peach-deep);
+  outline-offset: 1px;
+}
+
+.welcome-microcopy {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-size: 0.9375rem;
+  color: var(--ink-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.welcome-microcopy code {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 0.8125rem;
+  color: var(--ink-soft);
+  background: var(--cream-deep);
+  padding: 0.0625rem 0.25rem;
+}
+
+.welcome-microcopy--success {
+  color: var(--sage-deep);
+}
+
+.welcome-microcopy--meta {
+  text-align: center;
+}
+
+/* The disclosure paragraph is the editorial heart of the welcome
+   surface. Larger type than the regular section deck; not italic
+   throughout so the recruiter can scan the operational facts
+   without parsing italic prose for a paragraph. */
+.welcome-disclosure {
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1.55;
+  color: var(--ink);
+  margin: 0;
+  padding: 1rem;
+  background: var(--cream-deep);
+  border-left: 2px solid var(--wood);
+}
+
+.welcome-disclosure em {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+}
+
+.welcome-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  font-family: "Fraunces", Georgia, serif;
+  font-size: 1rem;
+  line-height: 1.45;
+  color: var(--ink);
+}
+
+.welcome-checkbox input[type="checkbox"] {
+  margin-top: 0.25rem;
+  flex-shrink: 0;
+}
+
+.welcome-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.875rem;
+  align-items: center;
+  padding-top: 1rem;
+}
+
+.welcome-cta {
+  align-self: stretch;
+  text-align: center;
+}
+
+.welcome-error {
+  font-family: "Instrument Serif", Georgia, serif;
+  font-style: italic;
+  font-size: 0.9375rem;
+  color: var(--peach-deep);
+  margin: 0;
+  align-self: stretch;
+  text-align: center;
 }

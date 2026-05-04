@@ -23,9 +23,7 @@
     listIntakeSessions,
     deleteIntakeSession,
   } from "../lib/onboarding/api";
-  import { draftsLoadingMessage } from "../lib/copy";
   import { describeApiError } from "../lib/errors";
-  import { stickyTrue } from "../lib/minDisplay.svelte";
   import {
     RUNNABLE_CHAPTERS,
     chapterForPhase,
@@ -42,9 +40,6 @@
   let loadError = $state<string | null>(null);
   let mutationError = $state<string | null>(null);
   let pendingDeleteId = $state<number | null>(null);
-  // Min-display gate (4s floor) so the loader hunts + finishes
-  // legibly on fast localhost responses.
-  const showLoading = stickyTrue(() => !loaded);
 
   onMount(async () => {
     await refresh();
@@ -153,13 +148,9 @@
         </p>
       {/if}
 
-      {#if showLoading()}
+      {#if !loaded}
         <div class="drafts-loading" out:loaderFadeOut>
-          <Finding
-            size="medium"
-            captions={draftsLoadingMessage}
-            finishing={loaded}
-          />
+          <Finding size="medium" />
         </div>
       {:else if loadError !== null}
         <p class="drafts-error" role="alert">{loadError}</p>

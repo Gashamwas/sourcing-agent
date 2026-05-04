@@ -13,7 +13,7 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
-    "types": ["svelte"]
+    "types": ["svelte", "vitest/globals", "@testing-library/jest-dom"]
   },
   "include": ["src/**/*"]
 }
