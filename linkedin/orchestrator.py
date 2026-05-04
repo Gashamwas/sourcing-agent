@@ -43,8 +43,23 @@ from shared.extractors import (
     extract_snippet_from_card_innertext,
     extract_profile_from_dom,
 )
-from shared.failures import judgment_failure_decision
-from shared.judger import facial_judge, full_judge, init_judger, is_failure_decision
+from shared.failures import (
+    ApiBudgetExhaustedError,
+    is_api_budget_exhausted_error,
+    judgment_failure_decision,
+    parse_failure_decision,
+)
+from shared.judger import facial_judge, full_judge, full_judge_with_external_evidence, init_judger, is_failure_decision
+from shared.external_evidence import (
+    fetch_external_candidate_evidence,
+    should_request_external_evidence,
+)
+from shared.external_evidence.shadow_writer import (
+    ShadowFullJudgmentRecord,
+    compute_judgment_diff,
+    record_shadow_full_judgment,
+)
+from shared.schemas import ExternalCandidateEvidence, ExternalEvidenceFailure
 from shared.runtime_state import LinkedInRuntimeStateBridge, RuntimeStateLock, RuntimeStateStore
 from shared.runtime_state.store import LINKEDIN_STRING_KIND
 from shared.safety import LinkedInRecoveryService, RunSafetyCoordinator, RunStopReason
@@ -232,6 +247,11 @@ class Pipeline:
             output_dir=self.output_dir,
             brief_id=self._brief_id,
             brief_name=self.brief_obj.id,
+            # Phase 3: brief_path so the bridge can pin brief identity
+            # on every start_run. brief_path is the on-disk JSON the
+            # orchestrator was loaded from; the canonical hash + snapshot
+            # come from compute_brief_identity at run-start.
+            brief_path=self.brief_path,
         )
         self._safety = RunSafetyCoordinator(
             store=self._runtime_state,
@@ -401,6 +421,7 @@ class Pipeline:
                 output_dir=output_dir,
                 brief_id=self._brief_id,
                 brief_name=self.brief_obj.id,
+                brief_path=self.brief_path,
             )
         if not hasattr(self, "_runtime_run_id"):
             self._runtime_run_id = None
@@ -546,6 +567,55 @@ class Pipeline:
                 payload=payload,
             )
 
+    def _normalize_facial_decision_for_persistence(self, facial: OpusDecision) -> OpusDecision:
+        """Step B alias-to-YES rule for FACIAL_BORDERLINE.
+
+        When ``LINKEDIN_FACIAL_BORDERLINE_ENABLED`` is True, a returned
+        ``FACIAL_BORDERLINE`` is structurally aliased to ``FACIAL_YES`` at
+        the parser-output boundary. Persistence, counters, and bias-monitor
+        semantics stay binary at Step B; canonical state never observes
+        ``FACIAL_BORDERLINE``.
+
+        When the flag is False, a returned ``FACIAL_BORDERLINE`` is a
+        structural surprise (the binary prompt should not produce
+        BORDERLINE). Convert to ``PARSE_FAILURE`` and let the standard
+        non-terminal failure path handle it. Fail loud, do not silently
+        coerce to YES or NO.
+
+        For all non-borderline decisions this is the identity function so
+        callers can wrap unconditionally.
+        """
+        if facial.decision != "FACIAL_BORDERLINE":
+            return facial
+
+        if config.LINKEDIN_FACIAL_BORDERLINE_ENABLED:
+            return OpusDecision(
+                stage=facial.stage,
+                decision="FACIAL_YES",
+                path=facial.path,
+                confidence=facial.confidence,
+                rationale=f"[BORDERLINE→YES alias] {facial.rationale}",
+                candidate_name=facial.candidate_name,
+                profile_url=facial.profile_url,
+                post_save_modifier=facial.post_save_modifier,
+                novelty_value=facial.novelty_value,
+                value_rationale=facial.value_rationale,
+            )
+
+        return parse_failure_decision(
+            stage=facial.stage,
+            candidate_name=facial.candidate_name,
+            profile_url=facial.profile_url,
+            detail=(
+                "Facial parser emitted FACIAL_BORDERLINE while "
+                "LINKEDIN_FACIAL_BORDERLINE_ENABLED=False. This is a "
+                "structural surprise (the binary prompt should not "
+                f"produce BORDERLINE). Original rationale: {facial.rationale}"
+            ),
+            reason="facial_borderline_under_flag_off",
+            path=facial.path,
+        )
+
     def _set_pending_block_adaptation(
         self,
         progress: Progress | None,
@@ -646,11 +716,20 @@ class Pipeline:
             print("\n\n  [!] Interrupted. Progress saved.")
             run_status = "interrupted"
             stop_reason = RunStopReason.OPERATOR_STOP
+        except ApiBudgetExhaustedError:
+            print("\n\n  [!] API budget exhausted. Progress saved; top up credits and resume.")
+            run_status = "interrupted"
+            stop_reason = RunStopReason.API_BUDGET_EXHAUSTED
+            raise
         except Exception as e:
             print(f"\n  [ERROR] {e}")
             log_event(self.log_path, "pipeline_error", error=str(e))
-            run_status = "error"
-            stop_reason = RunStopReason.FATAL_RUNTIME_ERROR
+            if is_api_budget_exhausted_error(e):
+                run_status = "interrupted"
+                stop_reason = RunStopReason.API_BUDGET_EXHAUSTED
+            else:
+                run_status = "error"
+                stop_reason = RunStopReason.FATAL_RUNTIME_ERROR
             raise
         finally:
             self._checkpoint_progress(progress)
@@ -1053,6 +1132,34 @@ class Pipeline:
                             page_num=progress.current_page or None,
                         )
                         raise
+                    except ApiBudgetExhaustedError as e:
+                        stop_reason = RunStopReason.API_BUDGET_EXHAUSTED
+                        print(
+                            "\n  [BUDGET] API credits exhausted during "
+                            f"string #{search_string.id}: {e}"
+                        )
+                        self._checkpoint_progress(
+                            progress,
+                            search_string=search_string,
+                            page_num=progress.current_page or None,
+                        )
+                        log_event(
+                            self.log_path,
+                            "api_budget_exhausted",
+                            string_id=search_string.id,
+                            page=progress.current_page or None,
+                            error=str(e),
+                        )
+                        self._record_runtime_event(
+                            search_string=search_string,
+                            event_type="api_budget_exhausted",
+                            payload={
+                                "string_id": search_string.id,
+                                "page": progress.current_page or None,
+                                "error": str(e),
+                            },
+                        )
+                        raise
                     except Exception as e:
                         if _is_browser_disconnect_error(e):
                             browser_recovery_attempts += 1
@@ -1139,6 +1246,11 @@ class Pipeline:
             run_status = "governor_limit_reached"
             stop_reason = RunStopReason.GOVERNOR_LIMIT
             raise
+        except ApiBudgetExhaustedError:
+            print("\n\n  [!] API budget exhausted. Progress saved; top up credits and resume.")
+            run_status = "interrupted"
+            stop_reason = RunStopReason.API_BUDGET_EXHAUSTED
+            raise
         except KeyboardInterrupt:
             print("\n\n  [!] Interrupted. Progress saved.")
             run_status = "interrupted"
@@ -1146,13 +1258,17 @@ class Pipeline:
         except Exception as e:
             print(f"\n  [ERROR] {e}")
             log_event(self.log_path, "pipeline_error", error=str(e))
-            run_status = (
-                "interrupted"
-                if stop_reason == RunStopReason.BROWSER_DISCONNECT_UNRECOVERED
-                else "error"
-            )
-            if stop_reason == RunStopReason.NORMAL:
-                stop_reason = RunStopReason.FATAL_RUNTIME_ERROR
+            if is_api_budget_exhausted_error(e):
+                run_status = "interrupted"
+                stop_reason = RunStopReason.API_BUDGET_EXHAUSTED
+            else:
+                run_status = (
+                    "interrupted"
+                    if stop_reason == RunStopReason.BROWSER_DISCONNECT_UNRECOVERED
+                    else "error"
+                )
+                if stop_reason == RunStopReason.NORMAL:
+                    stop_reason = RunStopReason.FATAL_RUNTIME_ERROR
             raise
         finally:
             if self._progress:
@@ -1940,6 +2056,26 @@ class Pipeline:
         decisions = facial_judge_batch(
             eligible_snippets, self.brief_obj, prompt_prefix=self._tightening_prefix,
         )
+        # C3: pre-alias borderline observability. Increment the bias monitor's
+        # borderline counter for raw FACIAL_BORDERLINE decisions BEFORE the
+        # boundary alias runs, so the counter sees what the parser emitted,
+        # not what record_decision will see after the alias. Pure observability;
+        # does not feed any alarm or threshold.
+        if (
+            config.LINKEDIN_FACIAL_BORDERLINE_ENABLED
+            and self._bias_monitor is not None
+        ):
+            for raw_snippet, raw_decision in zip(eligible_snippets, decisions):
+                if raw_decision.decision == "FACIAL_BORDERLINE":
+                    self._bias_monitor.record_facial_borderline_seen(
+                        string_id=str(raw_snippet.source_string_id),
+                    )
+        # Step B: translate FACIAL_BORDERLINE at the parser-output boundary
+        # so downstream branch logic, persistence, counters, and bias
+        # monitor never observe BORDERLINE. Identity for non-borderline.
+        decisions = [
+            self._normalize_facial_decision_for_persistence(d) for d in decisions
+        ]
 
         facial_yes_snippets: list[CandidateSnippet] = []
         page_evaluated = 0
@@ -3031,6 +3167,15 @@ Current page stats:
         Meaning: exit when NO rate is so extreme that even the most pessimistic
         expected YES rate is halved. Architecture overrides can only tighten (raise)
         this floor, never loosen it.
+
+        C3 interpretation contract: under the Option B ternary regime,
+        ``expected_yes_rate_low`` means the lower bound on the
+        opens-for-full-eval rate, i.e. ``(facial_yes + facial_borderline) /
+        (total - skips)`` — equivalently, the post-alias YES rate the bias
+        monitor sees. The early-exit "NO rate" denominator therefore counts
+        ``FACIAL_NO + FACIAL_SKIP`` (= "did not open for full eval"), which is
+        invariant under ternary because borderline does not appear here — it
+        was aliased to YES upstream. The formula remains correct unchanged.
         """
         # Brief-derived threshold
         brief_rate = None
@@ -3689,6 +3834,8 @@ Provide a narrowed Boolean."""
         try:
             facial = facial_judge(snippet, self.brief_obj, prompt_prefix=self._tightening_prefix)
         except Exception as e:
+            if is_api_budget_exhausted_error(e):
+                raise ApiBudgetExhaustedError(str(e)) from e
             print(f"    [ERROR] Facial judgment failed: {e}")
             log_event(self.log_path, "facial_error", name=snippet.name, error=str(e))
             facial = judgment_failure_decision(
@@ -3698,6 +3845,25 @@ Provide a narrowed Boolean."""
                 error=e,
                 source="judgment",
             )
+
+        # C3: pre-alias borderline observability. Increment the bias monitor's
+        # borderline counter for a raw FACIAL_BORDERLINE BEFORE the boundary
+        # alias runs, so the counter sees what the parser emitted, not what
+        # record_decision will see after the alias. Pure observability; does
+        # not feed any alarm or threshold.
+        if (
+            config.LINKEDIN_FACIAL_BORDERLINE_ENABLED
+            and self._bias_monitor is not None
+            and facial.decision == "FACIAL_BORDERLINE"
+        ):
+            self._bias_monitor.record_facial_borderline_seen(
+                string_id=str(snippet.source_string_id),
+            )
+
+        # Step B: translate FACIAL_BORDERLINE at the parser-output boundary
+        # so downstream branch logic, persistence, counters, and bias
+        # monitor never observe BORDERLINE. Identity for non-borderline.
+        facial = self._normalize_facial_decision_for_persistence(facial)
 
         # Intercept parse/judgment failures — log but do NOT persist to cross-session history
         if is_failure_decision(facial.decision):
@@ -3814,6 +3980,8 @@ Provide a narrowed Boolean."""
                 print(f"    [ERROR] Browser session dropped during profile extraction: {e}")
                 log_event(self.log_path, "profile_browser_disconnect", name=snippet.name, error=str(e))
                 raise
+            if is_api_budget_exhausted_error(e):
+                raise ApiBudgetExhaustedError(str(e)) from e
             print(f"    [ERROR] Profile extraction failed: {e}")
             log_event(self.log_path, "profile_error", name=snippet.name, error=str(e))
             self._finish_runtime_stage_failure(
@@ -3850,6 +4018,8 @@ Provide a narrowed Boolean."""
         try:
             final = full_judge(summary, self.brief_obj)
         except Exception as e:
+            if is_api_budget_exhausted_error(e):
+                raise ApiBudgetExhaustedError(str(e)) from e
             print(f"    [ERROR] Final judgment failed: {e}")
             log_event(self.log_path, "final_error", name=snippet.name, error=str(e))
             final = judgment_failure_decision(
@@ -3935,6 +4105,159 @@ Provide a narrowed Boolean."""
                               string_id=alert.string_id)
                 elif alert.severity == "info":
                     print(f"    ℹ BIAS INFO: {alert.message}")
+
+        # --- Shadow: external evidence augmentation (analytical-debug only) ---
+        # Placed AFTER baseline canonical persistence (_finish_runtime_stage_success,
+        # _mark_terminal, _prior_outcomes write, bias_monitor record) so that any
+        # failure here is mechanically incapable of affecting baseline truth.
+        # Disabled by default via config.LINKEDIN_EXTERNAL_EVIDENCE_ENABLED.
+        try:
+            if config.LINKEDIN_EXTERNAL_EVIDENCE_ENABLED and not is_failure_decision(final.decision):
+                trigger = should_request_external_evidence(summary=summary, brief=self.brief_obj)
+                external_evidence_status = ""
+                evidence: ExternalCandidateEvidence | None = None
+                enriched: OpusDecision | None = None
+
+                if not trigger.should_run:
+                    external_evidence_status = "skipped_no_trigger"
+                    log_event(
+                        self.log_path,
+                        "external_evidence_skipped",
+                        name=snippet.name,
+                        profile_url=snippet.profile_url,
+                        skip_reason=trigger.skip_reason,
+                        signals=trigger.signals,
+                    )
+                    self._record_runtime_event(
+                        search_string=runtime_search_string,
+                        event_type="external_evidence_skipped",
+                        payload={
+                            "profile_url": snippet.profile_url,
+                            "skip_reason": trigger.skip_reason,
+                            "signals": trigger.signals,
+                        },
+                    )
+                else:
+                    identity_hints = {
+                        "name": snippet.name,
+                        "current_company": snippet.current_company,
+                        "current_title": snippet.current_title,
+                        "headline": snippet.headline,
+                        "education_snippet": snippet.education_snippet,
+                        "profile_url": snippet.profile_url,
+                    }
+                    result = fetch_external_candidate_evidence(
+                        summary=summary,
+                        brief=self.brief_obj,
+                        trigger=trigger,
+                        identity_hints=identity_hints,
+                    )
+                    if isinstance(result, ExternalCandidateEvidence):
+                        evidence = result
+                        external_evidence_status = "evidence_present"
+                        log_event(
+                            self.log_path,
+                            "external_evidence_fetched",
+                            name=snippet.name,
+                            profile_url=snippet.profile_url,
+                            trigger_reason=trigger.reason,
+                            identity_confidence=evidence.identity_confidence,
+                            fact_blocks=len(evidence.external_fact_blocks),
+                            inferences=len(evidence.external_inferences),
+                        )
+                        self._record_runtime_event(
+                            search_string=runtime_search_string,
+                            event_type="external_evidence_fetched",
+                            payload={
+                                "profile_url": snippet.profile_url,
+                                "trigger_reason": trigger.reason,
+                                "identity_confidence": evidence.identity_confidence,
+                            },
+                        )
+                        try:
+                            enriched = full_judge_with_external_evidence(summary, evidence, self.brief_obj)
+                        except Exception as enrich_exc:
+                            enriched = None
+                            log_event(
+                                self.log_path,
+                                "external_evidence_enriched_judge_failed",
+                                name=snippet.name,
+                                error=str(enrich_exc),
+                            )
+                    else:  # ExternalEvidenceFailure
+                        external_evidence_status = result.reason
+                        log_event(
+                            self.log_path,
+                            "external_evidence_failed",
+                            name=snippet.name,
+                            profile_url=snippet.profile_url,
+                            reason=result.reason,
+                            detail=result.detail,
+                            http_status=result.http_status,
+                        )
+                        self._record_runtime_event(
+                            search_string=runtime_search_string,
+                            event_type="external_evidence_failed",
+                            payload={
+                                "profile_url": snippet.profile_url,
+                                "reason": result.reason,
+                                "http_status": result.http_status,
+                            },
+                        )
+
+                diff = compute_judgment_diff(
+                    final,
+                    enriched,
+                    skip_reason=external_evidence_status if enriched is None else "",
+                )
+                evidence_refs_count = 0
+                identity_confidence = None
+                if evidence is not None:
+                    identity_confidence = evidence.identity_confidence
+                    evidence_refs_count = sum(len(b.evidence_refs) for b in evidence.external_fact_blocks)
+                    evidence_refs_count += sum(len(i.basis_refs) for i in evidence.external_inferences)
+
+                record_shadow_full_judgment(
+                    output_dir=self.output_dir,
+                    record=ShadowFullJudgmentRecord(
+                        candidate_name=snippet.name,
+                        profile_url=snippet.profile_url,
+                        source_string_id=snippet.source_string_id,
+                        page=snippet.page,
+                        result_rank=snippet.result_rank,
+                        trigger_reason=trigger.reason if trigger.should_run else "",
+                        external_evidence_status=external_evidence_status,
+                        identity_confidence=identity_confidence,
+                        evidence_refs_count=evidence_refs_count,
+                        baseline=final.to_dict(),
+                        enriched=enriched.to_dict() if enriched is not None else None,
+                        diff=diff,
+                        timestamp=datetime.now(timezone.utc).isoformat(),
+                    ),
+                )
+
+                if enriched is not None:
+                    self._record_runtime_event(
+                        search_string=runtime_search_string,
+                        event_type="shadow_full_judge_completed",
+                        payload={
+                            "profile_url": snippet.profile_url,
+                            "decision_changed": diff.get("decision_changed"),
+                            "path_changed": diff.get("path_changed"),
+                            "rationale_changed": diff.get("rationale_changed"),
+                            "confidence_delta": diff.get("confidence_delta"),
+                            "evidence_refs_count": evidence_refs_count,
+                        },
+                    )
+        except Exception as shadow_exc:
+            # The whole shadow path is best-effort. Nothing here may affect baseline.
+            print(f"    [WARN] shadow external-evidence eval failed: {shadow_exc}")
+            log_event(
+                self.log_path,
+                "external_evidence_shadow_unhandled_exception",
+                name=snippet.name,
+                error=str(shadow_exc),
+            )
 
         if final.decision in ("SAVE", "INFERENTIAL_SAVE", "TRANSFERABLE_SAVE"):
             tag = final.decision if final.decision in ("INFERENTIAL_SAVE", "TRANSFERABLE_SAVE") else "SAVE"

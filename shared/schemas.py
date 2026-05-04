@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 from dataclasses import dataclass, field, asdict
-from typing import Optional
+from typing import Any, Optional
 import json
 
 from shared.reconciliation_schemas import RecruiterActivitySnapshot
@@ -396,6 +396,11 @@ class SearchString:
     # Facial triage stats (persisted for block-level aggregate computation)
     facial_yes_count: int = 0
     facial_no_count: int = 0
+    # C2 (slice 15): own bucket distinct from YES. Stays 0 today because
+    # slices 13/14 alias FACIAL_BORDERLINE -> FACIAL_YES at the persistence
+    # boundary; this counter only ticks if a future code path persists raw
+    # FACIAL_BORDERLINE without the alias.
+    facial_borderline_count: int = 0
     candidates_count: int = 0
     duplicates_count: int = 0
     # Two-phase adaptation fields
@@ -467,3 +472,159 @@ class Progress:
     def save(self, path: str) -> None:
         with open(path, "w") as f:
             f.write(self.to_json())
+
+
+# ---------------------------------------------------------------------------
+# External candidate evidence (Perplexity-augmented context for full eval)
+# ---------------------------------------------------------------------------
+# Slice 1 of the perplexity-evidence-augmentation feature: types only, with no
+# callers. Strict separation between sourced facts, model inferences, and
+# unresolved ambiguities is the durable contract — it must survive normalization
+# all the way to the final judge.
+
+@dataclass
+class EvidenceRef:
+    """A single citation backing an external fact or inference."""
+
+    url: str
+    title: str = ""
+    source_quality: str = "unknown"  # "high" | "medium" | "low" | "unknown"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> EvidenceRef:
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
+class ExternalFactBlock:
+    """A topic-grouped block of sourced facts with citations."""
+
+    topic: str
+    facts: list[str] = field(default_factory=list)
+    evidence_refs: list[EvidenceRef] = field(default_factory=list)
+    source_quality: str = "unknown"
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> ExternalFactBlock:
+        refs = [EvidenceRef.from_dict(r) for r in d.get("evidence_refs", [])]
+        return cls(
+            topic=d.get("topic", ""),
+            facts=list(d.get("facts", [])),
+            evidence_refs=refs,
+            source_quality=d.get("source_quality", "unknown"),
+        )
+
+
+@dataclass
+class ExternalInference:
+    """Model-synthesized claim derived from sourced facts. Kept distinct from facts."""
+
+    claim: str
+    basis_refs: list[EvidenceRef] = field(default_factory=list)
+    confidence: float = 0.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> ExternalInference:
+        refs = [EvidenceRef.from_dict(r) for r in d.get("basis_refs", [])]
+        return cls(
+            claim=d.get("claim", ""),
+            basis_refs=refs,
+            confidence=float(d.get("confidence", 0.0) or 0.0),
+        )
+
+
+@dataclass
+class ExternalCandidateEvidence:
+    """Normalized public-web evidence layer used to enrich first-party profile evidence."""
+
+    trigger_reason: str
+    identity_confidence: float
+    profile_facts_used_for_matching: list[str] = field(default_factory=list)
+    external_fact_blocks: list[ExternalFactBlock] = field(default_factory=list)
+    external_inferences: list[ExternalInference] = field(default_factory=list)
+    unresolved_ambiguities: list[str] = field(default_factory=list)
+    do_not_use_for_judgment: list[str] = field(default_factory=list)
+    raw_provider_model: str = ""
+    normalizer_model: str = ""
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> ExternalCandidateEvidence:
+        return cls(
+            trigger_reason=d.get("trigger_reason", ""),
+            identity_confidence=float(d.get("identity_confidence", 0.0) or 0.0),
+            profile_facts_used_for_matching=list(d.get("profile_facts_used_for_matching", [])),
+            external_fact_blocks=[
+                ExternalFactBlock.from_dict(b)
+                for b in d.get("external_fact_blocks", [])
+            ],
+            external_inferences=[
+                ExternalInference.from_dict(i)
+                for i in d.get("external_inferences", [])
+            ],
+            unresolved_ambiguities=list(d.get("unresolved_ambiguities", [])),
+            do_not_use_for_judgment=list(d.get("do_not_use_for_judgment", [])),
+            raw_provider_model=d.get("raw_provider_model", ""),
+            normalizer_model=d.get("normalizer_model", ""),
+        )
+
+
+@dataclass
+class ExternalEvidenceFailure:
+    """Typed failure result from the external evidence pipeline.
+
+    This is *not* an exception. The provider and normalizer return it directly so
+    that callers can fall back to the baseline path without unwinding the stack
+    or coupling external-evidence quota errors to LinkedIn run-pause logic.
+    """
+
+    reason: str  # see allowed values in the slice 1 spec
+    detail: str = ""
+    provider: str = ""
+    http_status: Optional[int] = None
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> ExternalEvidenceFailure:
+        status = d.get("http_status")
+        return cls(
+            reason=d.get("reason", "unknown"),
+            detail=d.get("detail", ""),
+            provider=d.get("provider", ""),
+            http_status=int(status) if isinstance(status, int) else None,
+        )
+
+
+@dataclass
+class TriggerDecision:
+    """Output of the external-evidence trigger gate."""
+
+    should_run: bool
+    reason: str
+    skip_reason: str = ""
+    signals: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> TriggerDecision:
+        return cls(
+            should_run=bool(d.get("should_run", False)),
+            reason=d.get("reason", ""),
+            skip_reason=d.get("skip_reason", ""),
+            signals=dict(d.get("signals", {})),
+        )

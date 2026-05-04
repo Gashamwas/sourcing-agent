@@ -846,7 +846,9 @@ Rules:
 - Keep hard gates intact: geography, years, BFSI domain, post-2022 GenAI builder evidence, executive-builder scope.
 - Prefer replacing low-signal items over append-only growth.
 - Keep lists concise and high-signal.
-- __RETRIEVAL_RULES____STRICT_RULES__
+- __RETRIEVAL_RULES__
+- Anti-employer-proxy rule (applies to every brief, not only strict-seniority): do NOT literalize employer clusters, prestige-company findings, or company-inventory text into search_priorities or additional_search_terms. Prestige employers are NOT confidence-boosting retrieval advice on their own; they need behavioral evidence (specific work, build patterns, capability area) to belong in retrieval. If employer signal is strong but behavioral evidence is thin, route the finding into employer_signal_rules as secondary classification logic, never into opening retrieval.
+- Prefer abstract behavioral search guidance (the kind of work, the build pattern, the capability area) over employer or title inventories. Titles, employers, and keywords can support a pattern; they should not be the pattern.__STRICT_RULES__
 - If you suggest employer signal rules, save_on_employer_alone must stay false.
 - If you suggest facial calibration changes, make them small and evidence-based.
 - If there is not enough evidence to change a field, omit it from proposed_changes."""
@@ -1002,6 +1004,96 @@ def _run_metrics_are_internally_inconsistent(report: StructuredRunReport) -> boo
     metrics_saved = int(report.metrics_summary.get("saved", 0) or 0)
     string_saved = sum(int(item.get("saves", 0) or 0) for item in report.string_performance)
     return metrics_saved == 0 and string_saved > 0
+
+
+def _general_anti_employer_proxy_priority_rewrite(item: str) -> str | None:
+    """General anti-employer-proxy rewrite for search_priorities.
+
+    Applies to every brief, not only strict-seniority. The rule is
+    behavior-first: if a proposed search priority reads as a company
+    inventory (employer cluster prose), rewrite it to abstract behavioral
+    guidance so prestige employers do not literalize into opening
+    retrieval. Employer findings remain valid as secondary classification
+    logic via employer_signal_rules.
+
+    Returns the rewritten string, the original normalized string when no
+    rewrite is needed, or None to drop the item entirely.
+    """
+    normalized = _normalize_text(item)
+    if not normalized:
+        return None
+    if looks_like_company_inventory(normalized):
+        return (
+            "Behavioral search guidance: target the actual build pattern "
+            "and capability area rather than the employer set. Use employer "
+            "signals only as secondary classification."
+        )
+    return normalized
+
+
+def _general_anti_employer_proxy_term_rewrite(item: str) -> str | None:
+    """General anti-employer-proxy rewrite for additional_search_terms.
+
+    Same intent as the priority rewrite: drop or reframe employer-inventory
+    terms so they cannot become opening retrieval. Title-inventory terms
+    are also reframed because title clusters are a form of identity proxy
+    that should be a brief-secondary classifier, not a retrieval driver.
+    """
+    normalized = _normalize_text(item)
+    if not normalized:
+        return None
+    if looks_like_company_inventory(normalized):
+        return "behavioral build-pattern terms with capability-area context"
+    if looks_like_title_inventory(normalized):
+        return "bounded title variants tied to scoped capability work"
+    return normalized
+
+
+def _apply_general_anti_employer_proxy_guardrails(
+    *,
+    current_raw: dict,
+    draft: dict,
+    warnings: list[str],
+) -> None:
+    """Apply behavior-first anti-employer-proxy rewriting to every brief.
+
+    Strict-seniority briefs receive a tighter rewrite via
+    `_apply_strict_seniority_legacy_guardrails` after this. Briefs in
+    explicit retrieval_design mode skip this step because their
+    search_priorities and additional_search_terms are derived views.
+    """
+    if _raw_has_explicit_retrieval_design(current_raw):
+        return
+
+    rewritten_priorities = _dedupe_strings(
+        [
+            rewritten
+            for item in draft.get("search_priorities", [])
+            if (rewritten := _general_anti_employer_proxy_priority_rewrite(item))
+        ],
+        limit=LIST_LIMITS["search_priorities"],
+    )
+    rewritten_terms = _dedupe_strings(
+        [
+            rewritten
+            for item in draft.get("additional_search_terms", [])
+            if (rewritten := _general_anti_employer_proxy_term_rewrite(item))
+        ],
+        limit=LIST_LIMITS["additional_search_terms"],
+    )
+
+    if rewritten_priorities != draft.get("search_priorities", []):
+        warnings.append(
+            "Rewrote search_priorities to drop employer-cluster literalization "
+            "and keep retrieval guidance behavior-first."
+        )
+        draft["search_priorities"] = rewritten_priorities
+    if rewritten_terms != draft.get("additional_search_terms", []):
+        warnings.append(
+            "Rewrote additional_search_terms to drop employer/title-inventory "
+            "literalization and keep retrieval guidance behavior-first."
+        )
+        draft["additional_search_terms"] = rewritten_terms
 
 
 def _strict_seniority_priority_rewrite(item: str) -> str | None:
@@ -1236,10 +1328,19 @@ def _apply_iteration_proposal(
         draft["notes"] = generated_note
 
     warnings.extend(_find_heuristic_gap_warnings(current_raw, draft))
+    # Strict-seniority guardrail runs first when applicable: its rewrites
+    # are tighter and its warnings name the seniority context. The general
+    # anti-employer-proxy guardrail runs after to catch any remaining
+    # employer-inventory items on non-strict briefs (the floor behavior).
     _apply_strict_seniority_legacy_guardrails(
         current_raw=current_raw,
         draft=draft,
         report=report,
+        warnings=warnings,
+    )
+    _apply_general_anti_employer_proxy_guardrails(
+        current_raw=current_raw,
+        draft=draft,
         warnings=warnings,
     )
     return draft, _dedupe_strings(warnings)

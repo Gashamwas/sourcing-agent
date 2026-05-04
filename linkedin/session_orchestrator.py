@@ -37,6 +37,7 @@ from shared.governor import (
     MAX_PROFILE_OPENS_PER_24H,
     MAX_SESSIONS_PER_DAY,
 )
+from shared.failures import ApiBudgetExhaustedError
 from decoy.agent import DecoyAgent
 from decoy.scheduler import BurstScheduler
 from shared.human_timing import human_delay
@@ -273,6 +274,10 @@ async def _run_sourcing_session(
         shutdown_reason = e.reason
         _print_governor(f"Governor limit: {e.reason}")
 
+    except ApiBudgetExhaustedError as e:
+        shutdown_reason = "api_budget_exhausted"
+        _print_governor(f"API budget exhausted: {e}")
+
     except Exception as e:
         shutdown_reason = f"error: {e}"
         _print_governor(f"Session error: {e}")
@@ -444,6 +449,10 @@ async def run_day_cycle(
         restart_string_ids = None
 
         if single_session or stop_event.is_set():
+            break
+
+        if result.get("shutdown_reason") == "api_budget_exhausted":
+            _print_governor("Stopping day cycle until API credits are restored.")
             break
 
         if not _resume_has_pending_work(brief_path, output_dir):

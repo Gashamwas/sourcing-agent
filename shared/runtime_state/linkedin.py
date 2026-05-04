@@ -41,11 +41,19 @@ class LinkedInRuntimeStateBridge:
         output_dir: str | Path,
         brief_id: str,
         brief_name: str,
+        brief_path: str | None = None,
     ):
         self.store = store
         self.output_dir = Path(output_dir)
         self.brief_id = brief_id
         self.brief_name = brief_name
+        # Phase 3: brief_path is optional so legacy callers (older tests
+        # that construct the bridge directly) keep working without an
+        # invasive refactor. When set, every start_or_resume_run call
+        # computes the brief identity once and forwards it to start_run
+        # so runs.brief_path_at_launch / brief_content_hash /
+        # brief_snapshot_json get populated.
+        self.brief_path = brief_path
         self.progress_path = self.output_dir / "progress.json"
         self.history_path = self.output_dir / f"candidate_history-{brief_id}.jsonl"
         self.search_memory_path = self.output_dir / f"search_memory-{brief_id}.json"
@@ -78,6 +86,15 @@ class LinkedInRuntimeStateBridge:
     ) -> tuple[int, Progress]:
         self.store.reconcile_open_attempts(source="linkedin", brief_id=self.brief_id)
         self.store.reconcile_pending_side_effects(source="linkedin", brief_id=self.brief_id)
+        # Phase 3: compute brief identity at run-start so it pins the
+        # exact content the orchestrator was about to execute against.
+        # If brief_path wasn't passed at construction, identity is None
+        # and the run row falls back to legacy NULL columns.
+        from shared.brief_identity import compute_brief_identity
+
+        brief_identity = (
+            compute_brief_identity(self.brief_path) if self.brief_path else None
+        )
         return start_or_resume_linkedin_run(
             store=self.store,
             output_dir=self.output_dir,
@@ -90,6 +107,7 @@ class LinkedInRuntimeStateBridge:
             import_legacy_state=self.import_legacy_state,
             sync_progress=self.sync_progress,
             rebuild_artifacts=self.rebuild_artifacts,
+            brief_identity=dict(brief_identity) if brief_identity else None,
         )
 
     def sync_progress(
@@ -562,6 +580,7 @@ class LinkedInRuntimeStateBridge:
                     "candidates_discovered": 0,
                     "facial_yes_count": 0,
                     "facial_no_count": 0,
+                    "facial_borderline_count": 0,
                     "saves_count": 0,
                     "rejected_count": 0,
                 },
@@ -638,7 +657,15 @@ class LinkedInRuntimeStateBridge:
             "profiles_processed": search_string.candidates_count,
             "facial_yes": search_string.facial_yes_count,
             "facial_no": search_string.facial_no_count,
-            "facial_skip": max(0, search_string.candidates_count - search_string.facial_yes_count - search_string.facial_no_count),
+            # C2 (slice 15): borderline is its own counter, not silently absorbed into
+            # skip. Subtract borderline from the residual to keep skip math honest.
+            "facial_skip": max(
+                0,
+                search_string.candidates_count
+                - search_string.facial_yes_count
+                - search_string.facial_no_count
+                - search_string.facial_borderline_count,
+            ),
             "full_save": len(search_string.saves),
             "full_reject": 0,
             "duplicates_count": search_string.duplicates_count if duplicates_count is None else duplicates_count,

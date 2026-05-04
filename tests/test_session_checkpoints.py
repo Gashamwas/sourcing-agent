@@ -54,6 +54,7 @@ def test_restore_rebuilds_projections_from_runtime_state(tmp_path, monkeypatch):
         duplicates_count=1,
         facial_yes_count=1,
         facial_no_count=2,
+        facial_borderline_count=1,
     )
     store.upsert_work_unit(
         run_id=run_id,
@@ -74,6 +75,7 @@ def test_restore_rebuilds_projections_from_runtime_state(tmp_path, monkeypatch):
             "candidates_discovered": search_string.candidates_count,
             "facial_yes_count": search_string.facial_yes_count,
             "facial_no_count": search_string.facial_no_count,
+            "facial_borderline_count": search_string.facial_borderline_count,
             "saves_count": len(search_string.saves),
         },
     )
@@ -120,3 +122,9 @@ def test_restore_rebuilds_projections_from_runtime_state(tmp_path, monkeypatch):
     assert progress["pending_block_ready"] is True
     assert "Alice" in history_path.read_text()
     assert json.loads(memory_path.read_text())["project_id"] == "brief-1"
+    # C2 (slice 15): facial_borderline_count round-trips through the canonical
+    # SQLite store and out via the progress projection.
+    restored_string = next(s for s in progress["strings"] if s["id"] == 1)
+    assert restored_string["facial_yes_count"] == 1
+    assert restored_string["facial_no_count"] == 2
+    assert restored_string["facial_borderline_count"] == 1

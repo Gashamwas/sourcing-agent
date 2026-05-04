@@ -2,15 +2,40 @@
 
 Note: For Turing corporate proxy, you may need:
     export NODE_TLS_REJECT_UNAUTHORIZED=0
+
+Frozen-app deployment (Phase 0 ``userdata`` slice): when Cloris runs
+inside a signed .app bundle, the bundle is read-only — PROJECT_ROOT
+resolves to a path inside ``Cloris.app/Contents/Resources/`` after
+PyInstaller extraction and cannot be written to. ``shared.user_data_dir``
+detects that case and we layer ``.env`` loads accordingly: the
+recipient's writable ``~/Library/Application Support/Cloris/.env``
+takes priority, with the project-root ``.env`` falling through for
+dev. ``OUTPUT_DIR`` resolves the same way.
 """
 
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from project root (one level up from shared/)
-_env_path = Path(__file__).parent.parent / ".env"
-load_dotenv(_env_path)
+from shared.user_data_dir import (
+    cloris_user_data_dir,
+    should_use_user_data_dir,
+)
+
+# .env layering. The user-data ``.env`` (written by the in-product API
+# key entry on first launch) is loaded first so its values seed the
+# environment. ``override=False`` on the second load means the
+# project-root ``.env`` provides defaults for any keys the user-data
+# ``.env`` did not set, without ever clobbering recipient-entered
+# credentials. Dev workflow is unchanged: when the user-data path is
+# disabled, we just load PROJECT_ROOT/.env directly the way we always
+# have.
+_PROJECT_ROOT_ENV: Path = Path(__file__).parent.parent / ".env"
+if should_use_user_data_dir():
+    _user_env_path = cloris_user_data_dir() / ".env"
+    if _user_env_path.exists():
+        load_dotenv(_user_env_path, override=False)
+load_dotenv(_PROJECT_ROOT_ENV, override=False)
 
 
 def _optional(key: str, default: str = "") -> str:
@@ -57,6 +82,43 @@ MARKET_INTEL_PERPLEXITY_PRESET: str = _optional(
 MARKET_INTEL_EXTERNAL_RESEARCH_TIMEOUT_SECONDS: float = float(
     _optional("MARKET_INTEL_EXTERNAL_RESEARCH_TIMEOUT_SECONDS", "300")
 )
+
+# --- LinkedIn external evidence augmentation (Perplexity-backed) ---
+# Slice 1 of the perplexity-evidence-augmentation feature. All defaults are
+# safe / disabled: the feature is gated off until slice 2 wires it in.
+LINKEDIN_EXTERNAL_EVIDENCE_ENABLED: bool = _optional(
+    "LINKEDIN_EXTERNAL_EVIDENCE_ENABLED", "false"
+).strip().lower() in {"1", "true", "yes", "on"}
+LINKEDIN_EXTERNAL_EVIDENCE_MODEL: str = _optional("LINKEDIN_EXTERNAL_EVIDENCE_MODEL", "")
+LINKEDIN_EXTERNAL_EVIDENCE_TIMEOUT_SECONDS: float = float(
+    _optional("LINKEDIN_EXTERNAL_EVIDENCE_TIMEOUT_SECONDS", "90")
+)
+LINKEDIN_EXTERNAL_EVIDENCE_MAX_OUTPUT_TOKENS: int = int(
+    _optional("LINKEDIN_EXTERNAL_EVIDENCE_MAX_OUTPUT_TOKENS", "4096")
+)
+LINKEDIN_EXTERNAL_EVIDENCE_MIN_CITATIONS: int = int(
+    _optional("LINKEDIN_EXTERNAL_EVIDENCE_MIN_CITATIONS", "2")
+)
+LINKEDIN_EXTERNAL_EVIDENCE_MIN_IDENTITY_CONFIDENCE: float = float(
+    _optional("LINKEDIN_EXTERNAL_EVIDENCE_MIN_IDENTITY_CONFIDENCE", "0.5")
+)
+# Intentionally NOT defaulted to "deep-research" — market-intel has its own preset
+# and the candidate-evidence path runs under a tighter time budget.
+LINKEDIN_EXTERNAL_EVIDENCE_PERPLEXITY_PRESET: str = _optional(
+    "LINKEDIN_EXTERNAL_EVIDENCE_PERPLEXITY_PRESET", ""
+)
+
+# Step B of the FACIAL_BORDERLINE promotion plan (slice 13). When True, the
+# facial-triage prompt offers a three-class output (YES/BORDERLINE/NO),
+# the parser recognizes BORDERLINE, and the orchestrator translates
+# BORDERLINE -> FACIAL_YES at the parser-output boundary (alias-to-YES).
+# Persistence and counters stay binary at Step B; canonical state never
+# observes BORDERLINE. Step C is where BORDERLINE becomes a real third
+# state. Default off; production behavior under flag-off is byte-identical
+# to pre-Step-B.
+LINKEDIN_FACIAL_BORDERLINE_ENABLED: bool = _optional(
+    "LINKEDIN_FACIAL_BORDERLINE_ENABLED", "false"
+).strip().lower() in {"1", "true", "yes", "on"}
 
 # --- Browser ---
 CDP_URL: str = _optional("CDP_URL", "http://127.0.0.1:9222")
@@ -202,5 +264,13 @@ ARCHITECTURE_OVERRIDES: dict[str, dict] = {
 
 # --- Paths ---
 PROJECT_ROOT: Path = Path(__file__).parent.parent
-OUTPUT_DIR: Path = PROJECT_ROOT / "output"
-OUTPUT_DIR.mkdir(exist_ok=True)
+# OUTPUT_DIR is the writable root for all per-state runtime data
+# (state dirs, runtime_state.sqlite3, projection JSONLs). When Cloris
+# runs as a frozen .app, this relocates under
+# ``~/Library/Application Support/Cloris/output/`` because the bundle
+# is read-only. Dev (running from the repo) preserves the historical
+# ``PROJECT_ROOT/output`` layout — see ``shared/user_data_dir.py`` for
+# the resolution rules and the ``CLORIS_USER_DATA_DIR`` opt-in for
+# tests / power users.
+from shared.user_data_dir import output_dir as _resolve_output_dir
+OUTPUT_DIR: Path = _resolve_output_dir()

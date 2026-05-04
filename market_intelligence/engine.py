@@ -60,6 +60,7 @@ from shared.retrieval_design import (
     summarize_retrieval_design,
 )
 from shared.run_report_schema import StructuredRunReport
+from shared.strict_seniority import looks_like_company_inventory
 from shared.search_memory import (
     extract_dominant_anchors,
     get_search_memory_families,
@@ -540,54 +541,96 @@ class HeuristicMarketIntelSynthesisBackend:
             hints = report_analysis.get("brief_iteration_hints", {}) or report.get(
                 "brief_iteration_hints", {}
             )
+            # Behavior-first / anti-employer-proxy guardrail: if the run's
+            # brief-iteration hints are dominated by employer-inventory
+            # content, demote them so they cannot drive opening retrieval.
+            # Employer findings remain valid late-stage classifier signal,
+            # but lane/anchor/noise evidence is the primary retrieval driver.
+            # See market-intel + brief-authoring guide doctrine: titles,
+            # employers, and keywords can support a pattern but should not
+            # become the pattern.
             if hints.get("search_priorities"):
-                brief_recs["rec-search-priorities"] = {
-                    "recommendation_id": "rec-search-priorities",
-                    "target_field": "search_priorities",
-                    "proposal": ", ".join(
-                        str(item).strip()
-                        for item in hints.get("search_priorities", [])[:3]
-                    ),
-                    "reason": "Run evidence indicates these lanes deserve more explicit prioritization.",
-                    "supporting_run_refs": [batch.run_ref],
-                    "confidence": 0.8,
-                    "retrieval_update": {
-                        "update_type": "layer_update",
-                        "category": "promote_family_objective",
-                        "target_field": "retrieval_design",
-                        "layer_name": "entry_signals",
-                        "suggested_values": [
-                            str(item).strip()
-                            for item in hints.get("search_priorities", [])[:3]
-                            if str(item).strip()
-                        ],
-                        "reason": "Winning lanes should become explicit retrieval-family priorities.",
-                    },
-                }
+                priorities_items = [
+                    str(item).strip()
+                    for item in hints.get("search_priorities", [])[:3]
+                    if str(item).strip()
+                ]
+                priorities_employer_proxy = any(
+                    looks_like_company_inventory(item) for item in priorities_items
+                )
+                if priorities_employer_proxy:
+                    brief_recs["rec-search-priorities"] = {
+                        "recommendation_id": "rec-search-priorities",
+                        "target_field": "employer_signal_rules",
+                        "proposal_kind": "late_stage_gap_probe",
+                        "proposal": ", ".join(priorities_items),
+                        "reason": (
+                            "Employer-cluster proposal surfaced in run hints; "
+                            "demoted from opening retrieval to late-stage "
+                            "lane classification per anti-employer-proxy rule."
+                        ),
+                        "supporting_run_refs": [batch.run_ref],
+                        "confidence": 0.45,
+                    }
+                else:
+                    brief_recs["rec-search-priorities"] = {
+                        "recommendation_id": "rec-search-priorities",
+                        "target_field": "search_priorities",
+                        "proposal_kind": "opening_retrieval",
+                        "proposal": ", ".join(priorities_items),
+                        "reason": "Run evidence indicates these lanes deserve more explicit prioritization.",
+                        "supporting_run_refs": [batch.run_ref],
+                        "confidence": 0.8,
+                        "retrieval_update": {
+                            "update_type": "layer_update",
+                            "category": "promote_family_objective",
+                            "target_field": "retrieval_design",
+                            "layer_name": "entry_signals",
+                            "suggested_values": priorities_items,
+                            "reason": "Winning lanes should become explicit retrieval-family priorities.",
+                        },
+                    }
             if hints.get("additional_search_terms"):
-                brief_recs["rec-additional-search-terms"] = {
-                    "recommendation_id": "rec-additional-search-terms",
-                    "target_field": "additional_search_terms",
-                    "proposal": ", ".join(
-                        str(item).strip()
-                        for item in hints.get("additional_search_terms", [])[:6]
-                    ),
-                    "reason": "These terms surfaced from the best-performing parts of the run.",
-                    "supporting_run_refs": [batch.run_ref],
-                    "confidence": 0.78,
-                    "retrieval_update": {
-                        "update_type": "layer_update",
-                        "category": "promote_layer_terms",
-                        "target_field": "retrieval_design",
-                        "layer_name": "capability_proxies",
-                        "suggested_values": [
-                            str(item).strip()
-                            for item in hints.get("additional_search_terms", [])[:6]
-                            if str(item).strip()
-                        ],
-                        "reason": "Winning anchors should become typed capability or reality-filter terms.",
-                    },
-                }
+                term_items = [
+                    str(item).strip()
+                    for item in hints.get("additional_search_terms", [])[:6]
+                    if str(item).strip()
+                ]
+                terms_employer_proxy = any(
+                    looks_like_company_inventory(item) for item in term_items
+                )
+                if terms_employer_proxy:
+                    brief_recs["rec-additional-search-terms"] = {
+                        "recommendation_id": "rec-additional-search-terms",
+                        "target_field": "employer_signal_rules",
+                        "proposal_kind": "late_stage_gap_probe",
+                        "proposal": ", ".join(term_items),
+                        "reason": (
+                            "Employer-inventory terms surfaced in run hints; "
+                            "demoted from opening retrieval to late-stage "
+                            "classifier signal per anti-employer-proxy rule."
+                        ),
+                        "supporting_run_refs": [batch.run_ref],
+                        "confidence": 0.42,
+                    }
+                else:
+                    brief_recs["rec-additional-search-terms"] = {
+                        "recommendation_id": "rec-additional-search-terms",
+                        "target_field": "additional_search_terms",
+                        "proposal_kind": "opening_retrieval",
+                        "proposal": ", ".join(term_items),
+                        "reason": "These terms surfaced from the best-performing parts of the run.",
+                        "supporting_run_refs": [batch.run_ref],
+                        "confidence": 0.78,
+                        "retrieval_update": {
+                            "update_type": "layer_update",
+                            "category": "promote_layer_terms",
+                            "target_field": "retrieval_design",
+                            "layer_name": "capability_proxies",
+                            "suggested_values": term_items,
+                            "reason": "Winning anchors should become typed capability or reality-filter terms.",
+                        },
+                    }
 
             for gap in report_analysis.get("coverage_gaps", []) or report.get(
                 "coverage_gaps", []
@@ -1665,6 +1708,7 @@ def _load_runtime_summary(db_path: Path, run_id: int | None = None) -> dict:
                   candidates_discovered,
                   facial_yes_count,
                   facial_no_count,
+                  facial_borderline_count,
                   saves_count,
                   rejected_count
                 FROM work_units
@@ -1690,6 +1734,7 @@ def _load_runtime_summary(db_path: Path, run_id: int | None = None) -> dict:
                   candidates_discovered,
                   facial_yes_count,
                   facial_no_count,
+                  facial_borderline_count,
                   saves_count,
                   rejected_count
                 FROM work_units
@@ -1720,6 +1765,7 @@ def _load_runtime_summary(db_path: Path, run_id: int | None = None) -> dict:
         "candidate_volume": 0,
         "facial_yes": 0,
         "facial_no": 0,
+        "facial_borderline": 0,
         "saved": 0,
         "rejected": 0,
     }
@@ -1727,9 +1773,16 @@ def _load_runtime_summary(db_path: Path, run_id: int | None = None) -> dict:
         payload = _loads_json(row["payload_json"])
         checkpoint = _loads_json(row["checkpoint_json"])
         metrics = _loads_json(row["metrics_json"])
+        # C2 (slice 15): include facial_borderline_count in the YES+NO+BORDERLINE
+        # floor so the candidate-volume estimate stays honest if a future code
+        # path persists raw FACIAL_BORDERLINE rows. With slices 13/14 active,
+        # this term is 0.
+        facial_borderline_count = int(row["facial_borderline_count"] or 0)
         candidate_volume = max(
             int(row["candidates_discovered"] or 0),
-            int(row["facial_yes_count"] or 0) + int(row["facial_no_count"] or 0),
+            int(row["facial_yes_count"] or 0)
+            + int(row["facial_no_count"] or 0)
+            + facial_borderline_count,
             int(metrics.get("profiles_processed", 0) or 0),
             int(metrics.get("candidates_count", 0) or 0),
             int(row["saves_count"] or 0) + int(row["rejected_count"] or 0),
@@ -1737,6 +1790,7 @@ def _load_runtime_summary(db_path: Path, run_id: int | None = None) -> dict:
         totals["candidate_volume"] += candidate_volume
         totals["facial_yes"] += int(row["facial_yes_count"] or 0)
         totals["facial_no"] += int(row["facial_no_count"] or 0)
+        totals["facial_borderline"] += facial_borderline_count
         totals["saved"] += int(row["saves_count"] or 0)
         totals["rejected"] += int(row["rejected_count"] or 0)
         work_units.append(
@@ -1760,6 +1814,7 @@ def _load_runtime_summary(db_path: Path, run_id: int | None = None) -> dict:
                 "candidate_volume": candidate_volume,
                 "facial_yes_count": int(row["facial_yes_count"] or 0),
                 "facial_no_count": int(row["facial_no_count"] or 0),
+                "facial_borderline_count": facial_borderline_count,
                 "saves_count": int(row["saves_count"] or 0),
                 "rejected_count": int(row["rejected_count"] or 0),
             }
@@ -1776,6 +1831,7 @@ def _load_runtime_summary(db_path: Path, run_id: int | None = None) -> dict:
         "candidate_volume": totals["candidate_volume"],
         "facial_yes": totals["facial_yes"],
         "facial_no": totals["facial_no"],
+        "facial_borderline": totals["facial_borderline"],
         "saved": totals["saved"],
         "rejected": totals["rejected"],
         "work_units": work_units,
@@ -3036,3 +3092,139 @@ def _lane_key_from_report_lane(report_lane: dict, performance: dict[int, dict]) 
                 perf.get("notes", ""),
             )
     return _slugify(_normalize_text(report_lane.get("lane")))
+
+
+# ---------------------------------------------------------------------------
+# Phase E Slice E1: public reader API for the market viewer.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class MarketRecord:
+    """Catalog row for the market viewer's list page.
+
+    Lightweight summary derived from `freshness` + `aggregate_metrics` so
+    the list payload doesn't ship the full 60-lane artifact for every
+    market. The detail page calls `load_artifact()` for the heavy data.
+    """
+
+    market_key: str
+    role_title: str
+    role_level: str
+    geography: str
+    last_updated_at: str
+    run_count: int
+    saved_count: int
+    aggregate_save_rate: float | None
+
+
+_MARKET_INTEL_FILENAME = "market-intel.json"
+
+
+def _markets_root(output_root: Path | None = None) -> Path:
+    """Resolve the `output/market_intelligence/` directory.
+
+    Mirrors the `_output_root` pattern but lazy-imports the canonical
+    constant so callers can pass an explicit override (test fixtures,
+    alternate install layouts).
+    """
+
+    if output_root is not None:
+        return Path(output_root) / "market_intelligence"
+    from shared.output_paths import MARKET_INTELLIGENCE_ROOT
+
+    return MARKET_INTELLIGENCE_ROOT
+
+
+def load_artifact(
+    market_key: str,
+    *,
+    output_root: Path | None = None,
+) -> MarketIntelArtifact | None:
+    """Load and parse the on-disk artifact for a market.
+
+    Returns ``None`` when the file is missing or unparseable so the
+    route layer can render a graceful empty state without crashing on
+    the first malformed artifact.
+    """
+
+    if not market_key:
+        return None
+    path = _markets_root(output_root) / market_key / _MARKET_INTEL_FILENAME
+    if not path.exists():
+        return None
+    try:
+        data = read_json(path)
+    except Exception:
+        return None
+    if not isinstance(data, dict):
+        return None
+    try:
+        return MarketIntelArtifact.from_dict(data)
+    except Exception:
+        return None
+
+
+def list_market_records(
+    *,
+    output_root: Path | None = None,
+) -> list[MarketRecord]:
+    """Walk `output/market_intelligence/` and return one record per
+    directory containing a parseable `market-intel.json`.
+
+    Sort: most-recently-updated first (artifact_updated_at desc) so the
+    list reads as "what Cloris has been studying lately." A directory
+    whose artifact fails to parse is skipped silently — the catalog is
+    a recruiter-facing surface and a malformed artifact is a backend
+    bug, not a viewer concern.
+    """
+
+    root = _markets_root(output_root)
+    if not root.exists() or not root.is_dir():
+        return []
+
+    out: list[MarketRecord] = []
+    for child in sorted(root.iterdir()):
+        if not child.is_dir():
+            continue
+        artifact_path = child / _MARKET_INTEL_FILENAME
+        if not artifact_path.exists():
+            continue
+        try:
+            data = read_json(artifact_path)
+        except Exception:
+            continue
+        if not isinstance(data, dict):
+            continue
+        # Catalog inclusion gate: skip artifacts missing the recruiter-
+        # facing identity block. A bare `{"schema_version": 1}` shouldn't
+        # surface as an "Unknown" row in the viewer.
+        if not isinstance(data.get("market_identity"), dict):
+            continue
+        market_identity = data["market_identity"]
+        freshness = data.get("freshness") or {}
+        aggregate_metrics = data.get("aggregate_metrics") or {}
+        market_key = (
+            str(market_identity.get("market_key") or "").strip() or child.name
+        )
+        save_rate = aggregate_metrics.get("save_rate")
+        try:
+            save_rate_f = float(save_rate) if save_rate is not None else None
+        except (TypeError, ValueError):
+            save_rate_f = None
+        out.append(
+            MarketRecord(
+                market_key=market_key,
+                role_title=str(market_identity.get("role_title") or "").strip(),
+                role_level=str(market_identity.get("role_level") or "").strip(),
+                geography=str(market_identity.get("geography") or "").strip(),
+                last_updated_at=str(
+                    freshness.get("artifact_updated_at") or ""
+                ).strip(),
+                run_count=int(aggregate_metrics.get("run_count") or 0),
+                saved_count=int(aggregate_metrics.get("saved_count") or 0),
+                aggregate_save_rate=save_rate_f,
+            )
+        )
+    out.sort(key=lambda r: r.last_updated_at, reverse=True)
+    return out

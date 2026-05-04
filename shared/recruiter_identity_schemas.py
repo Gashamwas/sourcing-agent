@@ -26,6 +26,11 @@ class PlausibleProfileReview:
     reachout_status: str = ""
     gate_final_action: str = ""
     gate_final_subreason: str = ""
+    # Post-open identity confirmation outcome for this opened card. Carried per-
+    # review so multi-profile ambiguity resolution (plan §5) can treat identity
+    # confirmation as the primary axis instead of fit/save.
+    identity_status: str = ""
+    identity_subreason: str = ""
 
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -49,6 +54,8 @@ class PlausibleProfileReview:
             reachout_status=str(data.get("reachout_status", "") or "").strip(),
             gate_final_action=str(data.get("gate_final_action", "") or "").strip(),
             gate_final_subreason=str(data.get("gate_final_subreason", "") or "").strip(),
+            identity_status=str(data.get("identity_status", "") or "").strip(),
+            identity_subreason=str(data.get("identity_subreason", "") or "").strip(),
         )
 
 
@@ -69,6 +76,11 @@ class RecruiterIdentityCandidate:
     ambiguity_reasons: list[str] = field(default_factory=list)
     recruiter_activity: RecruiterActivitySnapshot | None = None
     raw_card_text: str = ""
+    # Provenance: which bounded-query string surfaced this card. The resolver
+    # uses this to replay the correct query before any open/save operation
+    # (Recruiter-Identity-Collection-Followups §2). Empty means "the candidate
+    # was surfaced by the search the browser is currently on".
+    surfaced_query: str = ""
 
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -96,6 +108,7 @@ class RecruiterIdentityCandidate:
             ],
             recruiter_activity=RecruiterActivitySnapshot.from_dict(data.get("recruiter_activity")),
             raw_card_text=str(data.get("raw_card_text", "") or "").strip(),
+            surfaced_query=str(data.get("surfaced_query", "") or "").strip(),
         )
 
 
@@ -138,6 +151,32 @@ class RecruiterIdentityResolution:
     extraction_failed: bool = False
     plausible_profile_reviews: list[PlausibleProfileReview] = field(default_factory=list)
     ambiguity_multi_review: bool = False
+    # --- Identity-collection-first workflow (Recruiter-Identity-Collection-First) ---
+    # workflow_mode is "identity_collect" or "fit_gated_save"; both modes carry it
+    # so downstream consumers can treat legacy and identity-mode rows distinctly.
+    workflow_mode: str = ""
+    # identity_status: "confirmed" | "ambiguous" | "no_match" | "tool_failure" | ""
+    identity_status: str = ""
+    identity_subreason: str = ""
+    # collection_action: "COLLECT" | "MANUAL_REVIEW" | "REJECT" | ""
+    collection_action: str = ""
+    collection_subreason: str = ""
+    # project_save_state: "saved_now" | "already_saved" | "dry_run_skipped" |
+    #   "save_failed" | "not_attempted" | ""
+    project_save_state: str = ""
+    # Honest log of Recruiter search queries actually issued to the browser
+    # for this lead, in order. Recruiter-Identity-Collection-Cycle-Audit-Fixes
+    # §4 makes this attempted-only; the planned plan is in ``planned_queries``.
+    queries_tried: list[str] = field(default_factory=list)
+    # Bounded query plan that the resolver assembled before issuing any
+    # browser searches. Useful for debugging cases where the loop short-
+    # circuited and only a prefix of the plan ran.
+    planned_queries: list[str] = field(default_factory=list)
+    # Why _multi_query_lookup stopped issuing further queries (one of
+    # "score_above_threshold" | "high_confidence_match" | "no_new_urls" |
+    # "single_surface_name_variant_stop" | "plan_exhausted" | "").
+    stop_reason: str = ""
+    resolved_query: str = ""
 
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -195,4 +234,22 @@ class RecruiterIdentityResolution:
                 if isinstance(item, dict)
             ],
             ambiguity_multi_review=bool(data.get("ambiguity_multi_review", False)),
+            workflow_mode=str(data.get("workflow_mode", "") or "").strip(),
+            identity_status=str(data.get("identity_status", "") or "").strip(),
+            identity_subreason=str(data.get("identity_subreason", "") or "").strip(),
+            collection_action=str(data.get("collection_action", "") or "").strip(),
+            collection_subreason=str(data.get("collection_subreason", "") or "").strip(),
+            project_save_state=str(data.get("project_save_state", "") or "").strip(),
+            queries_tried=[
+                str(item).strip()
+                for item in data.get("queries_tried", []) or []
+                if str(item).strip()
+            ],
+            planned_queries=[
+                str(item).strip()
+                for item in data.get("planned_queries", []) or []
+                if str(item).strip()
+            ],
+            stop_reason=str(data.get("stop_reason", "") or "").strip(),
+            resolved_query=str(data.get("resolved_query", "") or "").strip(),
         )

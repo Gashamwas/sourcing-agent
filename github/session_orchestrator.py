@@ -21,6 +21,7 @@ import time
 
 from shared.output_paths import resolve_github_state_dir
 
+from github.client import GitHubAuthError
 from github.governor import (
     GitHubGovernor,
     GitHubGovernorLimitReached,
@@ -89,6 +90,7 @@ async def run_day_cycle(
 
     session_count = 0
     force_shutdown = False
+    exit_code = 0
 
     def _handler(sig, frame):
         nonlocal force_shutdown
@@ -119,25 +121,38 @@ async def run_day_cycle(
         governor.start_session()
         session_count += 1
         _print(f"Session {session_num} starting (#{session_count} this cycle)")
+        end_reason = "normal"
+        fatal_stop = False
 
         try:
             stats = await _run_session(brief_path, output_dir, resume=(resume and session_count == 1))
+        except GitHubAuthError as e:
+            _print(f"Fatal GitHub auth error: {e}")
+            stats = {"saved": 0, "enrichments": 0, "candidates_enriched": 0}
+            end_reason = "github_auth_error"
+            fatal_stop = True
+            exit_code = 1
         except GitHubGovernorLimitReached as e:
             _print(f"Session ended: {e.reason}")
             stats = {"saved": 0, "enrichments": 0}
+            end_reason = e.reason
         except Exception as e:
             _print(f"Session error: {e}")
             stats = {"saved": 0, "enrichments": 0}
+            end_reason = "error"
 
         # End session — use stats from the pipeline (governor in session_orchestrator
         # doesn't track enrichments; the pipeline's internal governor does)
         record_session_end(
             session_num,
             enrichments=stats.get("candidates_enriched", 0),
-            reason="normal",
+            reason=end_reason,
             stats=stats,
         )
         _print(f"Session {session_num} complete: {stats.get('saved', 0)} saves")
+
+        if fatal_stop:
+            break
 
         if single_session:
             _print("Single session mode — done.")
@@ -155,6 +170,7 @@ async def run_day_cycle(
             break
 
     _print(f"Day cycle complete. {session_count} sessions run.")
+    return exit_code
 
 
 # ---------------------------------------------------------------------------
@@ -192,12 +208,14 @@ def main():
             )
         )
 
-    asyncio.run(run_day_cycle(
+    exit_code = asyncio.run(run_day_cycle(
         brief_path=args.brief,
         output_dir=state_dir,
         single_session=args.single_session,
         resume=args.resume,
     ))
+    if exit_code:
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":

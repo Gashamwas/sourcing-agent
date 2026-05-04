@@ -42,7 +42,15 @@ V2_BRIEF_REQUIRED_FIELDS = frozenset({
 
 FAILURE_DECISIONS = frozenset({"PARSE_FAILURE", "JUDGMENT_FAILURE"})
 
-ACTIVE_FACIAL_DECISIONS = frozenset({"FACIAL_YES", "FACIAL_NO"})
+# FACIAL_BORDERLINE was added at Step A of the slice 12 promotion plan
+# (see plans/perplexity-evidence-augmentation.md and the
+# execution-boundary audit report). At Step A the constant is a *type-system
+# widening* only -- no parser, validator, orchestrator, runtime-state, or
+# persistence layer recognizes it yet. Step B will widen the parser and
+# orchestrator behind a feature flag with FACIAL_BORDERLINE aliasing to
+# FACIAL_YES at the orchestrator boundary. Step C wires it as a real third
+# state. Until then this constant is intentionally dark.
+ACTIVE_FACIAL_DECISIONS = frozenset({"FACIAL_YES", "FACIAL_NO", "FACIAL_BORDERLINE"})
 COMPAT_FACIAL_DECISIONS = frozenset({"FACIAL_SKIP"})
 FACIAL_DECISIONS = ACTIVE_FACIAL_DECISIONS | COMPAT_FACIAL_DECISIONS | FAILURE_DECISIONS
 
@@ -105,6 +113,7 @@ TARGET_CANDIDATE_LIFECYCLE = (
 RUN_LOG_EVENTS = frozenset({
     "adaptation_error",
     "activity_saturated_preview_skip",
+    "api_budget_exhausted",
     "architecture_pivot",
     "bias_alert",
     "block_adaptation",
@@ -114,9 +123,15 @@ RUN_LOG_EVENTS = frozenset({
     "candidate_saved",
     "circuit_breaker",
     "early_exit",
+    "external_evidence_enriched_judge_failed",
+    "external_evidence_failed",
+    "external_evidence_fetched",
+    "external_evidence_shadow_unhandled_exception",
+    "external_evidence_skipped",
     "facial_error",
     "final_error",
     "forced_narrow",
+    "github_auth_failed",
     "go_back_error",
     "glance_assess",
     "insufficient_data",

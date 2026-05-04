@@ -51,6 +51,7 @@ def _import_pipeline_with_stubs():
 
         client_mod = sys.modules["github.client"]
         client_mod.GitHubClient = MagicMock
+        client_mod.GitHubAuthError = type("GitHubAuthError", (RuntimeError,), {"status_code": 401})
 
         enricher_mod = sys.modules["github.enricher"]
         enricher_mod.GitHubEnricher = MagicMock
@@ -274,6 +275,27 @@ class TestQueryErrorHandling:
         asyncio.run(pipeline._execute_queries(client, enricher, progress))
         assert query.status == "error"
         assert "boom" in query.notes
+
+    def test_auth_error_stops_query_loop(self):
+        """Credential failures are fatal, not per-query misses."""
+        pipeline = _make_pipeline()
+        query = _make_query()
+        progress = GitHubProgress(brief_name="test")
+        progress.queries = [query]
+
+        client = MagicMock()
+        client.limiter.remaining.return_value = 5000
+        enricher = MagicMock()
+
+        auth_error = github_orchestrator.GitHubAuthError("bad credentials")
+        pipeline._execute_single_query = AsyncMock(side_effect=auth_error)
+        pipeline._save_progress = MagicMock()
+        pipeline._get_api_status = MagicMock(return_value={})
+
+        with pytest.raises(github_orchestrator.GitHubAuthError):
+            asyncio.run(pipeline._execute_queries(client, enricher, progress))
+
+        assert query.status == "in_progress"
 
     def test_error_query_retried_on_resume(self):
         """'error' queries are NOT in the skip set ('done', 'skipped')."""

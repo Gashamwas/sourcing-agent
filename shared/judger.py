@@ -17,14 +17,25 @@ from shared.failures import (
     judgment_failure_decision,
     parse_failure_decision,
 )
-from shared.schemas import CandidateSnippet, CandidateProfileSummary, OpusDecision
+from shared.schemas import (
+    CandidateSnippet,
+    CandidateProfileSummary,
+    ExternalCandidateEvidence,
+    OpusDecision,
+)
 from shared.llm_clients import opus_llm, opus_llm_cached, facial_llm
 from shared.brief_loader import Brief
 
 logger = logging.getLogger(__name__)
 
-# Valid decisions for old-brief prompt contracts
-_VALID_FACIAL = {"FACIAL_YES", "FACIAL_NO"}
+# Valid decisions for old-brief prompt contracts.
+# Step B of the FACIAL_BORDERLINE promotion plan widens this set to match
+# the parser's vocabulary so an old-brief code path that receives a
+# ``FACIAL_BORDERLINE`` (e.g. a future config experiment) does not route
+# through ``parse_failure_decision``. Persistence stays binary because
+# the orchestrator translates BORDERLINE -> YES at the parser-output
+# boundary; this set is the validator gate, not the persistence gate.
+_VALID_FACIAL = {"FACIAL_YES", "FACIAL_NO", "FACIAL_BORDERLINE"}
 _VALID_FULL = {"SAVE", "REJECT"}
 
 
@@ -533,6 +544,213 @@ Decide: SAVE or REJECT."""
     raw_decision = result.get("decision") if isinstance(result, dict) else None
     if raw_decision not in _VALID_FULL:
         logger.warning("full parse-failure: decision=%r (old-brief path)", raw_decision)
+        return parse_failure_decision(
+            stage="full",
+            candidate_name=summary.name,
+            profile_url=summary.profile_url,
+            reason="invalid_decision",
+            detail=f"decision={raw_decision!r}",
+        )
+    return OpusDecision(
+        stage="full",
+        decision=raw_decision,
+        path=result.get("path", "none"),
+        confidence=_safe_confidence(result.get("confidence", 0.5)),
+        rationale=result.get("rationale", ""),
+        candidate_name=summary.name,
+        profile_url=summary.profile_url,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 (shadow): Full judgment with external evidence augmentation
+# ---------------------------------------------------------------------------
+# Sibling to ``full_judge`` for slice 2 of perplexity-evidence-augmentation.
+# The v2 path uses the IDENTICAL ``assemble_full_evaluation_system`` system
+# prompt as ``full_judge`` so prompt-cache hits on the static prefix are
+# preserved; the external-evidence block is appended only to the user message.
+# ``full_judge`` itself is not called from here — they are siblings, not
+# layered. Failure parity with ``full_judge`` is required so behavior is
+# comparable on failure too.
+
+
+def _format_external_evidence_block(evidence: ExternalCandidateEvidence) -> str:
+    """Render external evidence as a deterministic, fenced text block.
+
+    Determinism note: lists that are user-visible (facts, ambiguities,
+    do_not_use_for_judgment, evidence_refs) are emitted in input order.
+    Fact blocks and inferences are emitted in input order too — the normalizer
+    already preserves provider order, and downstream tests assert on stable
+    output for the same input.
+    """
+
+    lines: list[str] = []
+    lines.append("## External Evidence (NOT a judgment — augmentation only)")
+    trigger_reason = evidence.trigger_reason or "unspecified"
+    identity_conf = (
+        f"{evidence.identity_confidence:.2f}"
+        if isinstance(evidence.identity_confidence, (int, float))
+        else "0.00"
+    )
+    lines.append(
+        f"trigger_reason={trigger_reason} | identity_confidence={identity_conf}"
+    )
+
+    lines.append("")
+    lines.append("### Sourced facts")
+    if evidence.external_fact_blocks:
+        for block in evidence.external_fact_blocks:
+            topic = block.topic or "(no topic)"
+            quality = block.source_quality or "unknown"
+            lines.append(f"- topic: {topic} (source_quality={quality})")
+            if block.facts:
+                for fact in block.facts:
+                    refs = ", ".join(ref.url for ref in block.evidence_refs if ref.url)
+                    refs_text = f" [refs: {refs}]" if refs else ""
+                    lines.append(f"  - {fact}{refs_text}")
+            else:
+                lines.append("  - (no facts)")
+    else:
+        lines.append("(none)")
+
+    lines.append("")
+    lines.append("### Model inferences (not first-party facts; treat with caution)")
+    if evidence.external_inferences:
+        for inference in evidence.external_inferences:
+            try:
+                conf_text = f"{float(inference.confidence):.2f}"
+            except (TypeError, ValueError):
+                conf_text = "0.00"
+            basis = ", ".join(ref.url for ref in inference.basis_refs if ref.url)
+            basis_text = f" [basis: {basis}]" if basis else ""
+            lines.append(
+                f"- {inference.claim} (confidence={conf_text}){basis_text}"
+            )
+    else:
+        lines.append("(none)")
+
+    lines.append("")
+    lines.append("### Unresolved ambiguities")
+    if evidence.unresolved_ambiguities:
+        for amb in evidence.unresolved_ambiguities:
+            lines.append(f"- {amb}")
+    else:
+        lines.append("(none)")
+
+    if evidence.do_not_use_for_judgment:
+        lines.append("")
+        lines.append("### Do not use for judgment")
+        for item in evidence.do_not_use_for_judgment:
+            lines.append(f"- {item}")
+
+    return "\n".join(lines)
+
+
+def full_judge_with_external_evidence(
+    summary: CandidateProfileSummary,
+    evidence: ExternalCandidateEvidence,
+    brief: Brief | None = None,
+) -> OpusDecision:
+    """Full judgment with external evidence augmentation (shadow path).
+
+    Mirrors ``full_judge`` exactly in v2 / old-brief branching so the two
+    paths can be compared 1:1. The system prompt is *unchanged* relative to
+    ``full_judge`` to preserve prompt-cache hits on the static prefix; the
+    external-evidence block is appended only to the user message.
+
+    Failure absorption matches ``full_judge``: returns
+    ``judgment_failure_decision`` / ``parse_failure_decision`` rather than
+    raising.
+    """
+
+    b = brief or _brief
+    if not b:
+        raise RuntimeError("Judger not initialized. Call init_judger(brief) or pass brief.")
+
+    evidence_block = _format_external_evidence_block(evidence)
+
+    if b.has_v2_schema:
+        system = assemble_full_evaluation_system(b._new_brief)
+        profile_text = _profile_to_text(summary)
+        user_msg = profile_text + "\n\n" + evidence_block
+        try:
+            raw = opus_llm_cached(system, user_msg, expect_json=False)
+        except Exception as e:
+            logger.warning("V2 full judge (with evidence) exception: %s", e)
+            return judgment_failure_decision(
+                stage="full",
+                candidate_name=summary.name,
+                profile_url=summary.profile_url,
+                error=e,
+                source="judgment",
+            )
+        result = parse_full_evaluation_response(raw)
+        if result.match_type and result.capability_area:
+            path = f"{result.match_type}:{result.capability_area}"
+        elif result.match_type:
+            path = result.match_type.lower()
+        else:
+            path = result.capability_area or "none"
+        if result.transferability and result.transferability not in ("N/A", None):
+            path += f"|{result.transferability}"
+        return OpusDecision(
+            stage="full",
+            decision=result.decision,
+            path=path,
+            confidence=result.confidence,
+            rationale=result.summary or result.case_for or "[parse error]",
+            candidate_name=summary.name,
+            profile_url=summary.profile_url,
+            post_save_modifier=getattr(result, 'post_save_modifier', 'NONE'),
+        )
+
+    system = _build_full_system(b)
+
+    exp_text = ""
+    for e in summary.experiences:
+        bullets = "; ".join(e.summary_bullets) if e.summary_bullets else "no details"
+        exp_text += f"- {e.title} at {e.company} ({e.start}-{e.end}): {bullets}\n"
+
+    edu_text = ""
+    for e in summary.education:
+        edu_text += f"- {e.degree} in {e.field}, {e.school} ({e.start}-{e.end})\n"
+
+    skills_text = ", ".join(summary.skills_snippet) if summary.skills_snippet else "none listed"
+
+    user_prompt = f"""## Candidate Profile
+Name: {summary.name}
+Headline: {summary.headline}
+
+Experience:
+{exp_text if exp_text else "None listed"}
+
+Education:
+{edu_text if edu_text else "None listed"}
+
+Skills: {skills_text}
+
+{evidence_block}
+
+Decide: SAVE or REJECT."""
+
+    try:
+        result = opus_llm_cached(system, user_prompt, expect_json=True)
+    except Exception as e:
+        logger.warning("old-brief full judge (with evidence) exception: %s", e)
+        return judgment_failure_decision(
+            stage="full",
+            candidate_name=summary.name,
+            profile_url=summary.profile_url,
+            error=e,
+            source="judgment",
+        )
+
+    raw_decision = result.get("decision") if isinstance(result, dict) else None
+    if raw_decision not in _VALID_FULL:
+        logger.warning(
+            "full parse-failure (with evidence): decision=%r (old-brief path)",
+            raw_decision,
+        )
         return parse_failure_decision(
             stage="full",
             candidate_name=summary.name,

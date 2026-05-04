@@ -588,7 +588,7 @@ def _insert_linkedin_attempt_payloads(
                             "candidate_name": candidate_name,
                             "skills_snippet": "agents, deployment",
                         },
-                        "final_decision": {
+                        "full_decision": {
                             "candidate_name": candidate_name,
                             "decision": decision,
                             "confidence": 0.81,
@@ -3758,3 +3758,244 @@ def test_finalize_run_snapshot_auto_updates_market_intel(monkeypatch, tmp_path):
     event_names = [item["event"] for item in events]
     assert "run_snapshot_finalized" in event_names
     assert "market_intel_updated" in event_names
+
+
+# ---------------------------------------------------------------------------
+# Behavior-first / anti-employer-proxy guardrails on engine recommendations.
+#
+# These tests pin that lane and noise evidence drive brief recommendations
+# while employer-inventory text is demoted: the engine still surfaces the
+# information for narrative context, but it loses opening-retrieval primacy
+# and is reframed as late-stage classifier signal targeting
+# employer_signal_rules instead of search_priorities/additional_search_terms.
+# Doctrine: docs/brief-authoring-guide.md ("Titles, employers, and keywords
+# can support the pattern, but they should not be the pattern.")
+# ---------------------------------------------------------------------------
+
+
+def _make_synthesis_inputs(*, brief_iteration_hints: dict) -> dict:
+    """Build the minimal pieces HeuristicMarketIntelSynthesisBackend needs.
+
+    Returns a dict keyed for direct use by ``synthesize`` and the small set
+    of inputs the recommendation-emission path reads. Lane intelligence is
+    populated so the lane-narrative path stays the primary surface even
+    while we exercise employer-inventory hints.
+    """
+    deterministic_summary = {
+        "lane_intelligence": [
+            {
+                "lane_key": "research_copilot",
+                "lane_label": "Research copilot",
+                "supporting_run_refs": ["run-1"],
+                "dominant_anchors": ["research copilot", "knowledge worker copilots"],
+                "evidence_summary": "Highest absolute save count.",
+                "metrics": {"saves": 8, "candidates": 40},
+                "status": "live",
+            }
+        ],
+        "aggregate_metrics": {"save_rate": 0.12, "saved_count": 14},
+        "channel_summaries": {},
+    }
+    report = {
+        "winning_lanes": [
+            {
+                "lane": "Research copilot",
+                "string_ids": [2],
+                "candidate_examples": ["Mithun Azhagappan"],
+                "evidence": "Highest absolute save count.",
+                "why_it_worked": "Specific workflow language.",
+                "recommended_action": "Promote this lane earlier.",
+            }
+        ],
+        "underperforming_lanes": [],
+        "coverage_gaps": [],
+        "noise_patterns": [
+            {
+                "pattern": "Product-heavy AI leadership",
+                "evidence": "Several product leaders failed builder bar.",
+                "mitigation": "Strengthen builder-authorship language.",
+            }
+        ],
+        "saved_candidate_patterns": {
+            "archetype_distribution": [
+                {"archetype": "BFSI-native GenAI converts", "count": 6}
+            ],
+            "common_employers": [
+                {"employer": "JPMorgan", "count": 3, "note": "Bank GenAI converts."}
+            ],
+        },
+        "brief_iteration_hints": brief_iteration_hints,
+        "string_performance": [
+            {"string_id": 2, "name": "Research copilot lane"}
+        ],
+    }
+    market_identity = MarketIdentity(
+        market_key="head_of_applied_ai_lab__new_york_new_york_united_states__ic6",
+        role_title="Head of Applied AI Lab",
+        role_level="ic6",
+        geography="New York, New York, United States",
+        channels_seen=["linkedin"],
+        brief_ids_seen=["head-ai-lab"],
+        brief_versions_seen=["1.0"],
+    )
+    batch = MarketEvidenceBatch(
+        run_ref="run-1",
+        source="linkedin",
+        output_dir="/tmp/snapshot",
+        brief_version="1.0",
+        generated_at="2026-04-25T00:00:00+00:00",
+        report=report,
+        research_context={"deterministic_snapshot": deterministic_summary},
+        runtime_summary={"saves": 14, "candidates": 120},
+    )
+    return {
+        "market_identity": market_identity,
+        "deterministic_summary": deterministic_summary,
+        "evidence_batches": [batch],
+    }
+
+
+def _synthesize(inputs: dict) -> dict:
+    backend = engine_mod.HeuristicMarketIntelSynthesisBackend()
+    return backend.synthesize(
+        market_identity=inputs["market_identity"],
+        deterministic_summary=inputs["deterministic_summary"],
+        evidence_batches=inputs["evidence_batches"],
+        previous_artifact=None,
+        planner_result=None,
+        external_research=None,
+    )
+
+
+def test_engine_keeps_lane_intelligence_primary_when_hints_are_lane_shaped():
+    """Lane-shaped brief_iteration_hints stay first-class opening retrieval.
+
+    This is the control case: when search_priorities and
+    additional_search_terms are behavioral / lane-anchored, no demotion
+    should fire. confidence stays high, target_field stays as the search
+    fields, proposal_kind reads ``opening_retrieval``.
+    """
+    inputs = _make_synthesis_inputs(
+        brief_iteration_hints={
+            "search_priorities": [
+                "Payments / transaction-banking builders",
+            ],
+            "additional_search_terms": [
+                "payment orchestration",
+                "transaction banking",
+            ],
+        }
+    )
+    result = _synthesize(inputs)
+    recs_by_id = {rec["recommendation_id"]: rec for rec in result["brief_recommendations"]}
+    priorities_rec = recs_by_id["rec-search-priorities"]
+    terms_rec = recs_by_id["rec-additional-search-terms"]
+
+    assert priorities_rec["target_field"] == "search_priorities"
+    assert priorities_rec["proposal_kind"] == "opening_retrieval"
+    assert priorities_rec["confidence"] >= 0.7
+    assert "retrieval_update" in priorities_rec
+
+    assert terms_rec["target_field"] == "additional_search_terms"
+    assert terms_rec["proposal_kind"] == "opening_retrieval"
+    assert terms_rec["confidence"] >= 0.7
+    assert "retrieval_update" in terms_rec
+
+    # Noise patterns remain a primary synthesis surface alongside lanes.
+    assert result["noise_patterns"], "Noise patterns must remain primary surface"
+    assert any(
+        "Product-heavy" in pattern["label"]
+        for pattern in result["noise_patterns"]
+    )
+
+
+def test_engine_demotes_employer_cluster_priorities_to_late_stage_gap_probe():
+    """Employer-inventory search_priorities are demoted, not opening retrieval.
+
+    When a run hint is dominated by employer-cluster prose, the engine
+    must reframe the recommendation as a late-stage gap probe targeting
+    employer_signal_rules with reduced confidence, not as opening
+    retrieval. The retrieval_update layer is dropped on demoted items so
+    employer findings cannot drive entry signals.
+    """
+    inputs = _make_synthesis_inputs(
+        brief_iteration_hints={
+            "search_priorities": [
+                "Buy-side AI lab heads at BlackRock, Bridgewater, Citadel, Two Sigma, Point72, AQR",
+            ],
+            "additional_search_terms": [
+                "behavioral build evidence: production agent platforms",
+            ],
+        }
+    )
+    result = _synthesize(inputs)
+    recs_by_id = {rec["recommendation_id"]: rec for rec in result["brief_recommendations"]}
+    priorities_rec = recs_by_id["rec-search-priorities"]
+
+    assert priorities_rec["target_field"] == "employer_signal_rules"
+    assert priorities_rec["proposal_kind"] == "late_stage_gap_probe"
+    assert priorities_rec["confidence"] < 0.6
+    assert "retrieval_update" not in priorities_rec
+    assert "anti-employer-proxy rule" in priorities_rec["reason"]
+
+
+def test_engine_demotes_employer_inventory_terms_to_classifier_signal():
+    """Employer-inventory additional_search_terms get the same demotion.
+
+    Even when search_priorities are clean, employer-inventory terms must
+    be redirected from opening retrieval to employer_signal_rules.
+    """
+    inputs = _make_synthesis_inputs(
+        brief_iteration_hints={
+            "search_priorities": [
+                "Capital markets AI builders with executive-builder scope",
+            ],
+            "additional_search_terms": [
+                "company-first anchors: BlackRock, Bridgewater, Citadel, Two Sigma, Point72, AQR",
+            ],
+        }
+    )
+    result = _synthesize(inputs)
+    recs_by_id = {rec["recommendation_id"]: rec for rec in result["brief_recommendations"]}
+    priorities_rec = recs_by_id["rec-search-priorities"]
+    terms_rec = recs_by_id["rec-additional-search-terms"]
+
+    # Priorities are still behavioral, so they keep opening retrieval.
+    assert priorities_rec["target_field"] == "search_priorities"
+    assert priorities_rec["proposal_kind"] == "opening_retrieval"
+
+    # Terms are employer-inventory, so they are demoted.
+    assert terms_rec["target_field"] == "employer_signal_rules"
+    assert terms_rec["proposal_kind"] == "late_stage_gap_probe"
+    assert terms_rec["confidence"] < 0.6
+    assert "retrieval_update" not in terms_rec
+
+
+def test_engine_employer_findings_remain_secondary_classifier():
+    """common_employers data still flows to employer_signal_intelligence.
+
+    Even after the demotion of employer-inventory hints, the engine must
+    continue to surface common_employers as employer_signal_intelligence
+    so operators retain visibility for late-stage classification. The
+    point is to keep them out of opening retrieval, not to delete them.
+    """
+    inputs = _make_synthesis_inputs(
+        brief_iteration_hints={
+            "search_priorities": [
+                "JPMorgan, Goldman, Morgan Stanley, Citi, Barclays, HSBC, UBS, Deutsche Bank engineers",
+            ],
+            "additional_search_terms": [],
+        }
+    )
+    result = _synthesize(inputs)
+
+    # The literal cluster recommendation is demoted...
+    recs_by_id = {rec["recommendation_id"]: rec for rec in result["brief_recommendations"]}
+    priorities_rec = recs_by_id["rec-search-priorities"]
+    assert priorities_rec["proposal_kind"] == "late_stage_gap_probe"
+
+    # ...but employer findings still appear in employer_signal_intelligence.
+    assert any(
+        signal["label"].lower() == "jpmorgan"
+        for signal in result["employer_signal_intelligence"]
+    )

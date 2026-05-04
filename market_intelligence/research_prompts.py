@@ -934,3 +934,217 @@ def build_perplexity_edge_case_research_response_format() -> dict:
             },
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Briefing polish — Cloris-voice rewrite over planner output.
+# ---------------------------------------------------------------------------
+#
+# These prompts power BriefingPolishBackend in
+# market_intelligence/briefing_polish.py. They produce the recruiter-
+# facing reflection at Gate 1 of The Reflection HITL flow, replacing
+# the v1 path that surfaced planner_summary verbatim (3-of-4 real
+# markets read "Tracking 1 active hypotheses across N run(s)" — a
+# templated, ungrounded string).
+
+
+def build_briefing_polish_system_prompt() -> str:
+    """System prompt for the briefing polish step.
+
+    SOURCE OF TRUTH: docs/cloris-surface-design-rules.md R18 + R21.
+    Last verified against rules doc on 2026-05-03.
+    When updating this prompt, re-read the rules doc and update the date.
+    Drift between this prompt and the rules doc is the failure mode this
+    cross-reference is designed to slow down.
+
+    Voice extracts (verbatim from the rules doc):
+    - R18: "Cloris narrates her own work; she does not address the user.
+      'She paused on the daily limit' beats 'Your run hit the governor.'
+      beats 'RUN PAUSED.' High-stakes / error states drop character
+      entirely. Editorial voice survives only in calm and ambient surfaces."
+    - R21: "Operational copy is plain product language; voice copy is
+      character. The two NEVER overlap. A loading message during a fetch
+      is operational ('Loading the run…'), not voice ('Looking for her
+      glasses.'). Voice belongs in voice-copy zones; operational belongs
+      everywhere else."
+    """
+
+    return """You are Cloris's editorial voice. You read planner output from a recruiting market-intelligence agent and write a recruiter-facing reflection on the just-finished sourcing run.
+
+VOICE RULES (from docs/cloris-surface-design-rules.md R18 + R21):
+- Cloris narrates her own work in first person ("I read 84 candidates...", "I want to look at..."). She does NOT address the user as "you" except for the optional steering acknowledgment.
+- "She paused on the daily limit" beats "Your run hit the governor." beats "RUN PAUSED." Editorial voice; not operational; not shouty.
+- High-stakes and no-signal cases drop character entirely. If the run produced no candidates, write plainly: "I don't have enough from this run to draw conclusions yet — let me read the broader market."
+- Operational copy and voice copy never overlap. This is voice copy. Render in editorial register.
+
+PARAGRAPH RULES:
+- 2 to 4 sentences. Period.
+- Lead with a SPECIFIC named signal from the structured input: a candidate count, save count, save rate as a percent, the strongest lane name, a channel name. Never "Tracking N hypotheses." Never generic counts.
+- Past-tense for what happened ("I read 47 candidates and saved 3"). Present-tense for intent ("I want to look at...").
+- If the recruiter added a steering note, weave it in as a final sentence: "Per your note, I'll also factor in: \\"<note>\\"."
+- Cite ONLY values present in the structured input. Do NOT invent numbers, lane names, or candidate names. If a signal isn't present, omit the clause that would have cited it.
+
+ENGINE IDENTIFIERS — TRANSLATE, DO NOT QUOTE:
+- The structured input may contain engine-layer identifiers (lane keys, family names) that look like `devprod_genai`, `forward_deployed_engineering`, `colombian_academic_ml`. These are jargon — the recruiter has never seen them and never should.
+- Each lane in `top_lanes` carries both `lane_name` (recruiter-readable) and `lane_key` (engine identifier). USE `lane_name`. NEVER quote `lane_key`.
+- The same applies to anything else in the input that looks like a snake_case identifier: translate to a recruiter-readable form (humanize: replace underscores with spaces, title-case the result) before citing it in the paragraph.
+- Concrete: write "DevProd GenAI" not "devprod_genai"; write "Forward Deployed Engineering" not "forward_deployed_engineering". If a translation isn't obvious, omit the clause rather than quoting the raw identifier.
+
+BANNED TOKENS (these are engineer jargon — the recruiter never sees them):
+- hypothesis, Tracking, lane_key, planner, critic, artifact
+- Any snake_case identifier from the input. The output is automatically rejected if it contains an underscore-bearing identifier; the recruiter never sees rejected output but you waste your turn.
+
+INTENTIONS RULES:
+- Up to 4 items. Each is one sentence in present-tense intentional voice ("Whether the comp band is realistic for Staff Engineers in NYC right now").
+- Map each item to a priority: high | medium | low. Default medium.
+- These are what Cloris wants to find out. Use the planner's external_research_focus as the primary source; if empty, default to one generic item.
+
+Return JSON ONLY with this exact shape:
+{
+  "paragraph": "2-4 sentence reflection in Cloris voice, grounded in specific values from the input.",
+  "intentions": [
+    {"text": "What I want to find out, one sentence.", "priority": "high|medium|low"}
+  ]
+}"""
+
+
+def build_briefing_polish_user_prompt(
+    *,
+    market_identity: MarketIdentity,
+    deterministic_summary: dict,
+    planner_result,  # PlannerResult; not type-hinted to avoid circular import
+    steering_notes: list[str] | None = None,
+) -> str:
+    """User prompt: structured input the polish call grounds itself in.
+
+    Pass-through of the structured signals — the prompt is intentionally
+    a JSON dump rather than prose, so the LLM has explicit access to
+    every value it might cite. The system prompt's containment rule is
+    enforced both at the LLM (instruction) and post-call (programmatic
+    check in BriefingPolishBackend).
+    """
+
+    agg = (deterministic_summary or {}).get("aggregate_metrics") or {}
+    lanes = (deterministic_summary or {}).get("lane_intelligence") or []
+    # Trim lanes to top 5 by saved_count then candidate_volume so the
+    # prompt stays compact; the LLM only needs the strongest signals.
+    # Each lane carries BOTH the recruiter-readable display name and
+    # the engine lane_key. The system prompt instructs the LLM to use
+    # display_name and never quote lane_key. _humanize_lane_key()
+    # provides the fallback when no display name exists.
+    sortable_lanes = []
+    for lane in lanes:
+        if not isinstance(lane, dict):
+            continue
+        lane_key_raw = str(lane.get("lane_key") or "").strip()
+        sortable_lanes.append(
+            {
+                "lane_name": lane_display_name(lane),
+                "lane_key": lane_key_raw,
+                "saved_count": int(lane.get("saved_count") or 0),
+                "candidate_volume": int(lane.get("candidate_volume") or 0),
+                "status": lane.get("status", ""),
+            }
+        )
+    sortable_lanes.sort(
+        key=lambda d: (d["saved_count"], d["candidate_volume"]),
+        reverse=True,
+    )
+
+    # Lane translation table: lane_key → recruiter-readable display name.
+    # Surfaced separately in the prompt as an explicit reference the
+    # LLM consults when tempted to quote a raw key. Built from ALL
+    # lanes (not just top 5) so the LLM has a translation for any
+    # lane it might be tempted to reference.
+    lane_translation_table = {
+        str(lane.get("lane_key") or "").strip(): lane_display_name(lane)
+        for lane in lanes
+        if isinstance(lane, dict) and lane.get("lane_key")
+    }
+
+    payload = {
+        "market": {
+            "role_title": market_identity.role_title,
+            "geography": market_identity.geography,
+            "role_level": market_identity.role_level,
+        },
+        "run_signals": {
+            "run_count": int(agg.get("run_count") or 0),
+            "saved_count": int(agg.get("saved_count") or 0),
+            "rejected_count": int(agg.get("rejected_count") or 0),
+            "save_rate": float(agg.get("save_rate") or 0.0),
+            "facial_yes_rate": float(agg.get("facial_yes_rate") or 0.0),
+            "candidate_volume_by_channel": agg.get(
+                "candidate_volume_by_channel"
+            )
+            or {},
+        },
+        "top_lanes": sortable_lanes[:5],
+        "lane_translation_table": lane_translation_table,
+        "external_research_focus": list(
+            getattr(planner_result, "external_research_focus", []) or []
+        )[:4],
+        "edge_case_research_focus": list(
+            getattr(planner_result, "edge_case_research_focus", []) or []
+        )[:2],
+        "operator_steering_notes": [
+            _normalize_steering(note)
+            for note in (steering_notes or [])
+            if _normalize_steering(note)
+        ],
+    }
+
+    return (
+        "Write the recruiter-facing reflection for this run.\n\n"
+        "INPUT (structured — use ONLY these values; do NOT invent):\n"
+        f"{_dump_bundle(payload)}\n\n"
+        "When citing a lane in the paragraph, use `lane_name` from "
+        "`top_lanes` or look up the recruiter-readable name in "
+        "`lane_translation_table`. NEVER quote a raw `lane_key` or any "
+        "underscore-bearing identifier from this input.\n\n"
+        "Return JSON only, matching the schema in the system prompt."
+    )
+
+
+def lane_display_name(lane: dict) -> str:
+    """Resolve a recruiter-readable display name for a lane.
+
+    Prefers the artifact's explicit ``display_name`` when set; falls
+    back to humanizing the ``lane_key`` (underscores → spaces, title-
+    case). The humanize fallback is deterministic and always produces
+    a non-snake_case string, which is what the post-LLM
+    snake_case_token_detected check enforces.
+
+    Public — also imported by ``market_intelligence.briefing_polish``
+    for the heuristic paragraph builder so both surfaces translate
+    lane keys identically. Drift between the two paths produces
+    inconsistent recruiter-facing names for the same underlying lane.
+    """
+
+    explicit = str(lane.get("display_name") or "").strip()
+    if explicit and "_" not in explicit:
+        return explicit
+    return humanize_lane_key(str(lane.get("lane_key") or ""))
+
+
+def humanize_lane_key(lane_key: str) -> str:
+    """Convert ``forward_deployed_engineering`` → ``Forward Deployed Engineering``.
+
+    Idempotent on already-humanized strings (no underscores → returned
+    title-cased). Empty / whitespace input returns empty string so
+    upstream callers can decide whether to omit the clause entirely.
+
+    Public — imported by both this module's prompt builder and
+    ``market_intelligence.briefing_polish`` for the heuristic
+    paragraph builder. The shared helper guarantees both surfaces
+    produce the same humanization for any given lane_key.
+    """
+
+    text = " ".join(str(lane_key or "").replace("_", " ").split()).strip()
+    if not text:
+        return ""
+    return text.title()
+
+
+def _normalize_steering(note: str) -> str:
+    return " ".join(str(note or "").split()).strip()

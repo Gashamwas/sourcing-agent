@@ -105,6 +105,16 @@ class BiasMonitor:
         self._decisions: list[DecisionRecord] = []
         self._per_string: dict[str, list[DecisionRecord]] = {}
         self._alerts_fired: set[str] = set()  # Dedup key: f"{alert_type}:{string_id}"
+        # C3: pre-alias borderline observability counter. Counts raw
+        # FACIAL_BORDERLINE the parser emitted, before the orchestrator's
+        # boundary alias (_normalize_facial_decision_for_persistence) translates
+        # it to FACIAL_YES. Does NOT feed alarms; surfaced only via
+        # session_summary() for diagnostic visibility.
+        # See slice-12 / slice-13 / C3 audits for the Option B + Option α
+        # decision rationale: alarm logic continues to see post-alias decisions
+        # via record_decision; this dict is the only path that distinguishes
+        # "confident YES" from "aliased borderline" in the session summary.
+        self._facial_borderline_counts: dict[str, int] = {}
 
     @classmethod
     def from_brief(cls, brief) -> "BiasMonitor":
@@ -125,6 +135,26 @@ class BiasMonitor:
         if record.string_id not in self._per_string:
             self._per_string[record.string_id] = []
         self._per_string[record.string_id].append(record)
+
+    def record_facial_borderline_seen(self, string_id: str) -> None:
+        """Increment the pre-alias borderline counter for a string.
+
+        This is the observability path. Borderline candidates pass through
+        ``_normalize_facial_decision_for_persistence`` (linkedin/orchestrator.py)
+        and arrive at ``record_decision`` aliased to ``FACIAL_YES``. Without
+        this counter, the bias monitor cannot distinguish "confident YES" from
+        "aliased borderline" in its session summary.
+
+        This method does NOT feed ``_check_facial_rate_anomaly`` or
+        ``get_tightening_status``. The alarm logic continues to count the
+        post-alias yes_rate (= opens-for-full-eval rate per Option B). See
+        the C3 audit for the Option B + Option α decision rationale.
+        """
+        if not string_id:
+            return
+        self._facial_borderline_counts[string_id] = (
+            self._facial_borderline_counts.get(string_id, 0) + 1
+        )
 
     def check_alerts(self, current_string_id: str) -> list[Alert]:
         """
@@ -289,6 +319,15 @@ class BiasMonitor:
             )]
         return []
 
+    # C3 interpretation contract for the rate computed below:
+    # ``yes_rate`` here means "opens-for-full-eval rate" under the Option B
+    # ternary regime. Source: post-alias decisions arriving via
+    # ``record_decision`` after ``_normalize_facial_decision_for_persistence``
+    # in linkedin/orchestrator.py has translated ``FACIAL_BORDERLINE``
+    # to ``FACIAL_YES``. The ``expected_facial_yes_low/high`` thresholds in the
+    # brief's ``FacialCalibration`` retain their pre-ternary numeric values and
+    # are interpreted as bounds on this opens-for-full-eval rate. The C3 audit
+    # made this contract explicit; see plans/ and the C3 audit report.
     def _check_facial_rate_anomaly(self, string_id: str) -> list[Alert]:
         """
         Detects: Facial YES rate outside expected range for a string.
@@ -340,6 +379,15 @@ class BiasMonitor:
 
     # --- Triage tightening ---
 
+    # C3 interpretation contract for the rate computed below:
+    # Same as ``_check_facial_rate_anomaly`` — ``yes_rate`` is the
+    # opens-for-full-eval rate under Option B, sourced post-alias from
+    # ``record_decision``. The ``expected_facial_yes_high * 2`` tightening
+    # threshold is therefore a bound on opens-for-full-eval, not on the
+    # parser's raw FACIAL_YES literal rate. Borderline candidates aliased to
+    # YES correctly count toward "should we tighten?" because they are
+    # candidates the system *opens* for full eval. See C3 audit for the
+    # Option B + Option α decision rationale.
     def get_tightening_status(self, string_id: str) -> dict | None:
         """Check if triage should be tightened for this string.
         Returns dict with rate info if tightening needed, else None.
@@ -391,10 +439,35 @@ class BiasMonitor:
                 "total_full_evals": len(full_d),
             }
 
+        # C3: Option B contractual fields. ``facial_open_rate`` is the
+        # opens-for-full-eval rate; ``facial_yes_rate`` is preserved as a
+        # numerically-identical deprecation alias for one release while
+        # downstream consumers migrate. ``facial_borderline_rate`` and
+        # ``facial_borderline_count`` surface the pre-alias borderline volume
+        # the alarm path cannot see (record_decision observes post-alias YES).
+        # The borderline-rate denominator matches the alarm path's post-skip
+        # triaged total (decisions where stage=facial and decision!=FACIAL_SKIP),
+        # while ``facial_open_rate`` matches the existing ``facial_yes_rate``
+        # denominator (``len(facial)``, includes skips) so the alias remains
+        # exact. The two denominators differ by the skip count by design.
+        facial_open_rate = facial_yes / len(facial) if facial else 0
+        borderline_count = sum(self._facial_borderline_counts.values())
+        facial_post_skip_total = sum(
+            1 for d in facial if d.decision != "FACIAL_SKIP"
+        )
+        facial_borderline_rate = (
+            borderline_count / facial_post_skip_total
+            if facial_post_skip_total
+            else 0.0
+        )
+
         return {
             "total_decisions": total,
             "facial_total": len(facial),
-            "facial_yes_rate": facial_yes / len(facial) if facial else 0,
+            "facial_open_rate": facial_open_rate,
+            "facial_yes_rate": facial_open_rate,  # deprecation alias for one release; migrate to facial_open_rate
+            "facial_borderline_rate": facial_borderline_rate,
+            "facial_borderline_count": borderline_count,
             "full_total": len(full),
             "save_rate": saves / len(full) if full else 0,
             "saves": saves,

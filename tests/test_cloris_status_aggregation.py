@@ -166,8 +166,67 @@ def test_aggregator_handles_corrupt_db_gracefully(tmp_path: Path) -> None:
     assert len(response.entries) == 1
     entry = response.entries[0]
     assert entry.runtime_state_present is True
+    # Phase 1.4: corrupt DB now sets a distinct flag so the UI can render
+    # "runtime state unreadable" instead of indistinguishable "no run".
+    assert entry.runtime_state_corrupt is True
     assert entry.latest_run is None
     assert entry.brief_id_from_run is None
+
+
+def test_aggregator_empty_db_is_not_corrupt(tmp_path: Path) -> None:
+    """An empty but readable DB (no runs row yet) must NOT be classified
+    as corrupt — the user just hasn't run anything for this brief."""
+
+    state_dir = _build_state_dir(tmp_path, "linkedin", "empty-key")
+    db_path = state_dir / "runtime_state.sqlite3"
+    # Initialize a real schema-shaped DB but never insert a run.
+    RuntimeStateStore(db_path)
+
+    response = aggregate_status(tmp_path)
+
+    assert len(response.entries) == 1
+    entry = response.entries[0]
+    assert entry.runtime_state_present is True
+    assert entry.runtime_state_corrupt is False
+    assert entry.latest_run is None
+
+
+def test_aggregator_missing_db_is_not_corrupt(tmp_path: Path) -> None:
+    """A state dir without runtime_state.sqlite3 must report
+    runtime_state_corrupt=False — corrupt is reserved for "file exists but
+    cannot be read." The UI distinguishes "DB missing" from "DB unreadable"
+    via separate flags so the remediation guidance differs."""
+
+    _build_state_dir(tmp_path, "linkedin", "no-db-key")
+
+    response = aggregate_status(tmp_path)
+
+    assert len(response.entries) == 1
+    entry = response.entries[0]
+    assert entry.runtime_state_present is False
+    assert entry.runtime_state_corrupt is False
+
+
+def test_is_runtime_state_corrupt_helper(tmp_path: Path) -> None:
+    """Direct unit coverage for the corruption-probe helper. The aggregator
+    consumes it once per state dir per poll; bugs here would surface as
+    silent miscategorization in the UI."""
+
+    from cloris.control_plane import is_runtime_state_corrupt
+
+    # Missing file: not corrupt (just absent).
+    missing = tmp_path / "missing.sqlite3"
+    assert is_runtime_state_corrupt(missing) is False
+
+    # Truncated/garbage file: corrupt.
+    bad = tmp_path / "bad.sqlite3"
+    bad.write_bytes(b"this is not a sqlite db")
+    assert is_runtime_state_corrupt(bad) is True
+
+    # Real, schema-initialized DB: not corrupt.
+    good = tmp_path / "good.sqlite3"
+    RuntimeStateStore(good)
+    assert is_runtime_state_corrupt(good) is False
 
 
 # --- Slice 4: enriched StateDirEntry + linkedin_resumable -----------------
@@ -186,8 +245,17 @@ def _write_worker_sidecar(state_dir: Path, **overrides) -> Path:
 
     Centralizes the build_sidecar plumbing so each Slice-4 test only has
     to express what it cares about (typically: pid, mode).
+
+    Phase 1.6 note: started_at and heartbeat_at default to "now" rather
+    than a fixed past date so the aggregator's alive_silent classifier
+    (heartbeat older than 5 minutes ⇒ silent) doesn't fire on tests that
+    only care about alive/stale, not staleness duration. Tests that
+    deliberately want an old heartbeat pass started_at via overrides.
     """
 
+    from datetime import datetime, timezone
+
+    fresh_now = datetime.now(timezone.utc).isoformat()
     payload = build_sidecar(
         source="linkedin",
         brief_id="brief-4",
@@ -195,7 +263,7 @@ def _write_worker_sidecar(state_dir: Path, **overrides) -> Path:
         output_dir=str(state_dir),
         mode="fresh",
         input_mode="concurrent",
-        started_at="2026-04-27T18:00:00+00:00",
+        started_at=fresh_now,
         pid=os.getpid(),
         run_id=None,
     )

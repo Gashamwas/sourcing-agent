@@ -13,6 +13,11 @@ class RunStopReason:
     BROWSER_DISCONNECT_UNRECOVERED = "browser_disconnect_unrecovered"
     API_BUDGET_EXHAUSTED = "api_budget_exhausted"
     FATAL_RUNTIME_ERROR = "fatal_runtime_error"
+    # Set by cloris.reconciler when a run is marked status='running' but the
+    # worker process has died (no sidecar, or sidecar PID is gone). Drives
+    # the "Lost track" UI state — Cloris doesn't know what happened, just
+    # that nothing is making progress on this run anymore.
+    WORKER_MISSING = "worker_missing"
 
 
 _KNOWN_STOP_REASONS = {
@@ -25,6 +30,7 @@ _KNOWN_STOP_REASONS = {
     RunStopReason.BROWSER_DISCONNECT_UNRECOVERED,
     RunStopReason.API_BUDGET_EXHAUSTED,
     RunStopReason.FATAL_RUNTIME_ERROR,
+    RunStopReason.WORKER_MISSING,
 }
 
 

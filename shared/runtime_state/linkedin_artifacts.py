@@ -35,6 +35,13 @@ def load_linkedin_history(
     for record in project_linkedin_candidate_history(store, brief_id=brief_id):
         url = record.get("profile_url", "")
         outcome = record.get("outcome", "")
+        # C1 alias-on-read defense-in-depth: project_linkedin_candidate_history
+        # already aliases FACIAL_BORDERLINE → FACIAL_YES, but if any future code
+        # path bypasses the projection (e.g. a direct SQLite read feeding into a
+        # custom record list), this layer re-applies the rule so the orchestrator
+        # never observes "FACIAL_BORDERLINE" via prior_outcomes.
+        if outcome == "FACIAL_BORDERLINE":
+            outcome = "FACIAL_YES"
         if url:
             prior_outcomes[url] = outcome
             if outcome in save_decisions:

@@ -324,3 +324,146 @@ def test_worker_main_default_mode_is_fresh_after_slice_4_bump(
     assert len(captured_argv) == 1
     argv = captured_argv[0]
     assert "--resume" not in argv
+
+
+# --- Phase 0 worker-binary slice: frozen-app in-process dispatch -------
+
+
+def test_worker_main_dispatches_in_process_when_frozen(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Frozen .app context: instead of ``execvp``-ing into a python
+    interpreter (the bundle has none), the worker calls the
+    orchestrator's ``main()`` in-process. Same PID, sidecar's ``pid``
+    field stays truthful for any later stop/probe."""
+
+    brief = tmp_path / "brief.json"
+    brief.write_text(json.dumps({"id": "brief-x"}))
+
+    exec_calls: list[list[str]] = []
+
+    def exec_recorder(argv: list[str]) -> None:
+        exec_calls.append(list(argv))
+
+    dispatch_calls: list[tuple[str, list[str]]] = []
+
+    def dispatch_recorder(source: str, orchestrator_argv: list[str]) -> int:
+        dispatch_calls.append((source, list(orchestrator_argv)))
+        return 0
+
+    monkeypatch.setattr(worker_mod, "_exec", exec_recorder)
+    monkeypatch.setattr(
+        worker_mod, "_dispatch_in_process", dispatch_recorder
+    )
+    monkeypatch.setattr(worker_mod, "_is_frozen", lambda: True)
+    monkeypatch.setattr(worker_mod, "_now", lambda: "2026-04-27T18:00:00+00:00")
+
+    rc = main(
+        [
+            "--brief",
+            str(brief),
+            "--brief-id",
+            "x",
+            "--state-dir",
+            str(tmp_path),
+        ]
+    )
+    assert rc == 0
+
+    # Sidecar still written before the in-process dispatch.
+    payload = json.loads((tmp_path / WORKER_SIDECAR_FILENAME).read_text())
+    assert payload["pid"] == os.getpid()
+
+    # ``_exec`` MUST NOT be called when frozen; we'd be trying to
+    # exec a python interpreter that doesn't exist in the bundle.
+    assert exec_calls == []
+
+    # ``_dispatch_in_process`` got the source and the same
+    # orchestrator argv ``execvp`` would have received.
+    assert len(dispatch_calls) == 1
+    source, orch_argv = dispatch_calls[0]
+    assert source == "linkedin"
+    assert orch_argv[:3] == [
+        sys.executable,
+        "-m",
+        "linkedin.session_orchestrator",
+    ]
+
+
+def test_dispatch_in_process_invokes_orchestrator_main_with_sliced_argv(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``_dispatch_in_process`` must slice off the python invocation
+    prefix and invoke the orchestrator's ``main()`` with sys.argv
+    populated from the orchestrator-cli-args portion. The orchestrator
+    reads sys.argv via ``argparse.parse_args()`` so this is the
+    contract that keeps it working under the frozen bundle."""
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_orchestrator_main() -> int:
+        captured["argv"] = list(sys.argv)
+        return 7
+
+    fake_orch = type("FakeOrch", (), {"main": staticmethod(fake_orchestrator_main)})
+
+    import linkedin
+    monkeypatch.setattr(linkedin, "session_orchestrator", fake_orch, raising=False)
+    # Clear cached import so the module-local ``from linkedin import
+    # session_orchestrator as orch`` picks up our fake.
+    monkeypatch.delitem(sys.modules, "linkedin.session_orchestrator", raising=False)
+    sys.modules["linkedin.session_orchestrator"] = fake_orch  # type: ignore[assignment]
+
+    rc = worker_mod._dispatch_in_process(
+        "linkedin",
+        [
+            sys.executable,
+            "-m",
+            "linkedin.session_orchestrator",
+            "--brief",
+            "/tmp/brief.json",
+            "--state-dir",
+            "/tmp/state",
+            "--input-mode",
+            "concurrent",
+        ],
+    )
+
+    assert rc == 7
+    assert captured["argv"] == [
+        "linkedin.session_orchestrator",
+        "--brief",
+        "/tmp/brief.json",
+        "--state-dir",
+        "/tmp/state",
+        "--input-mode",
+        "concurrent",
+    ]
+
+
+def test_dispatch_in_process_rejects_unknown_source() -> None:
+    """An unknown source returns exit code 2 — same surface the unknown-
+    source branch in ``main`` uses, so the spawn-side aggregator gets
+    a consistent failure signal.
+
+    Uses a synthetic source name that is not registered in
+    ``cloris/launchers``. As parallel module work lands, the registered
+    set grows (researcher, designer, …); pick a name guaranteed not to
+    collide.
+    """
+
+    rc = worker_mod._dispatch_in_process(
+        "nonexistent_source_for_test_only",
+        [sys.executable, "-m", "nonexistent_source_for_test_only", "--brief", "x"],
+    )
+    assert rc == 2
+
+
+def test_dispatch_in_process_rejects_malformed_argv() -> None:
+    """Argv shorter than ``[python, -m, MODULE]`` returns exit code 2
+    rather than indexing past the end. Defensive against a registry
+    bug that would otherwise crash the worker."""
+
+    rc = worker_mod._dispatch_in_process("linkedin", [sys.executable, "-m"])
+    assert rc == 2

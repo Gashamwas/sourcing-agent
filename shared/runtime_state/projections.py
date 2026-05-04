@@ -128,6 +128,7 @@ def project_linkedin_progress(store: RuntimeStateStore, run_id: int) -> Progress
                 "pages_reviewed": metrics.get("pages_reviewed", checkpoint.get("pages_reviewed", payload.get("pages_reviewed", 0))),
                 "facial_yes_count": row["facial_yes_count"],
                 "facial_no_count": row["facial_no_count"],
+                "facial_borderline_count": row["facial_borderline_count"],
                 "candidates_count": row["candidates_discovered"],
                 "duplicates_count": metrics.get("duplicates_count", checkpoint.get("duplicates_count", payload.get("duplicates_count", 0))),
                 "notes": row["notes"] or payload.get("notes", ""),
@@ -171,11 +172,22 @@ def project_linkedin_candidate_history(store: RuntimeStateStore, *, brief_id: st
     history = []
     for row in rows:
         payload = _json_loads(row["terminal_payload_json"])
+        # C1 alias-on-read: a row whose canonical terminal_decision is
+        # FACIAL_BORDERLINE projects out as FACIAL_YES so the orchestrator's
+        # existing FACIAL_YES recovery branch handles it (re-eval on resume).
+        # The canonical SQLite value is preserved; only the projection
+        # translates. See linkedin/orchestrator.py for the recovery branch.
+        raw_terminal_decision = row["terminal_decision"]
+        projected_outcome = (
+            "FACIAL_YES"
+            if raw_terminal_decision == "FACIAL_BORDERLINE"
+            else raw_terminal_decision
+        )
         history.append(
             {
                 "profile_url": row["profile_url"] or row["identity_key"],
                 "candidate_name": row["display_name"],
-                "outcome": row["terminal_decision"],
+                "outcome": projected_outcome,
                 "confidence": payload.get("confidence", 0.0),
                 "source_string_id": payload.get("source_string_id"),
                 "timestamp": payload.get("timestamp", row["last_seen_at"]),
@@ -205,7 +217,7 @@ def project_linkedin_search_memory(
     with store.connect() as conn:
         sql = """
             SELECT source_unit_id, display_name, payload_json, checkpoint_json, family_key, novelty_bucket, domain_lane, result_count,
-                   candidates_discovered, facial_yes_count, facial_no_count, saves_count, notes, metrics_json
+                   candidates_discovered, facial_yes_count, facial_no_count, facial_borderline_count, saves_count, notes, metrics_json
             FROM work_units
             WHERE source = 'linkedin' AND brief_id = ? AND kind = ? AND status = 'done'
         """
@@ -243,6 +255,7 @@ def project_linkedin_search_memory(
                     "string_type": payload.get("string_type", ""),
                     "facial_yes_count": row["facial_yes_count"],
                     "facial_no_count": row["facial_no_count"],
+                    "facial_borderline_count": row["facial_borderline_count"],
                     "candidates_count": row["candidates_discovered"],
                     "duplicates_count": metrics.get("duplicates_count", checkpoint.get("duplicates_count", payload.get("duplicates_count", 0))),
                     "phase": payload.get("phase", "scout"),
@@ -327,13 +340,16 @@ def project_linkedin_final_judgments(
     brief_id: str,
     run_id: int | None = None,
 ) -> list[dict]:
+    # Canonical SQLite stores full-stage decisions under "full_decision"
+    # (per SharedExecutionRuntime._build_stage_payload, which uses
+    # f"{stage}_decision"). Mirror the GitHub equivalent above.
     return _project_attempt_payloads(
         store,
         source="linkedin",
         brief_id=brief_id,
         run_id=run_id,
         stage="full",
-        payload_key="final_decision",
+        payload_key="full_decision",
     )
 
 

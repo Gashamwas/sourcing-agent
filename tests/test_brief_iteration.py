@@ -406,6 +406,253 @@ def test_apply_iteration_proposal_strict_seniority_guardrails_rewrite_literal_li
     assert any("internally inconsistent" in warning.lower() for warning in warnings)
 
 
+def _non_strict_brief_raw() -> dict:
+    """Return the NYC brief mutated so it is NOT a strict-seniority brief.
+
+    The strict-seniority detector requires both years >= 12 and one of the
+    Executive Director / lab-head triggers in the brief text. Lowering
+    years to 8 and stripping triggers from intake_notes / instructions /
+    minimum_bar_description / depth_distinction is enough to exit the
+    strict-seniority branch and exercise the *general* anti-employer-proxy
+    guardrail in isolation. We do not write this back to disk; this is a
+    test-only mutation so the on-disk NYC brief is untouched.
+    """
+    raw = read_json(SOURCE_BRIEF)
+    raw["minimum_years_experience"] = 8
+    for field in (
+        "intake_notes",
+        "minimum_bar_description",
+        "role_description",
+        "role_summary",
+        "minimum_bar",
+        "notes",
+    ):
+        if field in raw and isinstance(raw[field], str):
+            raw[field] = (
+                raw[field]
+                .replace("Executive Director", "senior builder")
+                .replace("ED-analogous", "senior-builder analogous")
+                .replace("ED-equivalent", "senior-builder-equivalent")
+                .replace("executive-builder", "senior-builder")
+                .replace("lab-head", "team-lead")
+            )
+    if isinstance(raw.get("instructions"), list):
+        raw["instructions"] = [
+            str(item)
+            .replace("Executive Director", "senior builder")
+            .replace("executive-builder", "senior-builder")
+            .replace("lab-head", "team-lead")
+            for item in raw["instructions"]
+        ]
+    depth = raw.get("depth_distinction")
+    if isinstance(depth, dict):
+        for key, value in list(depth.items()):
+            if isinstance(value, str):
+                depth[key] = (
+                    value.replace("Executive Director", "senior builder")
+                    .replace("executive-builder", "senior-builder")
+                    .replace("lab-head", "team-lead")
+                )
+    return raw
+
+
+def test_apply_iteration_proposal_general_anti_employer_proxy_rewrites_priorities():
+    """Non-strict briefs must also drop employer-cluster search_priorities.
+
+    The general (non-strict-seniority) anti-employer-proxy guardrail is the
+    floor: every brief that has search_priorities of company-inventory shape
+    must have those rewritten to behavioral framing, even when the brief is
+    not subject to the tighter strict-seniority rewrites.
+    """
+    current_raw = _non_strict_brief_raw()
+    report_data = _report_dict()
+    report = StructuredRunReport.from_dict(report_data)
+    proposal = {
+        "summary": "Employer-inventory priorities proposal.",
+        "proposed_changes": {
+            "search_priorities": [
+                "Engineers at BlackRock, Bridgewater, Citadel, Two Sigma, Point72, AQR",
+                "Builders at Stripe, Plaid, Revolut, SoFi, Affirm, Adyen, Klarna",
+            ],
+            "additional_search_terms": [
+                "company-first anchors: BlackRock, Bridgewater, Citadel, Two Sigma, Point72",
+            ],
+        },
+        "changed_fields": [],
+        "warnings": [],
+    }
+    draft, warnings = _apply_iteration_proposal(
+        current_raw,
+        proposal,
+        Path("run-report.json"),
+        report,
+    )
+    assert all(
+        "blackrock" not in str(item).lower() for item in draft["search_priorities"]
+    )
+    assert all(
+        "stripe" not in str(item).lower() for item in draft["search_priorities"]
+    )
+    assert all(
+        "company-first anchors" not in str(item).lower()
+        for item in draft["additional_search_terms"]
+    )
+    # Warning must clearly identify the behavior-first rewrite (not the
+    # strict-seniority message, which only fires for strict briefs).
+    assert any(
+        "behavior-first" in warning.lower() for warning in warnings
+    )
+    assert all(
+        "strict-seniority" not in warning.lower() for warning in warnings
+    ), "Strict-seniority warning must NOT fire on non-strict briefs"
+
+
+def test_apply_iteration_proposal_general_anti_employer_proxy_rewrites_terms():
+    """Title-inventory and employer-inventory additional_search_terms get reframed.
+
+    Pins that even when search_priorities are already behavioral, the
+    additional_search_terms surface gets the same anti-employer-proxy
+    sweep on every brief.
+    """
+    current_raw = _non_strict_brief_raw()
+    report_data = _report_dict()
+    report = StructuredRunReport.from_dict(report_data)
+    proposal = {
+        "summary": "Mostly-behavioral priorities, employer-heavy terms.",
+        "proposed_changes": {
+            "search_priorities": [
+                "Builders shipping production agent platforms in capital markets",
+            ],
+            "additional_search_terms": [
+                "company-first anchors: BlackRock, Bridgewater, Citadel, Two Sigma, Point72",
+                "title variants: Head of AI Labs, Head of AI Core, Head of AI Research, Head of AI Engineering",
+            ],
+        },
+        "changed_fields": [],
+        "warnings": [],
+    }
+    draft, warnings = _apply_iteration_proposal(
+        current_raw,
+        proposal,
+        Path("run-report.json"),
+        report,
+    )
+    assert "Builders shipping production agent platforms" in draft["search_priorities"][0]
+    assert all(
+        "company-first anchors" not in str(item).lower()
+        for item in draft["additional_search_terms"]
+    )
+    assert all(
+        "title variants" not in str(item).lower()
+        for item in draft["additional_search_terms"]
+    )
+    assert any(
+        "behavior-first" in warning.lower() for warning in warnings
+    )
+
+
+def test_apply_iteration_proposal_does_not_explode_employer_lists_into_search_priorities():
+    """Employer-heavy market intel must not literalize into priorities.
+
+    This pins the "no-explosion" guarantee: even when an LLM iteration
+    proposal returns a long employer roster, the persisted brief must not
+    accumulate that roster as search_priorities. The general guardrail
+    must replace the inventory text with abstract behavioral guidance.
+    """
+    current_raw = _non_strict_brief_raw()
+    report_data = _report_dict()
+    report = StructuredRunReport.from_dict(report_data)
+    proposal = {
+        "summary": "Employer roster proposal.",
+        "proposed_changes": {
+            "search_priorities": [
+                "Engineers at BlackRock, Bridgewater, Citadel, Two Sigma, Point72, AQR",
+            ],
+            "additional_search_terms": [],
+        },
+        "changed_fields": [],
+        "warnings": [],
+    }
+    draft, _warnings = _apply_iteration_proposal(
+        current_raw,
+        proposal,
+        Path("run-report.json"),
+        report,
+    )
+    joined = " | ".join(str(item).lower() for item in draft["search_priorities"])
+    for prestige in (
+        "blackrock",
+        "bridgewater",
+        "citadel",
+        "two sigma",
+        "point72",
+        "aqr",
+    ):
+        assert prestige not in joined, (
+            f"Prestige employer '{prestige}' must not appear in search_priorities"
+        )
+
+
+def test_apply_iteration_proposal_keeps_employer_signal_rules_secondary_with_save_alone_false():
+    """Employer rules remain secondary classification with save_on_employer_alone=False.
+
+    Pins the existing invariant remains true under the new general
+    guardrail: even when the proposal tries to set
+    save_on_employer_alone=True, normalization forces it back to False.
+    """
+    current_raw = _non_strict_brief_raw()
+    report_data = _report_dict()
+    report = StructuredRunReport.from_dict(report_data)
+    proposal = {
+        "summary": "Try to set save_on_employer_alone true.",
+        "proposed_changes": {
+            "employer_signal_rules": [
+                {
+                    "tier": "tier_a",
+                    "employer_patterns": ["BlackRock", "Bridgewater"],
+                    "evidence_required": "Behavioral build evidence required.",
+                    "save_on_employer_alone": True,
+                }
+            ],
+        },
+        "changed_fields": [],
+        "warnings": [],
+    }
+    draft, _warnings = _apply_iteration_proposal(
+        current_raw,
+        proposal,
+        Path("run-report.json"),
+        report,
+    )
+    assert draft["employer_signal_rules"], "Employer rules surface must remain available"
+    assert all(
+        rule["save_on_employer_alone"] is False
+        for rule in draft["employer_signal_rules"]
+    )
+
+
+def test_iteration_system_prompt_carries_general_anti_employer_proxy_rule():
+    """Every brief gets the anti-employer-proxy guardrail in the system prompt.
+
+    The rule must appear regardless of the strict_seniority_legacy flag,
+    so prestige employers cannot be literalized into search_priorities or
+    additional_search_terms by the LLM proposer on any brief.
+    """
+    from shared.brief_iteration import _build_iteration_system
+
+    for strict_flag in (False, True):
+        prompt = _build_iteration_system(
+            allow_retrieval_design_edits=False,
+            strict_seniority_legacy=strict_flag,
+        )
+        assert "Anti-employer-proxy rule" in prompt
+        assert "applies to every brief" in prompt
+        assert "save_on_employer_alone must stay false" in prompt
+        assert "abstract behavioral search guidance" in prompt or (
+            "behavioral search guidance" in prompt
+        )
+
+
 def test_run_report_prompt_summary_ranks_strings_by_signal_not_raw_order():
     payload = _report_dict()
     payload["string_performance"] = [

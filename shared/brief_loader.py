@@ -136,6 +136,19 @@ class Brief:
     abbreviation_collisions: list[Any] = field(default_factory=list)
     example_compounds: list[Any] = field(default_factory=list)
     domain_lane_hints: list[Any] = field(default_factory=list)
+    # --- Executive Search module (Slice 1) ---
+    # Mirrors of the executive-search V2 fields hydrated onto _new_brief.
+    # Inert until later slices consume them; mirrored here so consumers
+    # like Slice 6's confidentiality helpers and Slice 10's prior-search
+    # exclusion can read from the compat Brief without spelunking
+    # _new_brief. Dataclass-shaped fields default to None (consumers
+    # null-guard); string/int fields default to the brief's "open" /
+    # 180-day defaults so absent fields render as no-op.
+    confidentiality_class: str = "open"
+    prior_search: Any = None
+    board_signals: Any = None
+    executive_movement_window_days: int = 180
+    executive_calibration: Any = None
     # V2 brief schema object (set when loading a V2 brief)
     _new_brief: Any = field(default=None, repr=False)
 
@@ -169,7 +182,8 @@ def _load_v2_brief(raw: dict) -> Brief:
     from shared.brief_schema import Brief as NewBrief, CapabilityArea, DepthDistinction, \
         NonFitPattern, EmployerSignalRule, FacialCalibration, BiasControls, MarketDensity, \
         PostSaveModifier, TransferabilityExample, BlacklistCategory, AbbreviationCollision, \
-        ExampleCompound, DomainLaneHint
+        ExampleCompound, DomainLaneHint, \
+        ExecutiveCalibration, PriorSearchContext, BoardSignalRules
 
     # --- Build the new brief_schema.Brief ---
     # Normalize v3.1 field names: merge core_areas + differentiator_areas → capability_areas
@@ -284,6 +298,55 @@ def _load_v2_brief(raw: dict) -> Brief:
     senior_role_paradigms = list(raw.get("senior_role_paradigms", []))
     senior_role_function_name = raw.get("senior_role_function_name", "") or ""
 
+    # --- Executive Search module (Slice 1) ---
+    # Hydrate exec_search V2 fields once. Defaults match the dataclass
+    # defaults so a brief without these fields produces effectively-
+    # empty instances downstream. The validator (validate_v2_brief)
+    # has already gated `confidentiality_class` to the recognized enum.
+    confidentiality_class_raw = raw.get("confidentiality_class") or "open"
+    if not isinstance(confidentiality_class_raw, str):
+        confidentiality_class_raw = "open"
+    prior_search_raw = raw.get("prior_search") or {}
+    if not isinstance(prior_search_raw, dict):
+        prior_search_raw = {}
+    prior_search = PriorSearchContext(
+        ruled_out_urls=list(prior_search_raw.get("ruled_out_urls", []) or []),
+        ruled_out_notes=str(prior_search_raw.get("ruled_out_notes") or ""),
+        earlier_run_ids=list(prior_search_raw.get("earlier_run_ids", []) or []),
+    )
+    board_signals_raw = raw.get("board_signals") or {}
+    if not isinstance(board_signals_raw, dict):
+        board_signals_raw = {}
+    board_signals = BoardSignalRules(
+        relevant_board_companies=list(
+            board_signals_raw.get("relevant_board_companies", []) or []
+        ),
+        relevant_executive_alumni_companies=list(
+            board_signals_raw.get("relevant_executive_alumni_companies", []) or []
+        ),
+        adjacency_rationale=str(
+            board_signals_raw.get("adjacency_rationale") or ""
+        ),
+    )
+    executive_movement_window_days = raw.get("executive_movement_window_days", 180)
+    if not isinstance(executive_movement_window_days, int):
+        try:
+            executive_movement_window_days = int(executive_movement_window_days)
+        except (TypeError, ValueError):
+            executive_movement_window_days = 180
+    executive_calibration_raw = raw.get("executive_calibration")
+    if isinstance(executive_calibration_raw, dict):
+        executive_calibration = ExecutiveCalibration(
+            sector=str(executive_calibration_raw.get("sector") or ""),
+            stage=str(executive_calibration_raw.get("stage") or ""),
+            pnl_scale_usd=str(executive_calibration_raw.get("pnl_scale_usd") or ""),
+            register_notes=str(
+                executive_calibration_raw.get("register_notes") or ""
+            ),
+        )
+    else:
+        executive_calibration = None
+
     explicit_retrieval_design = raw.get("retrieval_design")
     retrieval_design = retrieval_design_from_payload(
         explicit_retrieval_design,
@@ -354,6 +417,11 @@ def _load_v2_brief(raw: dict) -> Brief:
         version=raw.get("version", "2.0"),
         author=raw.get("author", ""),
         notes=raw.get("notes", ""),
+        confidentiality_class=confidentiality_class_raw,
+        prior_search=prior_search,
+        board_signals=board_signals,
+        executive_movement_window_days=executive_movement_window_days,
+        executive_calibration=executive_calibration,
     )
 
     # --- Map V2 fields to old Brief for strategy.py / adaptation compat ---
@@ -448,6 +516,11 @@ def _load_v2_brief(raw: dict) -> Brief:
         abbreviation_collisions=_detach(abbreviation_collisions),
         example_compounds=_detach(example_compounds),
         domain_lane_hints=_detach(domain_lane_hints),
+        confidentiality_class=confidentiality_class_raw,
+        prior_search=_detach(prior_search),
+        board_signals=_detach(board_signals),
+        executive_movement_window_days=executive_movement_window_days,
+        executive_calibration=_detach(executive_calibration) if executive_calibration is not None else None,
         raw=raw,
         _new_brief=new_brief,
     )

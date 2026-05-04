@@ -19,6 +19,22 @@ ARCHIVE_ROOT = OUTPUT_ROOT / "archive"
 CACHE_ROOT = OUTPUT_ROOT / "cache"
 DEBUG_ROOT = OUTPUT_ROOT / "debug"
 
+# A24 trial plan, Slice 1B: intake sessions are global (not per-state-dir
+# and not per-source) because the brief-authoring conversation pre-dates
+# any commitment to source or state_key.
+INTAKE_ROOT = OUTPUT_ROOT / "intake"
+INTAKE_DB_FILENAME = "intake_sessions.sqlite3"
+
+# Phase F Slice F3: cross-module identity lives outside per-state-dir DBs
+# because cross-source identity is, by definition, structurally incapable
+# of being seen from within a single source's state_dir. The `_identity`
+# prefix sits alongside `linkedin/` + `github/` under `state/` but starts
+# with an underscore so `enumerate_state_dirs()` (which iterates only the
+# canonical `_SOURCES = ("linkedin", "github")` tuple) never accidentally
+# treats the identity DB's parent dir as a state_dir.
+IDENTITY_ROOT = STATE_ROOT / "_identity"
+IDENTITY_DB_FILENAME = "identity.sqlite3"
+
 for _root in (
     STATE_ROOT,
     RUNS_ROOT,
@@ -27,8 +43,45 @@ for _root in (
     ARCHIVE_ROOT,
     CACHE_ROOT,
     DEBUG_ROOT,
+    INTAKE_ROOT,
+    IDENTITY_ROOT,
 ):
     _root.mkdir(parents=True, exist_ok=True)
+
+
+def resolve_identity_db_path() -> Path:
+    """Path to the global cross-module identity SQLite store.
+
+    Cross-source identity (Phase F Slice F3) is fundamentally global —
+    it merges duplicates across `output/state/linkedin/<key>/` and
+    `output/state/github/<key>/`. Storing the persons table inside any
+    one of those state-dirs would be structurally incapable of seeing
+    the others, so F3 ships a separate global DB.
+
+    Resolved against the live :data:`IDENTITY_ROOT` so tests that
+    monkeypatch :data:`OUTPUT_ROOT` must also monkeypatch
+    :data:`IDENTITY_ROOT` (mirrors the
+    :func:`resolve_intake_db_path` pattern).
+    """
+
+    return IDENTITY_ROOT / IDENTITY_DB_FILENAME
+
+
+def resolve_intake_db_path() -> Path:
+    """Path to the global intake-sessions SQLite store.
+
+    Distinct from per-state-dir ``runtime_state.sqlite3`` files: intake
+    sessions are authored before any (source, state_key) commitment is
+    made. The DB lives at ``output/intake/intake_sessions.sqlite3``.
+
+    Resolved against the live :data:`INTAKE_ROOT` so tests that
+    monkeypatch :data:`OUTPUT_ROOT` still need to write through this
+    helper after also monkeypatching :data:`INTAKE_ROOT` (mirrors the
+    pattern used by other output-path helpers — derived constants are
+    not auto-recomputed when the root is patched).
+    """
+
+    return INTAKE_ROOT / INTAKE_DB_FILENAME
 
 
 def slugify_output_component(value: str) -> str:
@@ -149,12 +202,36 @@ def linkedin_state_key(
     brief: Brief | None = None,
     raw: dict | None = None,
 ) -> str:
+    """Derive the canonical LinkedIn state-key from brief content.
+
+    Phase F Slice F2 added the `source_config.linkedin.project_id`
+    lookup ahead of the flat `linkedin_project_id` fallback so the
+    same hash holds across the migration: a brief that's been edited
+    via F2's UI (writing the nested path) and one that still carries
+    only the flat field produce the same state-key. Without the
+    fallback, every existing state_dir would be orphaned the moment
+    F2 introduced the new path.
+
+    Resolution order:
+      1. ``source_config.linkedin.project_id`` (V2 shape, F2 onward)
+      2. ``linkedin_project_id`` flat field (Phase D and earlier)
+      3. ``brief.linkedin_project_id`` from the parsed Brief
+      4. ``brief.id``
+      5. ``brief_path.stem`` (last-resort)
+    """
+
+    from shared.brief_v2_schema import linkedin_project_id_from_brief
+
     brief_path = Path(brief_path)
     raw = raw or read_json(brief_path)
     brief = brief or load_brief(str(brief_path))
-    return slugify_output_component(
-        str(raw.get("linkedin_project_id") or brief.linkedin_project_id or brief.id or brief_path.stem)
+    candidate = (
+        linkedin_project_id_from_brief(raw)
+        or brief.linkedin_project_id
+        or brief.id
+        or brief_path.stem
     )
+    return slugify_output_component(str(candidate))
 
 
 def github_state_key(
@@ -162,6 +239,44 @@ def github_state_key(
     brief_path: str | Path,
     brief: Brief | None = None,
 ) -> str:
+    brief_path = Path(brief_path)
+    brief = brief or load_brief(str(brief_path))
+    return slugify_output_component(brief.id or brief.role_title or brief_path.stem)
+
+
+def designer_state_key(
+    *,
+    brief_path: str | Path,
+    brief: Brief | None = None,
+) -> str:
+    """Derive the canonical Designer state-key from brief content.
+
+    Designer briefs don't carry a per-source identifier (no
+    LinkedIn-style project_id) — same posture as GitHub. State-key
+    falls back through brief.id → role_title → brief filename stem.
+    """
+
+    brief_path = Path(brief_path)
+    brief = brief or load_brief(str(brief_path))
+    return slugify_output_component(brief.id or brief.role_title or brief_path.stem)
+
+
+def exec_search_state_key(
+    *,
+    brief_path: str | Path,
+    brief: Brief | None = None,
+) -> str:
+    """Derive the canonical Executive Search state-key from brief content.
+
+    Executive Search briefs reuse the LinkedIn evaluation pipeline but
+    carry their own state directory under ``output/state/exec_search/``
+    (separate from LinkedIn's so confidential briefs don't aggregate
+    into the LinkedIn home view). Mirrors GitHub's posture: state-key
+    falls back through brief.id → role_title → brief filename stem.
+    No project_id concept — saves land in the Cloris-native shortlist
+    destination shipping in Slice 7.
+    """
+
     brief_path = Path(brief_path)
     brief = brief or load_brief(str(brief_path))
     return slugify_output_component(brief.id or brief.role_title or brief_path.stem)
@@ -224,6 +339,90 @@ def resolve_github_state_dir(
         return path
     key = github_state_key(brief_path=brief_path, brief=brief)
     path = source_state_root("github") / key
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def resolve_designer_state_dir(
+    *,
+    brief_path: str | Path,
+    brief: Brief | None = None,
+    state_dir: str | Path | None = None,
+) -> Path:
+    """Resolve the per-brief state directory for a Designer run.
+
+    Mirrors :func:`resolve_github_state_dir`. The Designer state-key
+    derives from brief content (no per-source identifier), and the
+    state-dir lives under ``output/state/designer/<state_key>/``.
+    Caches the SQLite asset blob, the canonical
+    ``runtime_state.sqlite3``, and the JSONL projection files for the
+    Designer module's lifetime + 30 days.
+    """
+
+    if state_dir:
+        path = Path(state_dir).resolve()
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    key = designer_state_key(brief_path=brief_path, brief=brief)
+    path = source_state_root("designer") / key
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def resolve_exec_search_state_dir(
+    *,
+    brief_path: str | Path,
+    brief: Brief | None = None,
+    state_dir: str | Path | None = None,
+) -> Path:
+    """Resolve the per-brief state directory for an Executive Search run.
+
+    Mirrors :func:`resolve_github_state_dir`. State-dir lives under
+    ``output/state/exec_search/<state_key>/``, separate from
+    ``output/state/linkedin/`` so confidential briefs don't aggregate
+    into LinkedIn's shared per-source views.
+    """
+
+    if state_dir:
+        path = Path(state_dir).resolve()
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    key = exec_search_state_key(brief_path=brief_path, brief=brief)
+    path = source_state_root("exec_search") / key
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def researcher_state_key(
+    *,
+    brief_path: str | Path,
+    brief: Brief | None = None,
+) -> str:
+    """Derive the canonical Researcher state-key from brief content.
+
+    Researcher has no per-brief project_id concept (workspace is the
+    only save destination per Researcher Module Spec Opinion 4), so the
+    key resolves from ``brief.id`` → ``brief.role_title`` → file stem,
+    mirroring :func:`github_state_key`.
+    """
+
+    brief_path = Path(brief_path)
+    brief = brief or load_brief(str(brief_path))
+    return slugify_output_component(brief.id or brief.role_title or brief_path.stem)
+
+
+def resolve_researcher_state_dir(
+    *,
+    brief_path: str | Path,
+    brief: Brief | None = None,
+    state_dir: str | Path | None = None,
+) -> Path:
+    if state_dir:
+        path = Path(state_dir).resolve()
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    key = researcher_state_key(brief_path=brief_path, brief=brief)
+    path = source_state_root("researcher") / key
     path.mkdir(parents=True, exist_ok=True)
     return path
 

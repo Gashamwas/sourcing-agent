@@ -13,6 +13,7 @@ from shared.runtime_state.projections import (
     project_github_progress,
     project_github_snippets,
     project_linkedin_candidate_history,
+    project_linkedin_final_judgments,
     project_linkedin_progress,
     project_linkedin_search_memory,
     write_github_progress_projection,
@@ -343,3 +344,92 @@ def test_linkedin_projections_cover_progress_history_and_search_memory(tmp_path)
     assert json.loads(progress_path.read_text())["current_page"] == 3
     assert "Alice" in history_path.read_text()
     assert json.loads(memory_path.read_text())["project_id"] == "brief-1"
+
+
+def test_linkedin_final_judgments_projection_round_trip(tmp_path):
+    """Canonical SQLite stores full-stage decisions under ``full_decision``.
+
+    This test pins that the LinkedIn projection reads the correct canonical
+    key. Without this test, the LinkedIn projection's payload-key drift can
+    silently produce 0-byte ``final_judgments.jsonl`` across finalized runs
+    (slice 18, runtime-state audit). Mirrors the GitHub finals slice in
+    ``test_github_stage_projections_round_trip``.
+    """
+
+    store = _make_store(tmp_path)
+    run_id = store.start_run(
+        source="linkedin",
+        brief_id="brief-1",
+        output_dir=str(tmp_path),
+        mode="fresh",
+        resume_state={"brief_name": "brief-1"},
+    )
+    store.record_candidate_discovery(
+        run_id=run_id,
+        work_unit_id=None,
+        source="linkedin",
+        brief_id="brief-1",
+        identity_key="https://linkedin.com/in/ada",
+        display_name="Ada",
+        profile_url="https://linkedin.com/in/ada",
+        payload={"source_string_id": 1},
+    )
+    store.set_candidate_state(
+        run_id=run_id,
+        source="linkedin",
+        brief_id="brief-1",
+        identity_key="https://linkedin.com/in/ada",
+        new_state="snippet_extracted",
+    )
+    store.set_candidate_state(
+        run_id=run_id,
+        source="linkedin",
+        brief_id="brief-1",
+        identity_key="https://linkedin.com/in/ada",
+        new_state="facial_started",
+    )
+    store.set_candidate_state(
+        run_id=run_id,
+        source="linkedin",
+        brief_id="brief-1",
+        identity_key="https://linkedin.com/in/ada",
+        new_state="facial_terminal",
+        terminal_decision="FACIAL_YES",
+        terminal_payload={"source_string_id": 1},
+    )
+    store.set_candidate_state(
+        run_id=run_id,
+        source="linkedin",
+        brief_id="brief-1",
+        identity_key="https://linkedin.com/in/ada",
+        new_state="full_started",
+    )
+    full_attempt_id = store.start_attempt(
+        run_id=run_id,
+        source="linkedin",
+        brief_id="brief-1",
+        identity_key="https://linkedin.com/in/ada",
+        stage="full",
+        work_unit_id=None,
+        payload={
+            "profile_summary": {"name": "Ada", "profile_url": "https://linkedin.com/in/ada"},
+            "full_decision": {"decision": "SAVE", "profile_url": "https://linkedin.com/in/ada"},
+        },
+        source_cursor={"source_string_id": 1},
+        display_name="Ada",
+        profile_url="https://linkedin.com/in/ada",
+    )
+    store.finish_attempt_success(
+        attempt_id=full_attempt_id,
+        new_state="full_terminal",
+        terminal_decision="SAVE",
+        payload={
+            "profile_summary": {"name": "Ada", "profile_url": "https://linkedin.com/in/ada"},
+            "full_decision": {"decision": "SAVE", "profile_url": "https://linkedin.com/in/ada"},
+        },
+        run_id=run_id,
+    )
+
+    assert project_linkedin_final_judgments(store, brief_id="brief-1") == [
+        {"decision": "SAVE", "profile_url": "https://linkedin.com/in/ada"}
+    ]

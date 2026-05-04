@@ -29,7 +29,13 @@ def test_bootstrap_is_idempotent(tmp_path):
 
     with store.connect() as conn:
         row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
-        assert row["value"] == "3"
+        # Phase 1.5 bumped schema_version to "4" for the stop_reason_detail
+        # column + legacy normalization path. Pin against
+        # CURRENT_SCHEMA_VERSION rather than a literal so the test tracks
+        # the constant rather than going stale on the next bump.
+        from shared.runtime_state.store import CURRENT_SCHEMA_VERSION
+
+        assert row["value"] == CURRENT_SCHEMA_VERSION
 
 
 def test_rejects_invalid_state_transition(tmp_path):
@@ -241,3 +247,76 @@ def test_reconciles_pending_candidate_side_effects_and_allows_manual_replay(tmp_
         payload={"search_string_id": 1},
     )
     assert replay["should_execute"] is True
+
+
+def test_record_candidate_discovery_normalizes_linkedin_url(tmp_path):
+    """Phase C-bis 0.4: defense-in-depth URL normalization at the store
+    layer. The acquisition path already strips tracking params, but any
+    future code path that bypasses acquisition (manual backfill, a
+    different module) gets the same scrubbing on insert. The normalizer
+    is idempotent."""
+
+    store = _make_store(tmp_path)
+    run_id = _start_run(store, tmp_path, source="linkedin")
+
+    dirty_url = (
+        "https://www.linkedin.com/in/pat-doe?"
+        "miniProfileUrn=urn%3Ali%3Afsd_profile%3AACoAAA"
+        "&trackingId=abc123"
+        "&searchEntityType=PEOPLE"
+        "&position=4"
+        "&searchId=xyz789"
+    )
+
+    store.record_candidate_discovery(
+        run_id=run_id,
+        work_unit_id=None,
+        source="linkedin",
+        brief_id="brief-1",
+        identity_key="li-pat-doe",
+        display_name="Pat Doe",
+        profile_url=dirty_url,
+    )
+
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT profile_url FROM candidates "
+            "WHERE source='linkedin' AND brief_id='brief-1' "
+            "AND identity_key='li-pat-doe'"
+        ).fetchone()
+
+    assert row is not None
+    # Tracking params stripped; trailing slash absent; lowercased.
+    assert row["profile_url"] == "https://www.linkedin.com/in/pat-doe"
+
+
+def test_record_candidate_discovery_does_not_normalize_github_url(tmp_path):
+    """Negative case: the normalizer is LinkedIn-specific. GitHub URLs
+    pass through untouched, so the defense-in-depth is scoped and won't
+    surprise other modules."""
+
+    store = _make_store(tmp_path)
+    run_id = _start_run(store, tmp_path, source="github")
+
+    github_url = "https://github.com/alice?ref=tracking"
+
+    store.record_candidate_discovery(
+        run_id=run_id,
+        work_unit_id=None,
+        source="github",
+        brief_id="brief-1",
+        identity_key="alice",
+        display_name="Alice",
+        profile_url=github_url,
+    )
+
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT profile_url FROM candidates "
+            "WHERE source='github' AND brief_id='brief-1' "
+            "AND identity_key='alice'"
+        ).fetchone()
+
+    assert row is not None
+    # Untouched — the LinkedIn-specific normalizer is gated by source.
+    assert row["profile_url"] == github_url

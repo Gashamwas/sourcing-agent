@@ -1,12 +1,26 @@
-"""GitHub-specific configuration. Extends config.py with GitHub API settings."""
+"""GitHub-specific configuration. Extends config.py with GitHub API settings.
+
+.env loading mirrors ``shared/config.py``: the user-data ``.env``
+(written by the Cloris first-launch surface) takes priority when a
+frozen .app is in play, with the project-root ``.env`` falling
+through. See ``shared/user_data_dir.py`` for the resolution rules.
+"""
 
 import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Load .env from project root (same as config.py)
-_env_path = Path(__file__).parent.parent / ".env"
-load_dotenv(_env_path)
+from shared.user_data_dir import (
+    cloris_user_data_dir,
+    should_use_user_data_dir,
+)
+
+_PROJECT_ROOT_ENV = Path(__file__).parent.parent / ".env"
+if should_use_user_data_dir():
+    _user_env_path = cloris_user_data_dir() / ".env"
+    if _user_env_path.exists():
+        load_dotenv(_user_env_path, override=False)
+load_dotenv(_PROJECT_ROOT_ENV, override=False)
 
 
 def _optional(key: str, default: str = "") -> str:
@@ -51,7 +65,12 @@ MAX_SESSIONS_PER_DAY: int = 999  # effectively uncapped
 
 # --- Paths ---
 PROJECT_ROOT: Path = Path(__file__).parent.parent
-GITHUB_STATE_ROOT: Path = PROJECT_ROOT / "output" / "state" / "github"
+# GitHub state lives under the shared ``OUTPUT_DIR`` seam so it
+# relocates with the rest of Cloris's writable state when running as
+# a frozen .app. See ``shared/config.py:OUTPUT_DIR`` for the
+# resolution rules.
+from shared.config import OUTPUT_DIR as _OUTPUT_DIR
+GITHUB_STATE_ROOT: Path = _OUTPUT_DIR / "state" / "github"
 GITHUB_STATE_ROOT.mkdir(parents=True, exist_ok=True)
 # Deprecated compatibility alias. New runs should resolve a brief-scoped state dir
 # beneath GITHUB_STATE_ROOT rather than writing directly to this root.

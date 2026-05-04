@@ -13,8 +13,22 @@ JUDGMENT_FAILURE = "JUDGMENT_FAILURE"
 RECOVERABLE_ERROR = "RECOVERABLE_ERROR"
 TERMINAL_ERROR = "TERMINAL_ERROR"
 
+
+class ApiBudgetExhaustedError(RuntimeError):
+    """Raised when provider credits are exhausted and the run should pause."""
+
 FAILURE_DECISIONS = CONTRACT_FAILURE_DECISIONS
 RETRYABLE_STATUS_CODES = frozenset({408, 409, 425, 429, 500, 502, 503, 504, 529})
+
+_API_BUDGET_EXHAUSTED_PATTERNS: tuple[str, ...] = (
+    "credit balance is too low",
+    "purchase credits",
+    "plans & billing",
+    "billing hard limit",
+    "insufficient credits",
+    "exceeded your current quota",
+    "quota exceeded",
+)
 
 _RECOVERABLE_PATTERNS: tuple[tuple[str, str, str], ...] = (
     ("rate_limit", "provider", "rate_limit"),
@@ -68,11 +82,28 @@ def is_failure_decision(decision: str) -> bool:
     return decision in FAILURE_DECISIONS
 
 
+def is_api_budget_exhausted_error(exc: BaseException | str) -> bool:
+    """Detect provider billing/credit exhaustion errors that should pause the run."""
+    if isinstance(exc, ApiBudgetExhaustedError):
+        return True
+    detail = _clip_detail(str(exc) or exc.__class__.__name__).lower()
+    return any(pattern in detail for pattern in _API_BUDGET_EXHAUSTED_PATTERNS)
+
+
 def classify_runtime_failure(exc: Exception, source: str = "runtime") -> FailureClassification:
     """Classify an exception into shared retry semantics."""
     detail = _clip_detail(str(exc) or exc.__class__.__name__)
     status_code = _coerce_status_code(getattr(exc, "status_code", None))
     lowered = detail.lower()
+
+    if is_api_budget_exhausted_error(exc):
+        return FailureClassification(
+            kind=TERMINAL_ERROR,
+            domain="provider",
+            reason="api_budget_exhausted",
+            detail=detail,
+            status_code=status_code,
+        )
 
     if status_code in RETRYABLE_STATUS_CODES:
         return FailureClassification(

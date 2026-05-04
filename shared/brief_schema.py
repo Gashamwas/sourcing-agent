@@ -175,6 +175,54 @@ class DomainLaneHint:
     patterns: list[str] = field(default_factory=list)  # Patterns that should map onto this lane
 
 
+# Executive Search module (Slice 1). The three dataclasses below are
+# inert until later slices wire consumers to read them; they ship in
+# Slice 1 so the brief loader has somewhere to hydrate the V2 keys.
+
+@dataclass
+class ExecutiveCalibration:
+    """Executive-register calibration extensions.
+
+    Optional bag of fields tightly scoped to executive-search briefs.
+    Populated by the V2 loader; later slices (2, 5, 8) consume specific
+    fields. Fields default to empty so a brief without an executive
+    calibration block hydrates to an effectively-empty instance.
+    """
+    sector: str = ""
+    stage: str = ""
+    pnl_scale_usd: str = ""
+    register_notes: str = ""
+
+
+@dataclass
+class PriorSearchContext:
+    """Prior-search exclusion context for executive searches.
+
+    The recruiter encodes which candidates have already been
+    approached or formally ruled out. Slice 10 extends
+    ``linkedin/orchestrator.py:_load_candidate_history`` to merge
+    ``ruled_out_urls`` into ``_seen_urls`` at session init so prior-
+    search exclusions enforce at acquisition time, not at evaluation.
+    """
+    ruled_out_urls: list[str] = field(default_factory=list)
+    ruled_out_notes: str = ""
+    earlier_run_ids: list[str] = field(default_factory=list)
+
+
+@dataclass
+class BoardSignalRules:
+    """Board-membership / executive-network adjacency rules.
+
+    Recruiter-authored rules surfacing peer-network adjacency to client
+    leadership and board-cycle context. Slice 2's dossier full-eval
+    consumes these as evaluation evidence; Slice 5 may consume them
+    as off-LinkedIn signal acquisition hints.
+    """
+    relevant_board_companies: list[str] = field(default_factory=list)
+    relevant_executive_alumni_companies: list[str] = field(default_factory=list)
+    adjacency_rationale: str = ""
+
+
 @dataclass
 class Brief:
     """
@@ -258,6 +306,18 @@ class Brief:
     version: str = "1.0"
     author: str = ""
     notes: str = ""
+
+    # --- Executive Search module (Slice 1) ---
+    # Optional, default-bearing fields. Inert until later slices consume
+    # them. Slice 6 wires `confidentiality_class` into aggregator/emitter
+    # gating via `shared/confidentiality.py`; Slice 10 reads
+    # `prior_search.ruled_out_urls`; Slice 2 reads `executive_calibration`
+    # and `board_signals` for dossier-depth evaluation prompts.
+    confidentiality_class: str = "open"
+    prior_search: PriorSearchContext = field(default_factory=PriorSearchContext)
+    board_signals: BoardSignalRules = field(default_factory=BoardSignalRules)
+    executive_movement_window_days: int = 180
+    executive_calibration: Optional[ExecutiveCalibration] = None
 
     def capability_area_names(self) -> list[str]:
         """Convenience: list of just the capability area names for template injection."""

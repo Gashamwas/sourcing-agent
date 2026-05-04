@@ -16,6 +16,7 @@ Design principles:
   - Stateless per-candidate. No cumulative save/reject context leaks into evaluation.
 """
 
+import shared.config as _config
 from shared.brief_schema import Brief
 
 
@@ -123,6 +124,114 @@ CANDIDATES:
 
 Respond with EXACTLY this format for each candidate, one per line:
 [candidate_number] FACIAL_YES or FACIAL_NO | one-sentence reason citing trajectory signal"""
+
+
+# ---------------------------------------------------------------------------
+# FACIAL TRIAGE TEMPLATES — TERNARY (Step B of FACIAL_BORDERLINE promotion)
+# ---------------------------------------------------------------------------
+# Selected by ``assemble_facial_system`` / ``assemble_facial_batch_system``
+# when ``shared.config.LINKEDIN_FACIAL_BORDERLINE_ENABLED`` is True.
+# Body is byte-identical to the binary template except for the AMBIGUOUS
+# section, the post-non-fit decision guidance, and the response format.
+# Token-efficiency budget: ternary length must stay within 1.20× binary
+# length (see test_token_efficiency.py).
+# ---------------------------------------------------------------------------
+
+FACIAL_TRIAGE_TEMPLATE_TERNARY = """You are triaging candidate snippets from LinkedIn Recruiter search results.
+
+ROLE: {role_title} ({role_level}) — {role_summary}
+
+YOUR TASK: Decide whether this candidate's snippet warrants a full profile review. You are deciding whether to spend tokens on a full read, not whether to save.
+
+WHAT YOU HAVE: A name, headline, current title/company, location, education line, and a CAREER HISTORY — a list of all visible positions with titles, companies, and dates. You do NOT have job description bullets, project details, or skills. You cannot tell from this data what someone actually built at a given company.
+
+═══════════════════════════════════════════════════════
+STEP 1 — FAST EXITS
+═══════════════════════════════════════════════════════
+
+Reject immediately ONLY if the ENTIRE career trajectory clearly indicates work outside scope:
+{fast_exit_block}
+
+A fast exit requires that NO position in the career history has a plausible connection to the role. One relevant-looking position anywhere in the trajectory means this is NOT a fast exit.
+
+═══════════════════════════════════════════════════════
+STEP 2 — TRAJECTORY READ
+═══════════════════════════════════════════════════════
+
+The career history is your highest-signal field. Read the FULL trajectory, not just the current role. What you're looking for:
+
+TRAJECTORY PATTERNS THAT FAVOR YES:
+{trajectory_yes_patterns}
+
+TRAJECTORY PATTERNS THAT WARRANT BORDERLINE (snippet cannot resolve; full evaluation needed):
+{trajectory_ambiguous_patterns}
+
+TRAJECTORY PATTERNS THAT FAVOR NO (only if consistent across the ENTIRE history):
+{trajectory_no_patterns}
+
+═══════════════════════════════════════════════════════
+STEP 3 — NON-FIT CHECK
+═══════════════════════════════════════════════════════
+
+NON-FIT PATTERNS (automatic FACIAL_NO if detected):
+{non_fit_block}
+
+If ANY of the above non-fit patterns clearly match the candidate's visible trajectory, return FACIAL_NO immediately regardless of other signals.
+
+CAPABILITY AREAS for this role:
+{capability_area_names}
+
+═══════════════════════════════════════════════════════
+DECISION
+═══════════════════════════════════════════════════════
+
+For ambiguous trajectories that match a brief-listed ambiguous pattern, emit FACIAL_BORDERLINE — the snippet cannot resolve fit; full profile evaluation will. Do NOT collapse ambiguity to NO.
+
+- FACIAL_YES: At least one position shows a title, employer, or transition that DIRECTLY connects to a capability area. The connection must be specific, not generic.
+- FACIAL_BORDERLINE: Snippet matches a brief-listed ambiguous trajectory pattern and cannot be resolved without full-profile evidence. Full evaluation will decide.
+- FACIAL_NO: Entire career trajectory matches a non-fit pattern or a brief-listed NO trajectory.
+
+CANDIDATE SNIPPET:
+{candidate_snippet}
+
+Respond with EXACTLY this format:
+DECISION: FACIAL_YES | FACIAL_BORDERLINE | FACIAL_NO
+REASON: One sentence — what trajectory signal you see (if YES), why the snippet cannot resolve fit (if BORDERLINE), or why the full trajectory is clearly outside scope (if NO)."""
+
+
+FACIAL_TRIAGE_TEMPLATE_BATCH_TERNARY = """You are triaging candidate snippets from LinkedIn Recruiter search results.
+
+ROLE: {role_title} ({role_level}) — {role_summary}
+
+YOUR TASK: For each candidate, decide whether the snippet warrants a full profile review. You are deciding whether to spend tokens on a full read, not whether to save.
+
+WHAT YOU HAVE: Names, headlines, current titles/companies, locations, education, and CAREER HISTORIES. You do NOT have job description bullets or project details. You cannot tell what someone actually built at a given company.
+
+FAST EXITS — reject ONLY if the ENTIRE career trajectory clearly indicates:
+{fast_exit_block}
+
+TRAJECTORY READ — the career history is your highest-signal field. Read the FULL trajectory:
+
+YES patterns: {trajectory_yes_patterns_compact}
+BORDERLINE (snippet cannot resolve; full eval needed): {trajectory_ambiguous_patterns_compact}
+NO patterns (only if entire history matches): {trajectory_no_patterns_compact}
+
+NON-FIT PATTERNS (automatic FACIAL_NO): {non_fit_compact}
+
+CAPABILITY AREAS: {capability_area_names_inline}
+
+For ambiguous trajectories matching a brief-listed ambiguous pattern, emit FACIAL_BORDERLINE.
+
+- FACIAL_YES: At least one position shows a title, employer, or transition that DIRECTLY connects to a capability area. The connection must be specific, not generic.
+- FACIAL_BORDERLINE: Snippet matches a brief-listed ambiguous trajectory pattern and cannot be resolved without full-profile evidence.
+- FACIAL_NO: Entire career trajectory matches a non-fit pattern or a brief-listed NO trajectory.
+
+CANDIDATES:
+{candidate_snippets_numbered}
+
+Respond with EXACTLY this format for each candidate, one per line:
+[candidate_number] FACIAL_YES | FACIAL_BORDERLINE | FACIAL_NO | one-sentence reason citing trajectory signal"""
+
 
 # ---------------------------------------------------------------------------
 # FULL EVALUATION TEMPLATE
@@ -341,8 +450,18 @@ def _calibration_does_not_transfer_or_default(brief: Brief) -> str:
 
 
 def assemble_facial_system(brief: Brief) -> str:
-    """Return the cacheable system prompt for facial triage (all brief context, no candidate data)."""
-    return FACIAL_TRIAGE_TEMPLATE.format(
+    """Return the cacheable system prompt for facial triage (all brief context, no candidate data).
+
+    Step B of the FACIAL_BORDERLINE promotion plan: when
+    ``shared.config.LINKEDIN_FACIAL_BORDERLINE_ENABLED`` is True, the
+    ternary template (YES/BORDERLINE/NO) is selected. Default off.
+    """
+    template = (
+        FACIAL_TRIAGE_TEMPLATE_TERNARY
+        if _config.LINKEDIN_FACIAL_BORDERLINE_ENABLED
+        else FACIAL_TRIAGE_TEMPLATE
+    )
+    return template.format(
         role_title=brief.role_title,
         role_level=brief.role_level,
         role_summary=brief.role_summary,
@@ -388,8 +507,18 @@ def assemble_full_evaluation_system(brief: Brief) -> str:
 
 
 def assemble_facial_batch_system(brief: Brief) -> str:
-    """Return the cacheable system prompt for batch facial triage (no candidate data)."""
-    return FACIAL_TRIAGE_TEMPLATE_BATCH.format(
+    """Return the cacheable system prompt for batch facial triage (no candidate data).
+
+    Step B of the FACIAL_BORDERLINE promotion plan: when
+    ``shared.config.LINKEDIN_FACIAL_BORDERLINE_ENABLED`` is True, the
+    ternary batch template (YES/BORDERLINE/NO) is selected. Default off.
+    """
+    template = (
+        FACIAL_TRIAGE_TEMPLATE_BATCH_TERNARY
+        if _config.LINKEDIN_FACIAL_BORDERLINE_ENABLED
+        else FACIAL_TRIAGE_TEMPLATE_BATCH
+    )
+    return template.format(
         role_title=brief.role_title,
         role_level=brief.role_level,
         role_summary=brief.role_summary,
@@ -482,7 +611,7 @@ from typing import Optional
 
 @dataclass
 class FacialResult:
-    decision: str           # "FACIAL_YES" | "FACIAL_NO" | "PARSE_FAILURE"
+    decision: str           # "FACIAL_YES" | "FACIAL_BORDERLINE" | "FACIAL_NO" | "PARSE_FAILURE"
     reason: str
     raw_response: str
 
@@ -509,6 +638,12 @@ def parse_facial_response(raw: str) -> FacialResult:
     """
     Parse facial triage response.
     Default on failure: PARSE_FAILURE (non-terminal — candidate can be retried).
+
+    Step B of the FACIAL_BORDERLINE promotion plan widens this parser to
+    recognize ``FACIAL_BORDERLINE`` as a third class. The orchestrator
+    decides whether to alias-to-YES or fail-loud based on the
+    ``LINKEDIN_FACIAL_BORDERLINE_ENABLED`` flag; the parser itself is
+    flag-agnostic so it can correctly identify a model that goes off-script.
     """
     raw_stripped = raw.strip()
 
@@ -517,6 +652,12 @@ def parse_facial_response(raw: str) -> FacialResult:
         line_upper = line.strip().upper()
         if line_upper.startswith("DECISION:"):
             value = line_upper.replace("DECISION:", "").strip()
+            # Order matters: BORDERLINE first because "BORDERLINE" contains
+            # neither "YES" nor "NO" as a substring today, but a future
+            # format drift could collide and silently miscategorize.
+            if "BORDERLINE" in value:
+                reason = _extract_field(raw_stripped, "REASON:")
+                return FacialResult("FACIAL_BORDERLINE", reason, raw_stripped)
             if "YES" in value:
                 reason = _extract_field(raw_stripped, "REASON:")
                 return FacialResult("FACIAL_YES", reason, raw_stripped)
@@ -524,7 +665,10 @@ def parse_facial_response(raw: str) -> FacialResult:
                 reason = _extract_field(raw_stripped, "REASON:")
                 return FacialResult("FACIAL_NO", reason, raw_stripped)
 
-    # Fallback: scan for YES/NO anywhere
+    # Fallback: scan for class tokens anywhere. BORDERLINE checked first
+    # for the same reason as above.
+    if "FACIAL_BORDERLINE" in raw_stripped.upper():
+        return FacialResult("FACIAL_BORDERLINE", "parsed from raw", raw_stripped)
     if "FACIAL_YES" in raw_stripped.upper():
         return FacialResult("FACIAL_YES", "parsed from raw", raw_stripped)
     if "FACIAL_NO" in raw_stripped.upper():
@@ -537,7 +681,14 @@ def parse_facial_response(raw: str) -> FacialResult:
 def parse_facial_batch_response(raw: str, count: int) -> list[FacialResult]:
     """Parse a batch facial triage response.
 
-    Expected format per candidate: [N] FACIAL_YES or FACIAL_NO | reason
+    Expected format per candidate (binary):
+        [N] FACIAL_YES or FACIAL_NO | reason
+    Expected format per candidate (ternary, Step B):
+        [N] FACIAL_YES | FACIAL_BORDERLINE | FACIAL_NO | reason
+
+    Step B widens the regex to accept ``FACIAL_BORDERLINE``. Token-class
+    detection prefers BORDERLINE before YES so a future format drift
+    doesn't silently miscategorize.
     Returns one FacialResult per candidate, PARSE_FAILURE for missing/malformed entries.
     """
     raw_stripped = raw.strip()
@@ -547,10 +698,20 @@ def parse_facial_batch_response(raw: str, count: int) -> list[FacialResult]:
         line = line.strip()
         if not line:
             continue
-        m = re.match(r'\[(\d+)\]\s*(FACIAL_YES|FACIAL_NO)\s*\|\s*(.*)', line, re.IGNORECASE)
+        m = re.match(
+            r'\[(\d+)\]\s*(FACIAL_YES|FACIAL_NO|FACIAL_BORDERLINE)\s*\|\s*(.*)',
+            line,
+            re.IGNORECASE,
+        )
         if m:
             idx = int(m.group(1))
-            decision = "FACIAL_YES" if "YES" in m.group(2).upper() else "FACIAL_NO"
+            decision_raw = m.group(2).upper()
+            if "BORDERLINE" in decision_raw:
+                decision = "FACIAL_BORDERLINE"
+            elif "YES" in decision_raw:
+                decision = "FACIAL_YES"
+            else:
+                decision = "FACIAL_NO"
             reason = m.group(3).strip()
             parsed[idx] = FacialResult(decision, reason, line)
 

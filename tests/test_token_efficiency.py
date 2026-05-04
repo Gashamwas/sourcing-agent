@@ -423,3 +423,139 @@ class TestFacialModelConfig:
             assert call_kwargs.kwargs["max_tokens"] == 2048
         finally:
             llm_mod.config = orig_config
+
+
+# ---------------------------------------------------------------------------
+# Step B (slice 13): FACIAL_BORDERLINE parser + flag-gated prompt selection
+# ---------------------------------------------------------------------------
+# Pins the parser-widening + ternary-template behavior introduced in Step B
+# of the FACIAL_BORDERLINE promotion plan. The parser recognizes BORDERLINE
+# unconditionally; the prompt assembler picks the ternary template only
+# when ``LINKEDIN_FACIAL_BORDERLINE_ENABLED`` is True. Production behavior
+# under flag-off is byte-identical to pre-Step-B.
+# ---------------------------------------------------------------------------
+
+
+class TestFacialBorderlineParser:
+    def test_parse_facial_response_recognizes_borderline_in_decision_line(self):
+        from linkedin.judgment_templates import parse_facial_response
+        raw = "DECISION: FACIAL_BORDERLINE\nREASON: snippet cannot resolve"
+        result = parse_facial_response(raw)
+        assert result.decision == "FACIAL_BORDERLINE"
+        assert "cannot resolve" in result.reason
+
+    def test_parse_facial_response_borderline_wins_over_yes_substring_check(self):
+        """Order-matters fix: BORDERLINE detection runs before YES/NO substring."""
+        from linkedin.judgment_templates import parse_facial_response
+        raw = "DECISION: FACIAL_BORDERLINE\nREASON: yes-flavored prose mentioning yes"
+        result = parse_facial_response(raw)
+        assert result.decision == "FACIAL_BORDERLINE"
+
+    def test_parse_facial_batch_response_recognizes_borderline(self):
+        from linkedin.judgment_templates import parse_facial_batch_response
+        raw = (
+            "[1] FACIAL_BORDERLINE | snippet cannot resolve\n"
+            "[2] FACIAL_YES | strong ML trajectory\n"
+            "[3] FACIAL_NO | pure frontend\n"
+        )
+        results = parse_facial_batch_response(raw, 3)
+        assert len(results) == 3
+        assert results[0].decision == "FACIAL_BORDERLINE"
+        assert results[1].decision == "FACIAL_YES"
+        assert results[2].decision == "FACIAL_NO"
+
+    def test_parse_facial_response_unknown_decision_still_parse_failure(self):
+        """Parser must not become permissive — unknown classes still fail."""
+        from linkedin.judgment_templates import parse_facial_response
+        raw = "DECISION: FACIAL_MAYBE\nREASON: model went off-script"
+        result = parse_facial_response(raw)
+        assert result.decision == "PARSE_FAILURE"
+
+
+class TestFacialBorderlinePromptSelection:
+    """Flag-gated selection of binary vs ternary facial templates.
+
+    These tests monkey-patch ``shared.config.LINKEDIN_FACIAL_BORDERLINE_ENABLED``
+    rather than setting the env-var, because the flag is read once at import
+    time. ``linkedin.judgment_templates`` accesses it lazily via
+    ``_config.LINKEDIN_FACIAL_BORDERLINE_ENABLED`` so an attribute monkey-patch
+    is observed by ``assemble_facial_system`` / ``assemble_facial_batch_system``.
+    """
+
+    def _make_brief(self):
+        brief = MagicMock()
+        brief.role_title = "ML Engineer"
+        brief.role_level = "IC4"
+        brief.role_summary = "Build ML systems"
+        brief.fast_exit_block.return_value = "- Wrong domain entirely"
+        brief.trajectory_yes_block.return_value = "- ML research positions"
+        brief.trajectory_ambiguous_block.return_value = "- Mixed ML/non-ML"
+        brief.trajectory_no_block.return_value = "- Pure frontend"
+        brief.non_fit_block.return_value = "- Management consulting"
+        brief.capability_area_names.return_value = ["Data Curation", "RL"]
+        brief.trajectory_yes_compact.return_value = "ML research"
+        brief.trajectory_ambiguous_compact.return_value = "Mixed"
+        brief.trajectory_no_compact.return_value = "Frontend"
+        brief.non_fit_compact.return_value = "Consulting"
+        brief.capability_area_names_inline.return_value = "Data Curation, RL"
+        return brief
+
+    def test_assemble_facial_system_uses_binary_template_under_flag_off(self, monkeypatch):
+        import shared.config as cfg
+        from linkedin.judgment_templates import assemble_facial_system
+        monkeypatch.setattr(cfg, "LINKEDIN_FACIAL_BORDERLINE_ENABLED", False)
+        result = assemble_facial_system(self._make_brief())
+        assert "Ambiguity favors NO" in result
+        assert "DECISION: FACIAL_YES or FACIAL_NO" in result
+        assert "FACIAL_BORDERLINE" not in result
+
+    def test_assemble_facial_system_uses_ternary_template_under_flag_on(self, monkeypatch):
+        import shared.config as cfg
+        from linkedin.judgment_templates import assemble_facial_system
+        monkeypatch.setattr(cfg, "LINKEDIN_FACIAL_BORDERLINE_ENABLED", True)
+        result = assemble_facial_system(self._make_brief())
+        assert "Ambiguity favors NO" not in result
+        assert "Do NOT open a profile just to" not in result
+        assert "FACIAL_BORDERLINE" in result
+        assert "DECISION: FACIAL_YES | FACIAL_BORDERLINE | FACIAL_NO" in result
+
+    def test_assemble_facial_batch_system_flag_off_unchanged(self, monkeypatch):
+        import shared.config as cfg
+        from linkedin.judgment_templates import assemble_facial_batch_system
+        monkeypatch.setattr(cfg, "LINKEDIN_FACIAL_BORDERLINE_ENABLED", False)
+        result = assemble_facial_batch_system(self._make_brief())
+        assert "Ambiguity favors NO" in result
+        assert "[candidate_number] FACIAL_YES or FACIAL_NO" in result
+        assert "FACIAL_BORDERLINE" not in result
+
+    def test_assemble_facial_batch_system_flag_on_ternary(self, monkeypatch):
+        import shared.config as cfg
+        from linkedin.judgment_templates import assemble_facial_batch_system
+        monkeypatch.setattr(cfg, "LINKEDIN_FACIAL_BORDERLINE_ENABLED", True)
+        result = assemble_facial_batch_system(self._make_brief())
+        assert "Ambiguity favors NO" not in result
+        assert "FACIAL_BORDERLINE" in result
+        assert "[candidate_number] FACIAL_YES | FACIAL_BORDERLINE | FACIAL_NO" in result
+
+    def test_ternary_templates_within_token_efficiency_budget(self):
+        """Ternary template must be at most 1.20× binary template length.
+
+        The auditor flagged token-proxy growth as a cost concern. This pin
+        catches future prompt drift that would balloon the cached prefix.
+        """
+        from linkedin.judgment_templates import (
+            FACIAL_TRIAGE_TEMPLATE,
+            FACIAL_TRIAGE_TEMPLATE_TERNARY,
+            FACIAL_TRIAGE_TEMPLATE_BATCH,
+            FACIAL_TRIAGE_TEMPLATE_BATCH_TERNARY,
+        )
+        single_ratio = len(FACIAL_TRIAGE_TEMPLATE_TERNARY) / len(FACIAL_TRIAGE_TEMPLATE)
+        batch_ratio = len(FACIAL_TRIAGE_TEMPLATE_BATCH_TERNARY) / len(FACIAL_TRIAGE_TEMPLATE_BATCH)
+        assert single_ratio <= 1.20, (
+            f"Ternary single template too large: ratio={single_ratio:.4f} "
+            f"(binary={len(FACIAL_TRIAGE_TEMPLATE)}, ternary={len(FACIAL_TRIAGE_TEMPLATE_TERNARY)})"
+        )
+        assert batch_ratio <= 1.20, (
+            f"Ternary batch template too large: ratio={batch_ratio:.4f} "
+            f"(binary={len(FACIAL_TRIAGE_TEMPLATE_BATCH)}, ternary={len(FACIAL_TRIAGE_TEMPLATE_BATCH_TERNARY)})"
+        )

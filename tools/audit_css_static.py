@@ -49,6 +49,25 @@ DEF_PATTERN = re.compile(r"^\s*(--[a-z0-9-]+)\s*:")
 # silently if the token is undefined.
 REF_PATTERN = re.compile(r"var\(\s*(--[a-z0-9-]+)\s*\)")
 
+# CSS block comments. Stripped before scanning for refs so the validator
+# doesn't false-positive on ``var(--paper)`` written inside an editorial
+# explanation of why a previous bug existed. Re.DOTALL so the pattern
+# spans newlines (CSS comments are commonly multi-line).
+COMMENT_PATTERN = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+
+def strip_comments_preserving_lines(text: str) -> str:
+    """Replace CSS block-comment content with spaces, keeping ``\\n``.
+
+    Line numbers in the stripped text match the original file so the
+    diagnostic ``file:line`` reference remains correct.
+    """
+
+    def _blank(match: re.Match[str]) -> str:
+        return re.sub(r"[^\n]", " ", match.group(0))
+
+    return COMMENT_PATTERN.sub(_blank, text)
+
 
 @dataclass(frozen=True)
 class TokenReference:
@@ -79,7 +98,8 @@ def collect_references(css_files: list[Path]) -> list[TokenReference]:
 
     refs: list[TokenReference] = []
     for path in css_files:
-        for lineno, line in enumerate(path.read_text().splitlines(), start=1):
+        scrubbed = strip_comments_preserving_lines(path.read_text())
+        for lineno, line in enumerate(scrubbed.splitlines(), start=1):
             for match in REF_PATTERN.finditer(line):
                 refs.append(
                     TokenReference(file=path, line=lineno, token=match.group(1))

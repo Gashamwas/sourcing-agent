@@ -5,6 +5,7 @@ Run with: python -m pytest tests/test_linkedin_pipeline.py -v
 
 import asyncio
 import json
+import sqlite3
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,6 +23,7 @@ from shared.schemas import (
 )
 from shared.reconciliation_schemas import RecruiterActivitySnapshot
 from shared.governor import SessionExpired
+from shared.failures import ApiBudgetExhaustedError, is_api_budget_exhausted_error
 from shared.storage import append_jsonl, read_jsonl
 from linkedin.search_intelligence import LinkedInPageInsights, LinkedInSearchVariant
 from linkedin.search_mutation import SearchMutationResult
@@ -934,6 +936,76 @@ def test_run_full_resume_preserves_in_progress_string_on_session_expiry():
         assert saved["current_page"] == 1
         assert saved["strings"][0]["status"] == "in_progress"
         assert saved["strings"][1]["status"] == "queued"
+
+
+def test_evaluate_snippet_reraises_api_budget_exhaustion_from_facial_judge():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        snippet = _make_snippet()
+        p._tightening_prefix = ""
+
+        with patch(
+            "linkedin.orchestrator.facial_judge",
+            side_effect=RuntimeError(
+                "Your credit balance is too low to access the Anthropic API. "
+                "Please go to Plans & Billing to upgrade or purchase credits."
+            ),
+        ):
+            with pytest.raises(ApiBudgetExhaustedError):
+                asyncio.run(p._evaluate_snippet(snippet))
+
+
+def test_run_full_resume_preserves_in_progress_string_on_api_budget_exhaustion():
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+
+        progress = Progress(
+            brief_name="test",
+            strings=[
+                SearchString(
+                    id=5,
+                    name="interrupted",
+                    boolean="one",
+                    status="in_progress",
+                    block="Block A",
+                    pages_reviewed=3,
+                ),
+                SearchString(id=6, name="next", boolean="two", status="queued", block="Block B"),
+            ],
+            current_string_id=5,
+            current_page=3,
+        )
+        progress.save(str(p.progress_path))
+
+        p.browser.connect = AsyncMock()
+        p.browser.disconnect = AsyncMock()
+        p.browser.page = MagicMock(url="https://www.linkedin.com/talent/search")
+        p._print_session_summary = MagicMock()
+        p._print_summary = MagicMock()
+        p._generate_run_report = MagicMock()
+
+        async def fake_process(search_string, progress):
+            raise ApiBudgetExhaustedError(
+                "Your credit balance is too low to access the Anthropic API."
+            )
+
+        p._process_string = fake_process
+
+        with pytest.raises(ApiBudgetExhaustedError):
+            asyncio.run(p.run_full(resume=True))
+
+        saved = json.loads(Path(td, "progress.json").read_text())
+        assert saved["current_string_id"] == 5
+        assert saved["current_page"] == 3
+        assert saved["strings"][0]["status"] == "in_progress"
+        assert saved["strings"][1]["status"] == "queued"
+
+        runtime_db = Path(td, "runtime_state.sqlite3")
+        with sqlite3.connect(runtime_db) as conn:
+            row = conn.execute(
+                "SELECT status, stop_reason FROM runs ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        assert row == ("interrupted", "api_budget_exhausted")
 
 
 def test_run_full_retries_same_string_after_browser_crash_recovery():
@@ -2104,3 +2176,941 @@ def test_build_run_report_snapshot_includes_search_intelligence_summary():
             snapshot["string_performance"][0]["search_intelligence"]["drift_rescue_summary"]["outcome"]
             == "rescued"
         )
+
+
+# ---------------------------------------------------------------------------
+# Slice 2: shadow external-evidence augmentation in _full_evaluate
+# ---------------------------------------------------------------------------
+# These tests pin the analytical-debug shadow block. Baseline canonical state
+# must not be affected by anything in the shadow path; the artifact written
+# is shadow_final_judgments.jsonl (declared as ANALYTICAL_DEBUG in
+# shared/runtime_state/artifacts.py).
+
+from shared.schemas import (
+    CandidateProfileSummary,
+    Education,
+    Experience,
+    EvidenceRef,
+    ExternalCandidateEvidence,
+    ExternalEvidenceFailure,
+    ExternalFactBlock,
+    ExternalInference,
+    TriggerDecision,
+)
+
+
+def _make_full_evaluate_pipeline(td: str):
+    """Build a pipeline + the mocks needed to exercise just the shadow block.
+
+    Mocks the browser, profile extraction, baseline full_judge, novelty
+    derivation, and side-effects so that running _full_evaluate exercises
+    only the canonical lifecycle prelude + the shadow block + the
+    save/reject branch.
+    """
+
+    p = _make_pipeline(td)
+    # has_v2_schema=False → _bias_monitor stays None → no bias loop runs.
+    p._bias_monitor = None
+    p._triage_tightened = False
+    p._tightening_prefix = ""
+
+    # Browser mocks — _full_evaluate calls these.
+    p.browser.get_profile_status_summary = AsyncMock(return_value={})
+    p.browser.go_back_to_results = AsyncMock()
+
+    # Acquisition service — return a stand-in AcquisitionResult with .profile_summary
+    summary = CandidateProfileSummary(
+        name="Test Person",
+        profile_url="/talent/profile/test123",
+        headline="ML Engineer",
+        experiences=[
+            Experience(
+                title="ML Engineer",
+                company="Acme",
+                start="2020",
+                end="present",
+                summary_bullets=["X", "Y"],
+            )
+        ],
+        education=[Education(degree="PhD", school="MIT", field="ML")],
+        skills_snippet=["python"],
+    )
+    acquisition = MagicMock()
+    acquisition.profile_summary = summary
+    p._acquisition_service = MagicMock()
+    p._acquisition_service.extract_profile_summary = AsyncMock(return_value=acquisition)
+
+    # Side-effects (save action) — async no-op.
+    p._side_effects_service = MagicMock()
+    p._side_effects_service.handle_save_decision = AsyncMock()
+
+    # _ensure_services is called inside _full_evaluate; make it a no-op so
+    # it doesn't reset the mocks above.
+    p._ensure_services = MagicMock()
+
+    # Novelty derivation is orthogonal; return constant pair.
+    p._derive_novelty_value = MagicMock(return_value=("medium", "rationale"))
+
+    # Runtime state bridge / run id are not initialized in the fake pipeline,
+    # so _start_runtime_stage_attempt / _finish_runtime_stage_success /
+    # _record_runtime_event short-circuit on their None checks. Nothing to
+    # mock further.
+    return p, summary
+
+
+def _baseline_save_decision(*, name: str = "Test Person", url: str = "/talent/profile/test123") -> OpusDecision:
+    return OpusDecision(
+        stage="full",
+        decision="SAVE",
+        path="DIRECT:Data Curation",
+        confidence=0.62,
+        rationale="Strong builder.",
+        candidate_name=name,
+        profile_url=url,
+    )
+
+
+def _baseline_reject_decision(**kwargs) -> OpusDecision:
+    base = _baseline_save_decision(**kwargs)
+    base.decision = "REJECT"
+    base.path = "none"
+    base.rationale = "Not a fit."
+    base.confidence = 0.7
+    return base
+
+
+def _baseline_parse_failure(**kwargs) -> OpusDecision:
+    base = _baseline_save_decision(**kwargs)
+    base.decision = "PARSE_FAILURE"
+    base.path = "none"
+    base.rationale = "[PARSE_FAILURE: bad output]"
+    base.confidence = 0.0
+    return base
+
+
+def _evidence_with_two_refs() -> ExternalCandidateEvidence:
+    return ExternalCandidateEvidence(
+        trigger_reason="academic_context",
+        identity_confidence=0.7,
+        external_fact_blocks=[
+            ExternalFactBlock(
+                topic="thesis",
+                facts=["Thesis on RLHF."],
+                evidence_refs=[
+                    EvidenceRef(url="https://x.example/a", source_quality="high"),
+                    EvidenceRef(url="https://x.example/b", source_quality="medium"),
+                ],
+                source_quality="high",
+            )
+        ],
+        external_inferences=[],
+        unresolved_ambiguities=[],
+        do_not_use_for_judgment=[],
+        raw_provider_model="sonar-deep-research",
+        normalizer_model="",
+    )
+
+
+def _read_shadow(td: str) -> list[dict]:
+    return read_jsonl(Path(td, "shadow_final_judgments.jsonl"))
+
+
+def _assert_baseline_canonical_preserved(
+    pipeline,
+    *,
+    expected_decision: str,
+    expected_save_called: bool,
+):
+    """Common canonical-preservation invariants for shadow-block tests.
+
+    Pins that the save side-effect is governed by the BASELINE decision alone:
+    when the baseline is a SAVE-flavored decision, ``handle_save_decision`` is
+    awaited exactly once; for non-save baselines, it is never awaited. The
+    side-effect call site (orchestrator.py:4162) does not accept a ``decision``
+    kwarg, so the structural pin "no enriched OpusDecision can leak into the
+    save click" is verified by the save-call signature itself.
+    """
+    save_mock = pipeline._side_effects_service.handle_save_decision
+    if expected_save_called:
+        save_mock.assert_awaited_once()
+        # Structural pin: the call site only forwards (snippet, runtime_search_string,
+        # attempt_id). No decision kwarg is accepted, so an enriched OpusDecision
+        # cannot reach this path even if the shadow block produced one.
+        assert "decision" not in save_mock.await_args.kwargs
+    else:
+        assert save_mock.await_count == 0
+
+
+# Test A — feature off (default): shadow path is not entered at all.
+def test_full_evaluate_feature_off_skips_shadow_path():
+    with tempfile.TemporaryDirectory() as td:
+        p, _ = _make_full_evaluate_pipeline(td)
+        snippet = _make_snippet()
+
+        with patch("linkedin.orchestrator.config") as mock_cfg, \
+             patch("linkedin.orchestrator.full_judge", return_value=_baseline_save_decision()), \
+             patch(
+                 "linkedin.orchestrator.should_request_external_evidence"
+             ) as mock_gate, \
+             patch(
+                 "linkedin.orchestrator.fetch_external_candidate_evidence"
+             ) as mock_fetch, \
+             patch(
+                 "linkedin.orchestrator.full_judge_with_external_evidence"
+             ) as mock_enrich, \
+             patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+            mock_cfg.LINKEDIN_EXTERNAL_EVIDENCE_ENABLED = False
+            mock_cfg.LINKEDIN_PANEL_CLOSE_SETTLE_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MIN_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MAX_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_BASE_SECONDS = 0
+            decision = asyncio.run(p._full_evaluate(snippet))
+
+        assert decision.decision == "SAVE"
+        assert mock_gate.call_count == 0
+        assert mock_fetch.call_count == 0
+        assert mock_enrich.call_count == 0
+        # Shadow file must NOT exist when feature is off.
+        assert not Path(td, "shadow_final_judgments.jsonl").exists()
+        # Save side-effect was awaited exactly once with the baseline decision.
+        _assert_baseline_canonical_preserved(
+            p, expected_decision="SAVE", expected_save_called=True
+        )
+        # Tighten: the SAME snippet object reached the side-effect call (not
+        # a copy or a substitute built from the enriched path).
+        assert (
+            p._side_effects_service.handle_save_decision.await_args.kwargs["snippet"]
+            is snippet
+        )
+
+
+# Test B — feature on, gate decides to skip.
+def test_full_evaluate_feature_on_gate_skip_writes_skipped_record():
+    with tempfile.TemporaryDirectory() as td:
+        p, _ = _make_full_evaluate_pipeline(td)
+        snippet = _make_snippet()
+
+        skip_decision = TriggerDecision(
+            should_run=False,
+            reason="",
+            skip_reason="no_trigger_matched",
+            signals={"experience_count": 4, "fired": "none"},
+        )
+
+        with patch("linkedin.orchestrator.config") as mock_cfg, \
+             patch("linkedin.orchestrator.full_judge", return_value=_baseline_save_decision()), \
+             patch(
+                 "linkedin.orchestrator.should_request_external_evidence",
+                 return_value=skip_decision,
+             ) as mock_gate, \
+             patch(
+                 "linkedin.orchestrator.fetch_external_candidate_evidence"
+             ) as mock_fetch, \
+             patch(
+                 "linkedin.orchestrator.full_judge_with_external_evidence"
+             ) as mock_enrich, \
+             patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+            mock_cfg.LINKEDIN_EXTERNAL_EVIDENCE_ENABLED = True
+            mock_cfg.LINKEDIN_PANEL_CLOSE_SETTLE_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MIN_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MAX_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_BASE_SECONDS = 0
+            asyncio.run(p._full_evaluate(snippet))
+
+        assert mock_gate.call_count == 1
+        assert mock_fetch.call_count == 0
+        assert mock_enrich.call_count == 0
+
+        records = _read_shadow(td)
+        assert len(records) == 1
+        rec = records[0]
+        assert rec["external_evidence_status"] == "skipped_no_trigger"
+        assert rec["enriched"] is None
+        assert rec["diff"]["computed"] is False
+        assert rec["evidence_refs_count"] == 0
+        assert rec["identity_confidence"] is None
+        assert rec["feature_version"] == "slice2"
+        assert rec["candidate_name"] == snippet.name
+        assert rec["profile_url"] == snippet.profile_url
+        # Tighten: the gate-skip path must NOT block the save click — baseline
+        # said SAVE, so the side-effect runs exactly once with the same snippet.
+        # (Trigger signals are not persisted on ShadowFullJudgmentRecord, so
+        # we do not assert on rec["signals"]; the field does not exist.)
+        _assert_baseline_canonical_preserved(
+            p, expected_decision="SAVE", expected_save_called=True
+        )
+        assert (
+            p._side_effects_service.handle_save_decision.await_args.kwargs["snippet"]
+            is snippet
+        )
+
+
+# Test C — feature on, gate fires, evidence returned, enriched judge differs from baseline.
+def test_full_evaluate_enriched_decision_changed_does_not_replace_baseline():
+    with tempfile.TemporaryDirectory() as td:
+        p, _ = _make_full_evaluate_pipeline(td)
+        snippet = _make_snippet()
+
+        trigger = TriggerDecision(
+            should_run=True,
+            reason="academic_context",
+            skip_reason="",
+            signals={"fired": "academic_context"},
+        )
+        evidence = _evidence_with_two_refs()
+        baseline = _baseline_save_decision()
+        enriched = OpusDecision(
+            stage="full",
+            decision="REJECT",
+            path="none",
+            confidence=0.55,
+            rationale="External evidence undermines fit.",
+            candidate_name=snippet.name,
+            profile_url=snippet.profile_url,
+        )
+
+        with patch("linkedin.orchestrator.config") as mock_cfg, \
+             patch("linkedin.orchestrator.full_judge", return_value=baseline), \
+             patch(
+                 "linkedin.orchestrator.should_request_external_evidence",
+                 return_value=trigger,
+             ), \
+             patch(
+                 "linkedin.orchestrator.fetch_external_candidate_evidence",
+                 return_value=evidence,
+             ), \
+             patch(
+                 "linkedin.orchestrator.full_judge_with_external_evidence",
+                 return_value=enriched,
+             ), \
+             patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+            mock_cfg.LINKEDIN_EXTERNAL_EVIDENCE_ENABLED = True
+            mock_cfg.LINKEDIN_PANEL_CLOSE_SETTLE_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MIN_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MAX_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_BASE_SECONDS = 0
+            returned = asyncio.run(p._full_evaluate(snippet))
+
+        # Canonical decision is the BASELINE, not the enriched one.
+        assert returned.decision == "SAVE"
+        # Save side-effect was called exactly once with the baseline-shaped decision.
+        # The helper also pins that no `decision` kwarg reaches the call site —
+        # i.e., the enriched OpusDecision is structurally incapable of leaking
+        # into the side-effect (handle_save_decision's signature only accepts
+        # snippet/runtime_search_string/attempt_id; see orchestrator.py:4162).
+        _assert_baseline_canonical_preserved(
+            p, expected_decision="SAVE", expected_save_called=True
+        )
+        assert (
+            p._side_effects_service.handle_save_decision.await_args.kwargs["snippet"]
+            is snippet
+        )
+
+        records = _read_shadow(td)
+        assert len(records) == 1
+        rec = records[0]
+        assert rec["external_evidence_status"] == "evidence_present"
+        assert rec["evidence_refs_count"] == 2
+        assert rec["identity_confidence"] == pytest.approx(0.7)
+        assert rec["diff"]["computed"] is True
+        assert rec["diff"]["decision_changed"] is True
+        assert rec["diff"]["decision_baseline"] == "SAVE"
+        assert rec["diff"]["decision_enriched"] == "REJECT"
+        # Tighten: pin the raw top-level decision dicts too (not just the diff
+        # summary). The shadow record snapshots both OpusDecision.to_dict()s.
+        assert rec["baseline"]["decision"] == "SAVE"
+        assert rec["enriched"]["decision"] == "REJECT"
+
+
+# Test D — feature on, provider returns ExternalEvidenceFailure(reason="quota_exhausted").
+def test_full_evaluate_provider_failure_does_not_propagate_or_call_enrichment():
+    """Baseline canonical state survives a quota_exhausted provider failure.
+
+    NOTE on absorption: the slice 2 absorption layer is the try/except in
+    ``_full_evaluate`` itself (no ApiBudgetExhaustedError propagates), already
+    pinned below. We deliberately do NOT assert
+    ``is_api_budget_exhausted_error(detail) is False`` here, because this
+    test's failure detail ("credit balance is too low") is literally one of
+    the recognized substring patterns in ``shared/failures.py`` — that string
+    helper IS supposed to flag such messages when given them. The invariant
+    "the provider's quota detail must not later trip the run-pause helper"
+    is enforced by the orchestrator's absorption (no exception escapes this
+    code path), not by the helper's string-matching contract. The
+    parametrized test below asserts the helper-string property for failure
+    shapes whose details do not contain budget patterns.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        p, _ = _make_full_evaluate_pipeline(td)
+        snippet = _make_snippet()
+
+        trigger = TriggerDecision(
+            should_run=True,
+            reason="academic_context",
+            skip_reason="",
+            signals={"fired": "academic_context"},
+        )
+        failure = ExternalEvidenceFailure(
+            reason="quota_exhausted",
+            detail="credit balance is too low",
+            provider="perplexity",
+            http_status=402,
+        )
+
+        with patch("linkedin.orchestrator.config") as mock_cfg, \
+             patch("linkedin.orchestrator.full_judge", return_value=_baseline_save_decision()), \
+             patch(
+                 "linkedin.orchestrator.should_request_external_evidence",
+                 return_value=trigger,
+             ), \
+             patch(
+                 "linkedin.orchestrator.fetch_external_candidate_evidence",
+                 return_value=failure,
+             ), \
+             patch(
+                 "linkedin.orchestrator.full_judge_with_external_evidence"
+             ) as mock_enrich, \
+             patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+            mock_cfg.LINKEDIN_EXTERNAL_EVIDENCE_ENABLED = True
+            mock_cfg.LINKEDIN_PANEL_CLOSE_SETTLE_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MIN_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MAX_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_BASE_SECONDS = 0
+            try:
+                returned = asyncio.run(p._full_evaluate(snippet))
+            except ApiBudgetExhaustedError as exc:  # pragma: no cover
+                pytest.fail(
+                    f"Shadow path must absorb ExternalEvidenceFailure; got {exc!r}"
+                )
+
+        assert returned.decision == "SAVE"
+        assert mock_enrich.call_count == 0
+
+        records = _read_shadow(td)
+        assert len(records) == 1
+        rec = records[0]
+        assert rec["external_evidence_status"] == "quota_exhausted"
+        assert rec["enriched"] is None
+        assert rec["diff"]["computed"] is False
+        assert rec["evidence_refs_count"] == 0
+        # Tighten: provider failure must not block the save click — baseline
+        # said SAVE, so the side-effect runs exactly once with the baseline.
+        _assert_baseline_canonical_preserved(
+            p, expected_decision="SAVE", expected_save_called=True
+        )
+
+
+# Test E — feature on, evidence returned, enriched judge raises.
+def test_full_evaluate_enrichment_exception_is_absorbed():
+    with tempfile.TemporaryDirectory() as td:
+        p, _ = _make_full_evaluate_pipeline(td)
+        snippet = _make_snippet()
+
+        trigger = TriggerDecision(
+            should_run=True, reason="academic_context", skip_reason="", signals={}
+        )
+        evidence = _evidence_with_two_refs()
+
+        with patch("linkedin.orchestrator.config") as mock_cfg, \
+             patch("linkedin.orchestrator.full_judge", return_value=_baseline_save_decision()), \
+             patch(
+                 "linkedin.orchestrator.should_request_external_evidence",
+                 return_value=trigger,
+             ), \
+             patch(
+                 "linkedin.orchestrator.fetch_external_candidate_evidence",
+                 return_value=evidence,
+             ), \
+             patch(
+                 "linkedin.orchestrator.full_judge_with_external_evidence",
+                 side_effect=RuntimeError("opus broke"),
+             ), \
+             patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+            mock_cfg.LINKEDIN_EXTERNAL_EVIDENCE_ENABLED = True
+            mock_cfg.LINKEDIN_PANEL_CLOSE_SETTLE_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MIN_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MAX_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_BASE_SECONDS = 0
+            returned = asyncio.run(p._full_evaluate(snippet))
+
+        assert returned.decision == "SAVE"
+        records = _read_shadow(td)
+        assert len(records) == 1
+        rec = records[0]
+        assert rec["external_evidence_status"] == "evidence_present"
+        assert rec["enriched"] is None
+        assert rec["diff"]["computed"] is False
+        # Tighten: when the gate fired and the provider succeeded but only the
+        # enricher broke, compute_judgment_diff records the skip_reason as the
+        # external_evidence_status ("evidence_present"). Pinning this confirms
+        # the diff dict carries the same status forward into the analytics row.
+        assert rec["diff"]["reason"] == "evidence_present"
+        # Tighten: enrichment failure must not block the save click — baseline
+        # said SAVE, so the side-effect runs exactly once with the baseline.
+        _assert_baseline_canonical_preserved(
+            p, expected_decision="SAVE", expected_save_called=True
+        )
+
+
+# Test F — feature on, writer itself raises; outer try/except must absorb it.
+def test_full_evaluate_writer_exception_is_absorbed():
+    with tempfile.TemporaryDirectory() as td:
+        p, _ = _make_full_evaluate_pipeline(td)
+        snippet = _make_snippet()
+
+        trigger = TriggerDecision(
+            should_run=False, reason="", skip_reason="no_trigger_matched", signals={}
+        )
+
+        with patch("linkedin.orchestrator.config") as mock_cfg, \
+             patch("linkedin.orchestrator.full_judge", return_value=_baseline_save_decision()), \
+             patch(
+                 "linkedin.orchestrator.should_request_external_evidence",
+                 return_value=trigger,
+             ), \
+             patch(
+                 "linkedin.orchestrator.record_shadow_full_judgment",
+                 side_effect=RuntimeError("disk on fire"),
+             ), \
+             patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+            mock_cfg.LINKEDIN_EXTERNAL_EVIDENCE_ENABLED = True
+            mock_cfg.LINKEDIN_PANEL_CLOSE_SETTLE_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MIN_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MAX_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_BASE_SECONDS = 0
+            returned = asyncio.run(p._full_evaluate(snippet))
+
+        # Baseline canonical state is preserved.
+        assert returned.decision == "SAVE"
+        # Shadow file should not exist (writer was patched to raise before write).
+        assert not Path(td, "shadow_final_judgments.jsonl").exists()
+        # Save side-effect was awaited exactly once with the baseline-shaped
+        # decision (writer-failure path must not block the save click).
+        _assert_baseline_canonical_preserved(
+            p, expected_decision="SAVE", expected_save_called=True
+        )
+
+
+# Test G — baseline parse/judgment failure: shadow block is skipped entirely.
+def test_full_evaluate_baseline_parse_failure_skips_shadow():
+    with tempfile.TemporaryDirectory() as td:
+        p, _ = _make_full_evaluate_pipeline(td)
+        snippet = _make_snippet()
+
+        with patch("linkedin.orchestrator.config") as mock_cfg, \
+             patch(
+                 "linkedin.orchestrator.full_judge",
+                 return_value=_baseline_parse_failure(),
+             ), \
+             patch(
+                 "linkedin.orchestrator.should_request_external_evidence"
+             ) as mock_gate, \
+             patch(
+                 "linkedin.orchestrator.fetch_external_candidate_evidence"
+             ) as mock_fetch, \
+             patch(
+                 "linkedin.orchestrator.full_judge_with_external_evidence"
+             ) as mock_enrich, \
+             patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+            mock_cfg.LINKEDIN_EXTERNAL_EVIDENCE_ENABLED = True
+            mock_cfg.LINKEDIN_PANEL_CLOSE_SETTLE_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MIN_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MAX_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_BASE_SECONDS = 0
+            returned = asyncio.run(p._full_evaluate(snippet))
+
+        # Parse-failure path returns early in _full_evaluate (well before the
+        # bias monitor block), so the shadow block isn't reached. Either way,
+        # nothing should be written.
+        assert returned.decision == "PARSE_FAILURE"
+        assert mock_gate.call_count == 0
+        assert mock_fetch.call_count == 0
+        assert mock_enrich.call_count == 0
+        assert not Path(td, "shadow_final_judgments.jsonl").exists()
+        # Tighten: parse-failure path returns early before the save-click
+        # branch (orchestrator.py:~3966), so the side-effect must NOT have
+        # been awaited at all. The helper pins this with await_count == 0.
+        _assert_baseline_canonical_preserved(
+            p, expected_decision="PARSE_FAILURE", expected_save_called=False
+        )
+
+
+# Tests A–G above cover one provider-failure shape (quota_exhausted) plus the
+# binary feature off/on / gate skip / enriched differs / enrichment exception
+# / writer exception / parse-failure paths. The parametrized test below covers
+# the seven remaining provider-failure shapes from the slice 2 design with a
+# single test body, asserting the same canonical-preservation invariants on
+# every shape.
+@pytest.mark.parametrize(
+    "failure_reason,failure_detail,http_status",
+    [
+        ("disabled_no_api_key", "PERPLEXITY_API_KEY not set", None),
+        ("disabled_by_config", "LINKEDIN_EXTERNAL_EVIDENCE_ENABLED is False", None),
+        ("timeout", "request exceeded 90 seconds", None),
+        ("parse_failure", "expected JSON object, got list", None),
+        (
+            "weak_citations",
+            "0 citations across 0 fact blocks (minimum: 2)",
+            None,
+        ),
+        (
+            "unknown",
+            "unexpected: ConnectionResetError(54, 'Connection reset by peer')",
+            None,
+        ),
+        # http_error is structurally similar to the other failure shapes; we
+        # cover one with an http_status to exercise that field's persistence.
+        ("http_error", "Bad Gateway", 502),
+    ],
+)
+def test_full_evaluate_each_provider_failure_preserves_baseline(
+    failure_reason, failure_detail, http_status,
+):
+    """Every provider-failure reason must absorb cleanly: baseline persists,
+    no ApiBudgetExhaustedError propagates, save side effect runs with baseline.
+
+    Note on _finish_runtime_stage_success: ``_make_full_evaluate_pipeline``
+    leaves it as the real method (not a Mock); it short-circuits when
+    ``_runtime_bridge``/``_runtime_run_id`` are None on the fake pipeline (see
+    fixture comment at lines ~2254–2257). We therefore cannot assert a call
+    count on it here — the canonical-persistence pin is instead expressed via
+    the returned baseline decision and the save-click invariant.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        p, _ = _make_full_evaluate_pipeline(td)
+        snippet = _make_snippet()
+
+        trigger = TriggerDecision(
+            should_run=True,
+            reason="academic_context",
+            skip_reason="",
+            signals={"fired": "academic_context"},
+        )
+        failure = ExternalEvidenceFailure(
+            reason=failure_reason,
+            detail=failure_detail,
+            provider="perplexity",
+            http_status=http_status,
+        )
+
+        with patch("linkedin.orchestrator.config") as mock_cfg, \
+             patch("linkedin.orchestrator.full_judge", return_value=_baseline_save_decision()), \
+             patch(
+                 "linkedin.orchestrator.should_request_external_evidence",
+                 return_value=trigger,
+             ), \
+             patch(
+                 "linkedin.orchestrator.fetch_external_candidate_evidence",
+                 return_value=failure,
+             ) as mock_fetch, \
+             patch(
+                 "linkedin.orchestrator.full_judge_with_external_evidence"
+             ) as mock_enrich, \
+             patch("linkedin.orchestrator.human_delay_correlated", return_value=0.0):
+            mock_cfg.LINKEDIN_EXTERNAL_EVIDENCE_ENABLED = True
+            mock_cfg.LINKEDIN_PANEL_CLOSE_SETTLE_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MIN_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_MAX_SECONDS = 0
+            mock_cfg.LINKEDIN_REJECT_CLOSE_BASE_SECONDS = 0
+            try:
+                returned = asyncio.run(p._full_evaluate(snippet))
+            except ApiBudgetExhaustedError as exc:  # pragma: no cover
+                pytest.fail(
+                    f"Shadow path must absorb ExternalEvidenceFailure(reason={failure_reason!r}); "
+                    f"got {exc!r}"
+                )
+
+        # Baseline returned the SAVE decision — canonical state is unaffected.
+        assert returned.decision == "SAVE"
+        # The provider's ExternalEvidenceFailure was returned by the fetch
+        # mock; the enricher must not have been called.
+        assert mock_fetch.call_count == 1
+        assert mock_enrich.call_count == 0
+
+        # The slice 2 absorption layer must prevent the provider's failure
+        # detail from later tripping is_api_budget_exhausted_error. None of
+        # these seven detail strings should match the helper's billing
+        # patterns; if they ever shift to contain "credit balance is too low"
+        # / "quota exceeded" / etc., this assertion will catch it.
+        assert is_api_budget_exhausted_error(failure_detail) is False
+        assert is_api_budget_exhausted_error(failure_reason) is False
+
+        # Shadow row must record the typed failure verbatim.
+        records = _read_shadow(td)
+        assert len(records) == 1
+        rec = records[0]
+        assert rec["external_evidence_status"] == failure_reason
+        assert rec["enriched"] is None
+        assert rec["diff"]["computed"] is False
+        assert rec["evidence_refs_count"] == 0
+        assert rec["identity_confidence"] is None
+
+        # Canonical-preservation invariants: the save side-effect must have
+        # been awaited exactly once with the baseline-shaped decision.
+        _assert_baseline_canonical_preserved(
+            p, expected_decision="SAVE", expected_save_called=True
+        )
+        assert (
+            p._side_effects_service.handle_save_decision.await_args.kwargs["snippet"]
+            is snippet
+        )
+
+
+# ---------------------------------------------------------------------------
+# Step B (slice 13): orchestrator FACIAL_BORDERLINE alias-to-YES at boundary
+# ---------------------------------------------------------------------------
+# Pin the parser-output translation that keeps persistence binary at Step B.
+# Flag-on: FACIAL_BORDERLINE -> FACIAL_YES at the boundary; full-evaluate
+# fires; counters increment as YES; persistence never sees BORDERLINE.
+# Flag-off: FACIAL_BORDERLINE -> PARSE_FAILURE (fail-loud); routes through
+# the standard non-terminal failure path.
+# ---------------------------------------------------------------------------
+
+
+def _make_borderline_decision(name: str = "Test Person", url: str = "/talent/profile/test123") -> OpusDecision:
+    return OpusDecision(
+        stage="facial",
+        decision="FACIAL_BORDERLINE",
+        path="none",
+        confidence=1.0,
+        rationale="snippet matches an ambiguous trajectory",
+        candidate_name=name,
+        profile_url=url,
+    )
+
+
+def test_facial_borderline_alias_to_yes_under_flag_on():
+    """Flag-on: FACIAL_BORDERLINE returned by parser is aliased to FACIAL_YES.
+
+    Persistence (`_prior_outcomes`, `_finish_runtime_stage_success`),
+    counters (`facial_yes`), and the YES branch (which calls `_full_evaluate`)
+    must all observe FACIAL_YES, never FACIAL_BORDERLINE.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.brief_obj.has_v2_schema = True
+        p.brief_obj.employer_blacklist = []
+        p._tightening_prefix = ""
+        p._bias_monitor = None
+        p._full_evaluate = AsyncMock(return_value=None)
+
+        snippet = _make_snippet()
+
+        with patch("linkedin.orchestrator.facial_judge", return_value=_make_borderline_decision()), \
+             patch("linkedin.orchestrator.config.LINKEDIN_FACIAL_BORDERLINE_ENABLED", True):
+            asyncio.run(p._evaluate_snippet(snippet))
+
+        assert p._prior_outcomes[snippet.profile_url] == "FACIAL_YES"
+        assert p.stats["facial_yes"] == 1
+        assert p.stats["facial_no"] == 0
+        assert "facial_borderline" not in p.stats
+        assert p.stats.get("parse_failures", 0) == 0
+        p._full_evaluate.assert_awaited_once()
+
+
+def test_facial_borderline_under_flag_off_routes_to_parse_failure():
+    """Flag-off: FACIAL_BORDERLINE is a structural surprise; route to PARSE_FAILURE.
+
+    The orchestrator must NOT silently coerce to YES or NO; it must fall
+    into the standard non-terminal parse-failure path. Persistence must
+    not record FACIAL_BORDERLINE or FACIAL_YES.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.brief_obj.has_v2_schema = True
+        p.brief_obj.employer_blacklist = []
+        p._tightening_prefix = ""
+        p._bias_monitor = None
+        p._full_evaluate = AsyncMock(return_value=None)
+
+        snippet = _make_snippet()
+
+        with patch("linkedin.orchestrator.facial_judge", return_value=_make_borderline_decision()), \
+             patch("linkedin.orchestrator.config.LINKEDIN_FACIAL_BORDERLINE_ENABLED", False):
+            returned = asyncio.run(p._evaluate_snippet(snippet))
+
+        assert returned is not None
+        assert returned.decision == "PARSE_FAILURE"
+        assert p.stats.get("parse_failures", 0) == 1
+        assert p.stats["facial_yes"] == 0
+        assert p.stats["facial_no"] == 0
+        assert p._prior_outcomes.get(snippet.profile_url) != "FACIAL_BORDERLINE"
+        assert p._prior_outcomes.get(snippet.profile_url) != "FACIAL_YES"
+        p._full_evaluate.assert_not_awaited()
+
+
+def test_facial_yes_unchanged_under_flag_on():
+    """Regression: flag-on must not perturb the FACIAL_YES path."""
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.brief_obj.has_v2_schema = True
+        p.brief_obj.employer_blacklist = []
+        p._tightening_prefix = ""
+        p._bias_monitor = None
+        p._full_evaluate = AsyncMock(return_value=None)
+
+        snippet = _make_snippet()
+        yes_decision = OpusDecision(
+            stage="facial", decision="FACIAL_YES", path="none",
+            confidence=1.0, rationale="strong signal",
+            candidate_name=snippet.name, profile_url=snippet.profile_url,
+        )
+
+        with patch("linkedin.orchestrator.facial_judge", return_value=yes_decision), \
+             patch("linkedin.orchestrator.config.LINKEDIN_FACIAL_BORDERLINE_ENABLED", True):
+            asyncio.run(p._evaluate_snippet(snippet))
+
+        assert p._prior_outcomes[snippet.profile_url] == "FACIAL_YES"
+        assert p.stats["facial_yes"] == 1
+        p._full_evaluate.assert_awaited_once()
+
+
+def test_facial_no_unchanged_under_flag_on():
+    """Regression: flag-on must not perturb the FACIAL_NO path."""
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.brief_obj.has_v2_schema = True
+        p.brief_obj.employer_blacklist = []
+        p._tightening_prefix = ""
+        p._bias_monitor = None
+        p._full_evaluate = AsyncMock(return_value=None)
+
+        snippet = _make_snippet()
+        no_decision = OpusDecision(
+            stage="facial", decision="FACIAL_NO", path="none",
+            confidence=1.0, rationale="non-fit pattern",
+            candidate_name=snippet.name, profile_url=snippet.profile_url,
+        )
+
+        with patch("linkedin.orchestrator.facial_judge", return_value=no_decision), \
+             patch("linkedin.orchestrator.config.LINKEDIN_FACIAL_BORDERLINE_ENABLED", True):
+            returned = asyncio.run(p._evaluate_snippet(snippet))
+
+        assert returned.decision == "FACIAL_NO"
+        assert p._prior_outcomes[snippet.profile_url] == "FACIAL_NO"
+        assert p.stats["facial_no"] == 1
+        assert p.stats["facial_yes"] == 0
+        p._full_evaluate.assert_not_awaited()
+
+
+def test_no_facial_borderline_in_persistence_under_flag_on():
+    """All decisions reaching `_finish_runtime_stage_success` are post-translation.
+
+    Capture every call to `_finish_runtime_stage_success` while the parser
+    emits a mix of YES / BORDERLINE / NO under flag-on, and verify that
+    none of them carry decision="FACIAL_BORDERLINE". The same invariant
+    holds for `_prior_outcomes` writes.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.brief_obj.has_v2_schema = True
+        p.brief_obj.employer_blacklist = []
+        p._tightening_prefix = ""
+        p._bias_monitor = None
+        p._full_evaluate = AsyncMock(return_value=None)
+
+        captured_decisions: list[str] = []
+        original_finish = p._finish_runtime_stage_success
+
+        def _capture(*args, **kwargs):
+            captured_decisions.append(kwargs["decision"].decision)
+            return original_finish(*args, **kwargs)
+
+        p._finish_runtime_stage_success = _capture
+
+        snippets = [
+            _make_snippet(name="Alice", profile_url="/talent/profile/alice"),
+            _make_snippet(name="Bob", profile_url="/talent/profile/bob"),
+            _make_snippet(name="Carol", profile_url="/talent/profile/carol"),
+        ]
+        decisions = [
+            OpusDecision(stage="facial", decision="FACIAL_YES", path="none",
+                         confidence=1.0, rationale="strong",
+                         candidate_name="Alice", profile_url="/talent/profile/alice"),
+            _make_borderline_decision(name="Bob", url="/talent/profile/bob"),
+            OpusDecision(stage="facial", decision="FACIAL_NO", path="none",
+                         confidence=1.0, rationale="non-fit",
+                         candidate_name="Carol", profile_url="/talent/profile/carol"),
+        ]
+
+        with patch("linkedin.orchestrator.config.LINKEDIN_FACIAL_BORDERLINE_ENABLED", True):
+            for snippet, decision in zip(snippets, decisions):
+                with patch("linkedin.orchestrator.facial_judge", return_value=decision):
+                    asyncio.run(p._evaluate_snippet(snippet))
+
+        assert "FACIAL_BORDERLINE" not in captured_decisions
+        assert captured_decisions == ["FACIAL_YES", "FACIAL_YES", "FACIAL_NO"]
+        for url in (s.profile_url for s in snippets):
+            assert p._prior_outcomes.get(url) != "FACIAL_BORDERLINE"
+        assert p._prior_outcomes["/talent/profile/alice"] == "FACIAL_YES"
+        assert p._prior_outcomes["/talent/profile/bob"] == "FACIAL_YES"
+        assert p._prior_outcomes["/talent/profile/carol"] == "FACIAL_NO"
+
+
+def test_batch_path_facial_borderline_alias_to_yes():
+    """Batch path: same alias-to-YES translation at the parser-output boundary.
+
+    Mocks `facial_judge_batch` returning a YES + BORDERLINE + NO triple.
+    Both yes-class candidates (the original YES and the aliased BORDERLINE)
+    reach the YES branch (i.e. land in `facial_yes_snippets` and trigger
+    `_full_evaluate`); the NO candidate stays in NO.
+    """
+    with tempfile.TemporaryDirectory() as td:
+        p = _make_pipeline(td)
+        p.brief_obj.has_v2_schema = True
+        p.brief_obj.employer_blacklist = []
+        p._tightening_prefix = ""
+        p._bias_monitor = None
+        p._triage_tightened = False
+
+        full_eval_calls: list[str] = []
+
+        async def _capture_full_evaluate(snippet, *args, **kwargs):
+            full_eval_calls.append(snippet.profile_url)
+            return None
+
+        p._full_evaluate = AsyncMock(side_effect=_capture_full_evaluate)
+        p.browser.get_card_slot_count = AsyncMock(return_value=3)
+        p._extract_card_snippet = AsyncMock(side_effect=[
+            _make_snippet(name="Alice", profile_url="/talent/profile/alice"),
+            _make_snippet(name="Bob", profile_url="/talent/profile/bob"),
+            _make_snippet(name="Carol", profile_url="/talent/profile/carol"),
+        ])
+        p._checkpoint_progress = MagicMock()
+
+        search_string = SearchString(id=1, name="batch", boolean="ml")
+        page_report = MagicMock()
+        all_candidates: list[dict] = []
+        string_stats = {
+            "pages": 1, "candidates": 0, "duplicates": 0,
+            "facial_yes": 0, "facial_no": 0, "saves": 0, "rejects": 0,
+        }
+
+        batch_decisions = [
+            OpusDecision(stage="facial", decision="FACIAL_YES", path="none",
+                         confidence=1.0, rationale="strong",
+                         candidate_name="Alice", profile_url="/talent/profile/alice"),
+            _make_borderline_decision(name="Bob", url="/talent/profile/bob"),
+            OpusDecision(stage="facial", decision="FACIAL_NO", path="none",
+                         confidence=1.0, rationale="non-fit",
+                         candidate_name="Carol", profile_url="/talent/profile/carol"),
+        ]
+
+        with patch("shared.judger.facial_judge_batch", return_value=batch_decisions), \
+             patch("linkedin.orchestrator.config.LINKEDIN_FACIAL_BORDERLINE_ENABLED", True):
+            asyncio.run(
+                p._review_page_batch(
+                    search_string, 1, 0, page_report, all_candidates, string_stats, None,
+                )
+            )
+
+        assert "/talent/profile/alice" in full_eval_calls
+        assert "/talent/profile/bob" in full_eval_calls
+        assert "/talent/profile/carol" not in full_eval_calls
+        assert p._prior_outcomes["/talent/profile/alice"] == "FACIAL_YES"
+        assert p._prior_outcomes["/talent/profile/bob"] == "FACIAL_YES"
+        assert p._prior_outcomes["/talent/profile/carol"] == "FACIAL_NO"
+        assert p.stats["facial_yes"] == 2
+        assert p.stats["facial_no"] == 1
+        assert "facial_borderline" not in p.stats
+        outcomes = [c["outcome"] for c in all_candidates]
+        assert outcomes == ["facial_yes", "facial_yes", "facial_no"]

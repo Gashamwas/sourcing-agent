@@ -38,6 +38,12 @@ _MAX_RETRIES = 5
 _RETRYABLE_STATUS_CODES = {429, 500, 502, 503}
 
 
+class GitHubAuthError(RuntimeError):
+    """Raised when GitHub rejects the configured token."""
+
+    status_code = 401
+
+
 # ---------------------------------------------------------------------------
 # Client
 # ---------------------------------------------------------------------------
@@ -78,6 +84,15 @@ class GitHubClient:
     @property
     def limiter(self) -> RateLimiter:
         return self._limiter
+
+    async def validate_credentials(self) -> None:
+        """Fail fast before strategy formation if the configured token is invalid."""
+        status, body, _headers = await self._get("/rate_limit", "rest")
+        if status != 200 or body is None:
+            raise RuntimeError(
+                f"GitHub credential preflight failed with status {status}. "
+                "Check GITHUB_TOKEN in .env."
+            )
 
     # ── Core request method ──────────────────────────────────────────
 
@@ -138,6 +153,13 @@ class GitHubClient:
                     # 404 — not found (not an error for optional endpoints)
                     if resp.status == 404:
                         return 404, None, dict(resp.headers)
+
+                    if resp.status == 401:
+                        text = await resp.text()
+                        raise GitHubAuthError(
+                            "GitHub API authentication failed: 401 Bad credentials. "
+                            f"Check GITHUB_TOKEN in .env. Response: {text[:300]}"
+                        )
 
                     # Other errors
                     text = await resp.text()

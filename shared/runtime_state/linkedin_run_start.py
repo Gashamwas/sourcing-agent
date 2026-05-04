@@ -12,6 +12,22 @@ from .projections import project_linkedin_progress
 from .store import RuntimeStateStore
 
 
+def _identity_kwargs(brief_identity: dict | None) -> dict:
+    """Return start_run kwargs from a brief_identity dict, or empty.
+
+    Centralizes the dict-to-kwargs unpacking so future fields can be
+    added without touching every start_run call site.
+    """
+
+    if not brief_identity:
+        return {}
+    out = {}
+    for key in ("brief_path_at_launch", "brief_content_hash", "brief_snapshot_json"):
+        if key in brief_identity:
+            out[key] = brief_identity[key]
+    return out
+
+
 def start_or_resume_linkedin_run(
     *,
     store: RuntimeStateStore,
@@ -25,7 +41,16 @@ def start_or_resume_linkedin_run(
     import_legacy_state: Callable[[int], None],
     sync_progress: Callable[[int, Progress, dict[int, LinkedInExperimentState] | None], None],
     rebuild_artifacts: Callable[[int], None],
+    brief_identity: dict | None = None,
 ) -> tuple[int, Progress]:
+    """Phase 3: ``brief_identity`` is an optional dict carrying
+    ``brief_path_at_launch``, ``brief_content_hash``, and
+    ``brief_snapshot_json``. When present, the new run row pins those
+    values; when absent (legacy callers / tests), the columns stay
+    NULL/empty and the aggregator falls back to state_key for the UI
+    heading."""
+
+    pinning_kwargs = _identity_kwargs(brief_identity)
     latest_run = store.get_latest_run(source="linkedin", brief_id=brief_id)
     had_runtime_before = bool(
         latest_run or store.has_candidates(source="linkedin", brief_id=brief_id)
@@ -40,6 +65,7 @@ def start_or_resume_linkedin_run(
             resume_state=store.get_run_resume_state(int(latest_run["id"])),
             resumed_from_run_id=int(latest_run["id"]),
             clone_work_units_from_run_id=int(latest_run["id"]),
+            **pinning_kwargs,
         )
         rebuild_artifacts(run_id)
         return run_id, project_linkedin_progress(store, run_id)
@@ -51,6 +77,7 @@ def start_or_resume_linkedin_run(
         mode="resume" if resume else "fresh",
         resume_state={"brief_name": brief_name},
         resumed_from_run_id=int(latest_run["id"]) if resume and latest_run else None,
+        **pinning_kwargs,
     )
 
     if resume and not had_runtime_before and legacy_state_exists:

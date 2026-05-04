@@ -42,6 +42,7 @@ def sync_linkedin_progress(
             "candidates_discovered": search_string.candidates_count,
             "facial_yes_count": search_string.facial_yes_count,
             "facial_no_count": search_string.facial_no_count,
+            "facial_borderline_count": search_string.facial_borderline_count,
             "saves_count": len(search_string.saves),
             "rejected_count": 0,
         }

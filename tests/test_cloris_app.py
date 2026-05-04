@@ -139,6 +139,7 @@ def test_run_app_lifecycle_uses_launcher_and_shuts_down(
         server_factory=stub_server_factory,
         readiness_timeout=2.0,
         shutdown_timeout=2.0,
+        ensure_chrome=lambda: None,
     )
 
     captured_port = factory_received["port"]
@@ -187,6 +188,7 @@ def test_run_app_raises_and_shuts_down_on_readiness_timeout(
             server_factory=stub_server_factory,
             readiness_timeout=0.1,
             shutdown_timeout=2.0,
+            ensure_chrome=lambda: None,
         )
 
     assert launcher.opened == []
@@ -221,7 +223,22 @@ def test_api_status_endpoint_returns_empty_for_empty_state_root(
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/json")
-    assert response.json() == {"slice": "v0-shell-slice-4", "entries": []}
+    # Phase F Slice F7 added the additive `briefs` field — empty when
+    # there are no entries to group.
+    assert response.json() == {
+        "slice": "v0-shell-slice-4",
+        "entries": [],
+        "counts": {
+            "active": 0,
+            "working": 0,
+            "paused": 0,
+            "finished": 0,
+            "lost": 0,
+            "archived": 0,
+            "orphaned": 0,
+        },
+        "briefs": [],
+    }
 
 
 def test_api_status_endpoint_serializes_entries(
@@ -236,7 +253,6 @@ def test_api_status_endpoint_serializes_entries(
             StateDirEntry(
                 source="linkedin",
                 state_key="li-key",
-                state_dir="/tmp/state/linkedin/li-key",
                 runtime_state_present=True,
                 latest_run=RunSummary(
                     id=42,
@@ -251,7 +267,6 @@ def test_api_status_endpoint_serializes_entries(
             StateDirEntry(
                 source="github",
                 state_key="gh-key",
-                state_dir="/tmp/state/github/gh-key",
                 runtime_state_present=False,
                 latest_run=None,
                 brief_id_from_run=None,
@@ -274,8 +289,8 @@ def test_api_status_endpoint_serializes_entries(
             {
                 "source": "linkedin",
                 "state_key": "li-key",
-                "state_dir": "/tmp/state/linkedin/li-key",
                 "runtime_state_present": True,
+                "runtime_state_corrupt": False,
                 "latest_run": {
                     "id": 42,
                     "status": "completed",
@@ -293,12 +308,21 @@ def test_api_status_endpoint_serializes_entries(
                 "worker_input_mode": None,
                 "resumable": None,
                 "worker_state": "missing",
+                "heartbeat_age_s": None,
+                "brief_role_title": None,
+                "brief_linkedin_project": None,
+                "brief_drift_since_last_run": None,
+                "attempt_health": None,
+                "work_unit_progress": None,
+                "run_stalled": False,
+                "stall_failure_kind": None,
+                "kind": "orphaned_state_dir",
             },
             {
                 "source": "github",
                 "state_key": "gh-key",
-                "state_dir": "/tmp/state/github/gh-key",
                 "runtime_state_present": False,
+                "runtime_state_corrupt": False,
                 "latest_run": None,
                 "brief_id_from_run": None,
                 "brief_path_from_worker": None,
@@ -309,8 +333,30 @@ def test_api_status_endpoint_serializes_entries(
                 "worker_input_mode": None,
                 "resumable": None,
                 "worker_state": "missing",
+                "heartbeat_age_s": None,
+                "brief_role_title": None,
+                "brief_linkedin_project": None,
+                "brief_drift_since_last_run": None,
+                "attempt_health": None,
+                "work_unit_progress": None,
+                "run_stalled": False,
+                "stall_failure_kind": None,
+                "kind": "orphaned_state_dir",
             },
         ],
+        "counts": {
+            "active": 0,
+            "working": 0,
+            "paused": 0,
+            "finished": 0,
+            "lost": 0,
+            "archived": 0,
+            "orphaned": 0,
+        },
+        # Phase F Slice F7: empty for the fixture above (no briefs
+        # configured on the response — the fixture sets entries
+        # directly without populating the briefs grouping).
+        "briefs": [],
     }
 
 
@@ -335,10 +381,14 @@ def test_launch_linkedin_endpoint_201_happy_path(
     response = client.post("/api/launch/linkedin", json={"brief_path": "/tmp/brief.json"})
 
     assert response.status_code == 201
+    # Phase F Slice F1 added `mode` to LaunchResponse (additive — default
+    # "fresh"). Existing fields are preserved byte-for-byte; clients that
+    # ignore unknown fields are unaffected.
     assert response.json() == {
         "slice": "v0-shell-slice-3",
         "source": "linkedin",
         "input_mode": "concurrent",
+        "mode": "fresh",
         "pid": 12345,
         "state_dir": "/tmp/state/linkedin/key",
         "worker_json_path": "/tmp/state/linkedin/key/worker.json",

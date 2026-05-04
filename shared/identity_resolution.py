@@ -120,6 +120,36 @@ def normalize_public_linkedin_url(url: str) -> str:
     return normalized
 
 
+# Phase F Slice F3: cross-module identity needs the public-handle slug
+# (the lowercased path segment) so candidates discovered via LinkedIn and
+# candidates discovered via GitHub-with-LinkedIn-hint can match on the
+# same canonical handle. Mirrors the regex shape in
+# `linkedin/recruiter_identity_resolver.py:88-91`; ported here so
+# `shared.*` modules don't import from the LinkedIn package (cycle-prone
+# and violates the module-direction rule).
+_PUBLIC_LINKEDIN_SLUG_RE = re.compile(
+    r"(?:https?://)?(?:[a-z]+\.)?linkedin\.com/in/([A-Za-z0-9._\-%]+)|^/in/([A-Za-z0-9._\-%]+)",
+    re.IGNORECASE,
+)
+
+
+def normalize_public_linkedin_handle(value: str) -> str:
+    """Return the lowercase slug for a public LinkedIn URL, or empty.
+
+    Recruiter URLs (``/talent/profile/...``) carry no public handle and
+    return empty so they can't accidentally collide across humans.
+    """
+
+    if not value:
+        return ""
+    match = _PUBLIC_LINKEDIN_SLUG_RE.search(str(value))
+    if not match:
+        return ""
+    slug = match.group(1) or match.group(2) or ""
+    slug = slug.strip().lower()
+    return slug.rstrip("/").split("?", 1)[0].split("#", 1)[0]
+
+
 def build_person_lookup_name(candidate_name: str, github_username: str = "") -> str:
     raw = str(candidate_name or "").strip()
     if not raw:

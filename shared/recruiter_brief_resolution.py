@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from shared.brief_loader import load_brief
 from shared.output_paths import derive_market_key_from_brief
 from shared.storage import read_json
+
+# Match a trailing version suffix on a brief filename, e.g. "...-v1.4.json".
+# The suffix must be the LAST hyphen-separated token before .json so we don't
+# accidentally pick up role-name fragments that happen to contain "v1".
+_BRIEF_VERSION_RE = re.compile(r"-v(\d+(?:\.\d+)*)$")
 
 
 def _read_github_brief_path_from_manifest(github_output_dir: Path) -> Path | None:
@@ -23,6 +29,68 @@ def _read_github_brief_path_from_manifest(github_output_dir: Path) -> Path | Non
         return None
     path = Path(raw_path)
     return path if path.is_file() else None
+
+
+def _parse_brief_version(stem: str) -> tuple[int, ...] | None:
+    """Return the numeric version tuple parsed from a brief filename stem.
+
+    Examples:
+      ``"brief-foo-v1"`` -> ``(1,)``
+      ``"brief-foo-v1.4"`` -> ``(1, 4)``
+      ``"brief-foo-v2.10.3"`` -> ``(2, 10, 3)``
+      ``"brief-foo"`` -> ``None`` (no parseable version suffix)
+
+    Returning ``None`` is the signal to the caller that the sibling cannot be
+    safely version-compared and the run should fail closed (plan §6).
+    """
+    match = _BRIEF_VERSION_RE.search(stem)
+    if not match:
+        return None
+    parts = match.group(1).split(".")
+    try:
+        return tuple(int(part) for part in parts)
+    except ValueError:
+        return None
+
+
+def _select_highest_version_brief(matches: list[Path]) -> Path:
+    """Choose the matching sibling brief with the highest numeric version suffix.
+
+    Plan §6 fail-closed rules:
+      - If any matching sibling does not carry a parseable ``-vN[.N]*`` suffix,
+        raise ValueError so the operator must pass ``--linkedin-brief``.
+      - If two or more siblings share the highest version, raise ValueError for
+        the same reason.
+      - Otherwise return the unique highest-version sibling.
+    """
+    versioned: list[tuple[tuple[int, ...], Path]] = []
+    unparseable: list[Path] = []
+    for path in matches:
+        version = _parse_brief_version(path.stem)
+        if version is None:
+            unparseable.append(path)
+        else:
+            versioned.append((version, path))
+
+    if unparseable:
+        listing = ", ".join(sorted(p.name for p in unparseable))
+        raise ValueError(
+            "Ambiguous LinkedIn brief sibling set: at least one matching sibling has no "
+            f"parseable -vN[.N]* version suffix ({listing}). "
+            "Pass --linkedin-brief with the canonical LinkedIn brief path."
+        )
+
+    versioned.sort(key=lambda item: item[0], reverse=True)
+    top_version = versioned[0][0]
+    top_paths = [path for version, path in versioned if version == top_version]
+    if len(top_paths) > 1:
+        listing = ", ".join(sorted(p.name for p in top_paths))
+        raise ValueError(
+            "Ambiguous LinkedIn brief sibling set: multiple siblings share the highest "
+            f"version v{'.'.join(str(part) for part in top_version)} ({listing}). "
+            "Pass --linkedin-brief with the canonical LinkedIn brief path."
+        )
+    return top_paths[0]
 
 
 def resolve_linkedin_brief_path_for_github_run(
@@ -42,7 +110,13 @@ def resolve_linkedin_brief_path_for_github_run(
        - yields the same ``derive_market_key_from_brief`` as the GitHub brief
        - shares the same ``linkedin_project_id`` in raw JSON
 
-    If multiple siblings match, the lexicographically greatest path wins (stable, deterministic).
+    Sibling selection (plan §6, version-aware fail-closed):
+      - Each sibling filename must carry a trailing ``-vN[.N]*`` numeric version
+        suffix (e.g. ``-v1``, ``-v1.4``).
+      - The unique highest numeric version wins.
+      - If any sibling lacks a parseable suffix, or two or more siblings tie at
+        the highest version, this function raises ValueError so the operator
+        must pass ``--linkedin-brief`` explicitly.
     """
     github_output_dir = Path(github_output_dir)
     if explicit_linkedin_brief:
@@ -100,4 +174,4 @@ def resolve_linkedin_brief_path_for_github_run(
             "Pass --linkedin-brief with the canonical LinkedIn brief path."
         )
 
-    return sorted(matches)[-1].resolve()
+    return _select_highest_version_brief(matches).resolve()

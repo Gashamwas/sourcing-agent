@@ -21,11 +21,13 @@ class GitHubRuntimeStateBridge:
         output_dir: str | Path,
         brief_id: str,
         brief_name: str,
+        brief_path: str | None = None,
     ):
         self.store = store
         self.output_dir = Path(output_dir)
         self.brief_id = brief_id
         self.brief_name = brief_name
+        self.brief_path = brief_path
         self.progress_path = self.output_dir / "progress.json"
 
     def has_runtime_state(self) -> bool:
@@ -42,6 +44,21 @@ class GitHubRuntimeStateBridge:
         self.store.reconcile_pending_side_effects(source="github", brief_id=self.brief_id)
         latest_run = self.store.get_latest_run(source="github", brief_id=self.brief_id)
 
+        # Phase 3: pin the brief identity on the new run row so Run
+        # Review and brief-drift detection have stable references.
+        from shared.brief_identity import compute_brief_identity
+
+        identity = (
+            compute_brief_identity(self.brief_path) if self.brief_path else None
+        )
+        identity_kwargs: dict = {}
+        if identity is not None:
+            identity_kwargs = {
+                "brief_path_at_launch": identity["brief_path_at_launch"],
+                "brief_content_hash": identity["brief_content_hash"],
+                "brief_snapshot_json": identity["brief_snapshot_json"],
+            }
+
         if resume and latest_run and self.store.has_work_units(int(latest_run["id"])):
             run_id = self.store.start_run(
                 source="github",
@@ -51,6 +68,7 @@ class GitHubRuntimeStateBridge:
                 resume_state=self.store.get_run_resume_state(int(latest_run["id"])),
                 resumed_from_run_id=int(latest_run["id"]),
                 clone_work_units_from_run_id=int(latest_run["id"]),
+                **identity_kwargs,
             )
             self.rebuild_artifacts(run_id)
             return run_id, self.store.load_github_progress(run_id)
@@ -62,6 +80,7 @@ class GitHubRuntimeStateBridge:
             mode="resume" if resume else "fresh",
             resume_state={"brief_name": self.brief_name},
             resumed_from_run_id=int(latest_run["id"]) if resume and latest_run else None,
+            **identity_kwargs,
         )
 
         if initial_progress is not None:

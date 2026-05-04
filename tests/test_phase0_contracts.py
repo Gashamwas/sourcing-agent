@@ -14,6 +14,7 @@ from shared.contracts import (
     ACTIVE_FACIAL_DECISIONS,
     BRIEF_FAMILIES,
     COMPAT_FACIAL_DECISIONS,
+    FACIAL_DECISIONS,
     FAILURE_DECISIONS,
     FULL_DECISIONS,
     GITHUB_QUERY_STATUSES,
@@ -24,7 +25,13 @@ from shared.contracts import (
     TARGET_CANDIDATE_LIFECYCLE,
     V2_BRIEF_REQUIRED_FIELDS,
 )
+import shared.judger as _judger
 from shared.judger import is_failure_decision
+from shared.runtime_state.store import (
+    DEDUP_BLOCKING_DECISIONS,
+    DEDUP_BLOCKING_LINKEDIN_DECISIONS,
+    DEDUP_BLOCKING_RUNTIME_DECISIONS,
+)
 from shared.schemas import Progress, SearchString
 
 
@@ -110,3 +117,59 @@ def test_run_log_event_vocabulary_matches_current_emitters():
         discovered.update(event_pattern.findall(path.read_text()))
 
     assert discovered == RUN_LOG_EVENTS
+
+
+# ---------------------------------------------------------------------------
+# FACIAL_BORDERLINE -- Step A of the slice 12 promotion plan.
+#
+# At Step A the constant is a *type-system widening* only. The parser,
+# validator, orchestrator, runtime-state store, projections, and persistence
+# layer must NOT yet recognize FACIAL_BORDERLINE. The tests below pin the
+# shape of that boundary so the type-system widening cannot accidentally
+# leak into runtime behavior, and so a future drive-by promotion is forced
+# to think first.
+# ---------------------------------------------------------------------------
+
+
+def test_facial_borderline_is_active_decision():
+    assert "FACIAL_BORDERLINE" in ACTIVE_FACIAL_DECISIONS
+
+
+def test_facial_borderline_is_not_compat_decision():
+    assert "FACIAL_BORDERLINE" not in COMPAT_FACIAL_DECISIONS
+
+
+def test_facial_borderline_is_facial_decision():
+    assert "FACIAL_BORDERLINE" in FACIAL_DECISIONS
+
+
+def test_facial_borderline_is_not_failure_decision():
+    assert "FACIAL_BORDERLINE" not in FAILURE_DECISIONS
+    assert is_failure_decision("FACIAL_BORDERLINE") is False
+
+
+def test_facial_borderline_is_not_dedup_blocking():
+    assert "FACIAL_BORDERLINE" not in DEDUP_BLOCKING_LINKEDIN_DECISIONS
+    assert "FACIAL_BORDERLINE" not in DEDUP_BLOCKING_DECISIONS
+    assert "FACIAL_BORDERLINE" not in DEDUP_BLOCKING_RUNTIME_DECISIONS
+
+
+def test_facial_borderline_parallels_facial_yes_dedup_status():
+    assert "FACIAL_YES" in ACTIVE_FACIAL_DECISIONS
+    assert "FACIAL_YES" not in DEDUP_BLOCKING_LINKEDIN_DECISIONS
+    assert "FACIAL_BORDERLINE" in ACTIVE_FACIAL_DECISIONS
+    assert "FACIAL_BORDERLINE" not in DEDUP_BLOCKING_LINKEDIN_DECISIONS
+    assert "FACIAL_NO" in ACTIVE_FACIAL_DECISIONS
+    assert "FACIAL_NO" in DEDUP_BLOCKING_LINKEDIN_DECISIONS
+
+
+def test_facial_borderline_is_valid_in_judger():
+    """Step B widens ``_VALID_FACIAL`` to include ``FACIAL_BORDERLINE``.
+
+    Step A's prior pin (``not in _VALID_FACIAL``) guarded the dark-constant
+    invariant. Step B is the slice where that invariant flips: the parser
+    and the validator gate both widen, while persistence stays binary
+    because the orchestrator translates ``FACIAL_BORDERLINE`` to
+    ``FACIAL_YES`` upstream of any persistence call.
+    """
+    assert "FACIAL_BORDERLINE" in _judger._VALID_FACIAL

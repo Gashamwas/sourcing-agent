@@ -8,14 +8,38 @@ from contextlib import contextmanager
 from dataclasses import asdict, is_dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 from github.schemas import GitHubProgress, GitHubSearchQuery
 from shared.contracts import TARGET_CANDIDATE_LIFECYCLE
+from shared.runtime_state.heartbeat import bump_heartbeat
+
+
+CURRENT_SCHEMA_VERSION = "9"
+
+
+def _stop_reason_helpers() -> tuple[set[str], "Callable[[Any], str]"]:
+    """Lazy-import the stop-reasons module to break a circular dependency.
+
+    ``shared.safety.__init__`` eagerly imports ``coordinator``, which
+    imports ``RuntimeStateStore`` from this module. A module-level
+    ``from shared.safety.stop_reasons import ...`` here would deadlock
+    the import graph. The helpers we need (the canonical enum set and
+    the normalizer) are imported on first call instead.
+    """
+
+    from shared.safety.stop_reasons import (  # noqa: PLC0415 - lazy by design
+        _KNOWN_STOP_REASONS,
+        normalize_stop_reason,
+    )
+    return _KNOWN_STOP_REASONS, normalize_stop_reason
 
 GITHUB_QUERY_KIND = "github_query"
 GITHUB_GRAPH_SEED_KIND = "github_graph_seed"
 LINKEDIN_STRING_KIND = "linkedin_string"
+RESEARCHER_AUTHOR_QUERY_KIND = "researcher_author_query"
+DESIGNER_BEHANCE_QUERY_KIND = "designer_behance_query"
+DESIGNER_CSE_QUERY_KIND = "designer_cse_query"
 SIDE_EFFECT_TERMINAL_STATUSES = {"succeeded", "failed", "skipped", "invalidated"}
 
 TERMINAL_WORK_UNIT_STATUSES = {"done", "skipped", "error"}
@@ -56,7 +80,25 @@ class RuntimeStateStore:
     def __init__(self, db_path: str | Path):
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        # Phase 1.6: every canonical write checkpoint also bumps the
+        # worker.json heartbeat. The state_dir is db_path.parent (the
+        # sidecar contract pins worker.json at <state_dir>/worker.json).
+        # ``bump_heartbeat`` is a no-op when the sidecar doesn't exist —
+        # which covers tests and orchestrators run standalone outside
+        # of Cloris's launch path. No signature change needed.
+        self._state_dir: Path = self.db_path.parent
         self.initialize()
+
+    def _bump_heartbeat(self) -> None:
+        """Best-effort heartbeat refresh after a canonical write.
+
+        Must never raise: the orchestrator's primary write path has
+        already succeeded by the time this fires. A heartbeat write
+        failure should never roll back useful work or surface as a
+        run-killing exception.
+        """
+
+        bump_heartbeat(self._state_dir)
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
@@ -116,6 +158,7 @@ class RuntimeStateStore:
                     candidates_insufficient INTEGER NOT NULL DEFAULT 0,
                     facial_yes_count INTEGER NOT NULL DEFAULT 0,
                     facial_no_count INTEGER NOT NULL DEFAULT 0,
+                    facial_borderline_count INTEGER NOT NULL DEFAULT 0,
                     saves_count INTEGER NOT NULL DEFAULT 0,
                     rejected_count INTEGER NOT NULL DEFAULT 0,
                     notes TEXT NOT NULL DEFAULT '',
@@ -203,13 +246,20 @@ class RuntimeStateStore:
             )
             conn.execute(
                 "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
-                ("schema_version", "3"),
-            )
-            conn.execute(
-                "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
                 ("target_candidate_lifecycle", json.dumps(TARGET_CANDIDATE_LIFECYCLE)),
             )
             self._migrate(conn)
+            # Pin the schema version AFTER _migrate runs so the
+            # version-gated normalization steps inside _migrate fire on
+            # legacy rows. Pinning before _migrate would make the
+            # version-gate observe a too-new version and skip the
+            # migration on existing data (Phase 1.5 idempotency
+            # requirement: the rewrite must run exactly once on legacy
+            # data and never on already-normalized data).
+            conn.execute(
+                "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
+                ("schema_version", CURRENT_SCHEMA_VERSION),
+            )
 
     def _migrate(self, conn: sqlite3.Connection) -> None:
         columns = {
@@ -217,21 +267,200 @@ class RuntimeStateStore:
             for row in conn.execute("PRAGMA table_info(work_units)").fetchall()
         }
         if "metrics_json" not in columns:
-            conn.execute(
-                "ALTER TABLE work_units ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '{}'"
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE work_units ADD COLUMN metrics_json TEXT NOT NULL DEFAULT '{}'",
+            )
+        if "facial_borderline_count" not in columns:
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE work_units ADD COLUMN facial_borderline_count INTEGER NOT NULL DEFAULT 0",
             )
         run_columns = {
             row["name"]
             for row in conn.execute("PRAGMA table_info(runs)").fetchall()
         }
         if "stop_reason" not in run_columns:
-            conn.execute(
-                "ALTER TABLE runs ADD COLUMN stop_reason TEXT NOT NULL DEFAULT 'normal'"
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE runs ADD COLUMN stop_reason TEXT NOT NULL DEFAULT 'normal'",
             )
+        # Phase 1.5: stop_reason_detail captures the original freeform
+        # error string when the orchestrator's catchall path stuffed
+        # something like "error: KeyError" into stop_reason. The
+        # canonical enum value goes to stop_reason; the original (if
+        # non-canonical) goes to stop_reason_detail.
+        if "stop_reason_detail" not in run_columns:
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE runs ADD COLUMN stop_reason_detail TEXT",
+            )
+
+        # Phase 3: brief identity pinning. brief_path_at_launch records
+        # where the orchestrator loaded the brief from; brief_content_hash
+        # is the canonical-JSON SHA-256 of the brief at run-start; and
+        # brief_snapshot_json carries the full canonical JSON so Run
+        # Review can show "what the brief said when this run executed"
+        # even if the on-disk file has since changed. All three are
+        # nullable / empty-default so legacy rows survive untouched.
+        if "brief_path_at_launch" not in run_columns:
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE runs ADD COLUMN brief_path_at_launch TEXT",
+            )
+        if "brief_content_hash" not in run_columns:
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE runs ADD COLUMN brief_content_hash TEXT",
+            )
+        if "brief_snapshot_json" not in run_columns:
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE runs ADD COLUMN brief_snapshot_json TEXT NOT NULL DEFAULT '{}'",
+            )
+
+        # Schema v6: is_archived flag on runs. Drives Phase 1C brief-vs-
+        # state-dir taxonomy: `is_archived=1` means the user has filed
+        # this brief away (or the reconciler has auto-archived an old
+        # orphan). Default 0 preserves legacy semantics — every existing
+        # row stays surfaced as "live" until explicitly archived.
+        if "is_archived" not in run_columns:
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE runs ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0",
+            )
+
+        # Schema v7: intake_session_id FK on runs. Links a launched run
+        # back to the brief-authoring session that produced it, so the
+        # aggregator can distinguish "authored brief that has run history"
+        # from "filesystem state-dir artifact left behind by a one-off
+        # CLI launch." Nullable — legacy runs (pre-v7) and CLI-launched
+        # runs both leave this NULL, in which case the aggregator treats
+        # the run as "authored" by default for backwards compatibility.
+        if "intake_session_id" not in run_columns:
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE runs ADD COLUMN intake_session_id INTEGER "
+                "REFERENCES intake_sessions(id)",
+            )
+
+        # Schema v8: recruiter-authored note log + status override on
+        # candidates. Phase C, slice C3: notes are an append-only JSON
+        # array of `{body, created_at}` so the candidate-detail page can
+        # surface every note in reverse-chrono. user_status is a recruiter
+        # override that wins over Cloris's terminal_decision when set
+        # (NULL = "use Cloris's judgment"). Both are additive — legacy
+        # rows survive with empty notes and NULL user_status.
+        candidate_columns = {
+            row["name"]
+            for row in conn.execute(
+                "PRAGMA table_info(candidates)"
+            ).fetchall()
+        }
+        if "notes" not in candidate_columns:
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE candidates ADD COLUMN notes TEXT NOT NULL "
+                "DEFAULT '[]'",
+            )
+        if "user_status" not in candidate_columns:
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE candidates ADD COLUMN user_status TEXT",
+            )
+
+        # Schema v9: closed-loop feedback substrate. Phase C-bis Slice
+        # 0.5. ``judgment_accuracy`` is the recruiter's calibration
+        # signal on Cloris's terminal decision — explicitly distinct
+        # from ``user_status`` (a pipeline action). Keeping them
+        # schema-distinct from day one means the future Next Run
+        # Learning surface can read calibration signal without
+        # conflating it with recruiter pipeline action. NULL = no
+        # signal. ``judgment_accuracy_at`` mirrors the pattern set by
+        # other timestamp pairs (set together, cleared together).
+        if "judgment_accuracy" not in candidate_columns:
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE candidates ADD COLUMN judgment_accuracy TEXT",
+            )
+        if "judgment_accuracy_at" not in candidate_columns:
+            _add_column_if_missing(
+                conn,
+                "ALTER TABLE candidates ADD COLUMN judgment_accuracy_at TEXT",
+            )
+
+        # Onboarding flow intake sessions (A24 trial plan, Slice 1B).
+        # Authoring state, not run-lifecycle state. Single source of truth for
+        # the brief-authoring conversation; resumable across page reloads.
+        # Idempotent CREATE TABLE IF NOT EXISTS so re-running _migrate is a
+        # no-op against existing databases.
         conn.execute(
-            "INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)",
-            ("schema_version", "3"),
+            """
+            CREATE TABLE IF NOT EXISTS intake_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                brief_id_draft TEXT,
+                role_title TEXT,
+                current_step TEXT NOT NULL,
+                state_json TEXT NOT NULL DEFAULT '{}',
+                started_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                archived_at TEXT
+            );
+            """
         )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_intake_sessions_active
+            ON intake_sessions(archived_at, completed_at);
+            """
+        )
+
+        # The Reflection — HITL market-intelligence flow. Mirrors
+        # intake_sessions in shape (authoring state, not run-lifecycle
+        # state) but the lifecycle is two HITL gates wrapping a long-
+        # running research phase. ``current_phase`` walks:
+        #   planning → plan_approved → researching → awaiting_diff
+        #   → committed (terminal) | discarded (terminal)
+        # Single active reflection per brief_id is enforced at the API
+        # layer, not by a UNIQUE index, so legacy/ghost rows can coexist
+        # with a new active session if the API logic allows it later.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS reflection_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                brief_id TEXT NOT NULL,
+                source_run_id INTEGER,
+                current_phase TEXT NOT NULL,
+                state_json TEXT NOT NULL DEFAULT '{}',
+                steering_iterations INTEGER NOT NULL DEFAULT 0,
+                started_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                completed_at TEXT,
+                discarded_at TEXT,
+                brief_version_committed TEXT,
+                research_error TEXT
+            );
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_reflection_sessions_brief_active
+            ON reflection_sessions(brief_id, completed_at, discarded_at);
+            """
+        )
+
+        # Phase 1.5: one-shot normalization of legacy rows whose
+        # stop_reason was written before the canonical enum was enforced
+        # at the write boundary. Gated on meta.schema_version<4 so a
+        # mixed-version process race doesn't redo the migration after a
+        # newer writer normalized and an older writer re-wrote a freeform
+        # value (the older writer would have re-set schema_version to
+        # "3"; on next initialize, the gate fires again and re-normalizes
+        # — exactly the idempotency property critique A1 asked for).
+        prior_version = _read_schema_version(conn)
+        if _version_lt(prior_version, "4"):
+            _normalize_legacy_stop_reasons(conn)
 
     # ------------------------------------------------------------------
     # Runs
@@ -247,13 +476,24 @@ class RuntimeStateStore:
         resume_state: dict | None = None,
         resumed_from_run_id: int | None = None,
         clone_work_units_from_run_id: int | None = None,
+        brief_path_at_launch: str | None = None,
+        brief_content_hash: str | None = None,
+        brief_snapshot_json: str | None = None,
     ) -> int:
         now = _utc_now()
+        # Phase 3: brief identity pinning. All three are optional with
+        # safe defaults so legacy callers continue to work; computing
+        # them is the responsibility of the bridge layer (which has
+        # access to brief_path) — see shared.brief_identity.
+        snapshot_json = brief_snapshot_json if brief_snapshot_json is not None else "{}"
         with self.connect() as conn:
             cursor = conn.execute(
                 """
-                INSERT INTO runs(source, brief_id, output_dir, mode, status, started_at, resumed_from_run_id, resume_state_json)
-                VALUES (?, ?, ?, ?, 'running', ?, ?, ?)
+                INSERT INTO runs(source, brief_id, output_dir, mode, status, started_at,
+                                 resumed_from_run_id, resume_state_json,
+                                 brief_path_at_launch, brief_content_hash,
+                                 brief_snapshot_json)
+                VALUES (?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source,
@@ -263,6 +503,9 @@ class RuntimeStateStore:
                     now,
                     resumed_from_run_id,
                     _json_dumps(resume_state or {}),
+                    brief_path_at_launch,
+                    brief_content_hash,
+                    snapshot_json,
                 ),
             )
             run_id = int(cursor.lastrowid)
@@ -272,7 +515,7 @@ class RuntimeStateStore:
                     SELECT source, brief_id, kind, source_unit_id, display_name, ordering_index, status,
                            payload_json, checkpoint_json, metrics_json, family_key, novelty_bucket, domain_lane,
                            result_count, candidates_discovered, candidates_enriched, candidates_insufficient,
-                           facial_yes_count, facial_no_count, saves_count, rejected_count, notes
+                           facial_yes_count, facial_no_count, facial_borderline_count, saves_count, rejected_count, notes
                     FROM work_units
                     WHERE run_id = ?
                     ORDER BY ordering_index ASC, id ASC
@@ -286,8 +529,8 @@ class RuntimeStateStore:
                             run_id, source, brief_id, kind, source_unit_id, display_name, ordering_index, status,
                             payload_json, checkpoint_json, metrics_json, family_key, novelty_bucket, domain_lane,
                             result_count, candidates_discovered, candidates_enriched, candidates_insufficient,
-                            facial_yes_count, facial_no_count, saves_count, rejected_count, notes
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            facial_yes_count, facial_no_count, facial_borderline_count, saves_count, rejected_count, notes
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             run_id,
@@ -310,32 +553,170 @@ class RuntimeStateStore:
                             row["candidates_insufficient"],
                             row["facial_yes_count"],
                             row["facial_no_count"],
+                            row["facial_borderline_count"],
                             row["saves_count"],
                             row["rejected_count"],
                             row["notes"],
                         ),
                     )
             self._insert_event(conn, run_id=run_id, event_type="run_started", payload={"mode": mode})
-            return run_id
+        self._bump_heartbeat()
+        return run_id
+
+    def append_candidate_note(
+        self,
+        candidate_id: int,
+        body: str,
+        *,
+        created_at: str | None = None,
+    ) -> int:
+        """Append a recruiter note to a candidate's notes log.
+
+        Phase C, slice C3: notes are stored as a JSON array of objects
+        ``[{body: str, created_at: str}, ...]`` on ``candidates.notes``,
+        append-only. Returns the count of notes after the append. Raises
+        ``ValueError`` when the candidate id is not present (the API
+        layer maps that to HTTP 404).
+        """
+
+        if not body.strip():
+            raise ValueError("note body must not be empty or whitespace-only")
+        stamp = created_at or _utc_now()
+        new_note = {"body": body.strip(), "created_at": stamp}
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT notes FROM candidates WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"candidate {candidate_id} not found")
+            try:
+                existing = json.loads(row["notes"] or "[]")
+            except (json.JSONDecodeError, TypeError):
+                existing = []
+            if not isinstance(existing, list):
+                existing = []
+            existing.append(new_note)
+            conn.execute(
+                "UPDATE candidates SET notes = ?, last_seen_at = ? WHERE id = ?",
+                (json.dumps(existing), stamp, candidate_id),
+            )
+        self._bump_heartbeat()
+        return len(existing)
+
+    def set_candidate_user_status(
+        self,
+        candidate_id: int,
+        user_status: str | None,
+    ) -> None:
+        """Set or clear the recruiter-overridden status on a candidate.
+
+        Phase C, slice C3: ``user_status`` lives alongside
+        ``terminal_decision`` and wins when displayed (R24 — the
+        recruiter override is the primary signal once set). Setting to
+        ``None`` clears the override and falls back to Cloris's judgment.
+        Raises ``ValueError`` if the candidate id is not present.
+        """
+
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM candidates WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"candidate {candidate_id} not found")
+            conn.execute(
+                "UPDATE candidates SET user_status = ?, last_seen_at = ? WHERE id = ?",
+                (user_status, _utc_now(), candidate_id),
+            )
+        self._bump_heartbeat()
+
+    def set_candidate_judgment_accuracy(
+        self,
+        candidate_id: int,
+        judgment_accuracy: str | None,
+    ) -> None:
+        """Set or clear the recruiter's judgment-accuracy signal.
+
+        Phase C-bis Slice 0.5: closed-loop feedback substrate. Distinct
+        from ``user_status`` (pipeline action) — this column captures
+        whether Cloris's *judgment* was useful, wrong, or off-rubric.
+        NULL = no signal. The timestamp column moves in lockstep
+        (set when value is set, cleared when value is cleared) so the
+        Next Run Learning surface can sort/filter by recency without
+        a separate index.
+
+        Allowed values (None to clear):
+          - ``"useful"``        — judgment was correct + useful
+          - ``"wrong"``         — judgment was wrong
+          - ``"off_rubric"``    — judged on the wrong axis
+          - ``"overstated_depth"``  — Cloris overstated depth
+          - ``"understated_depth"`` — Cloris understated depth
+
+        Raises ``ValueError`` for unknown candidate ids or unknown
+        accuracy values.
+        """
+
+        allowed = {
+            "useful",
+            "wrong",
+            "off_rubric",
+            "overstated_depth",
+            "understated_depth",
+        }
+        if judgment_accuracy is not None and judgment_accuracy not in allowed:
+            raise ValueError(
+                f"invalid judgment_accuracy: {judgment_accuracy!r}; "
+                f"expected one of {sorted(allowed)} or None"
+            )
+
+        now = _utc_now()
+        stamp = now if judgment_accuracy is not None else None
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT id FROM candidates WHERE id = ?",
+                (candidate_id,),
+            ).fetchone()
+            if row is None:
+                raise ValueError(f"candidate {candidate_id} not found")
+            conn.execute(
+                "UPDATE candidates SET judgment_accuracy = ?, "
+                "judgment_accuracy_at = ?, last_seen_at = ? WHERE id = ?",
+                (judgment_accuracy, stamp, now, candidate_id),
+            )
+        self._bump_heartbeat()
 
     def finish_run(self, run_id: int, status: str, *, stop_reason: str = "normal") -> None:
+        normalized, detail = _split_stop_reason(stop_reason)
         with self.connect() as conn:
             conn.execute(
-                "UPDATE runs SET status = ?, stop_reason = ?, ended_at = ? WHERE id = ?",
-                (status, stop_reason, _utc_now(), run_id),
+                "UPDATE runs SET status = ?, stop_reason = ?, "
+                "stop_reason_detail = ?, ended_at = ? WHERE id = ?",
+                (status, normalized, detail, _utc_now(), run_id),
             )
             self._insert_event(
                 conn,
                 run_id=run_id,
                 event_type="run_finished",
-                payload={"status": status, "stop_reason": stop_reason},
+                payload={
+                    "status": status,
+                    "stop_reason": normalized,
+                    # Original (unnormalized) string preserved in the event
+                    # payload so callers reading the event stream get the
+                    # full forensic detail; the column carries the canonical
+                    # enum value the UI consumes.
+                    "stop_reason_detail": detail,
+                },
             )
+        self._bump_heartbeat()
 
     def set_run_stop_reason(self, run_id: int, stop_reason: str) -> None:
+        normalized, detail = _split_stop_reason(stop_reason)
         with self.connect() as conn:
             conn.execute(
-                "UPDATE runs SET stop_reason = ? WHERE id = ?",
-                (stop_reason, run_id),
+                "UPDATE runs SET stop_reason = ?, stop_reason_detail = ? "
+                "WHERE id = ?",
+                (normalized, detail, run_id),
             )
 
     def get_latest_run(self, *, source: str, brief_id: str) -> dict | None:
@@ -455,6 +836,7 @@ class RuntimeStateStore:
                 started_at = existing["started_at"] or started_at
                 if status not in TERMINAL_WORK_UNIT_STATUSES:
                     ended_at = None
+                self._bump_heartbeat()
                 conn.execute(
                     """
                     UPDATE work_units
@@ -462,6 +844,7 @@ class RuntimeStateStore:
                         metrics_json = ?,
                         family_key = ?, novelty_bucket = ?, domain_lane = ?, result_count = ?, candidates_discovered = ?,
                         candidates_enriched = ?, candidates_insufficient = ?, facial_yes_count = ?, facial_no_count = ?,
+                        facial_borderline_count = ?,
                         saves_count = ?, rejected_count = ?, notes = ?, started_at = ?, ended_at = ?
                     WHERE id = ?
                     """,
@@ -481,6 +864,7 @@ class RuntimeStateStore:
                         int(counters.get("candidates_insufficient", 0)),
                         int(counters.get("facial_yes_count", 0)),
                         int(counters.get("facial_no_count", 0)),
+                        int(counters.get("facial_borderline_count", 0)),
                         int(counters.get("saves_count", 0)),
                         int(counters.get("rejected_count", 0)),
                         notes,
@@ -497,9 +881,9 @@ class RuntimeStateStore:
                     run_id, source, brief_id, kind, source_unit_id, display_name, ordering_index, status,
                     payload_json, checkpoint_json, metrics_json, family_key, novelty_bucket, domain_lane, result_count,
                     candidates_discovered, candidates_enriched, candidates_insufficient, facial_yes_count,
-                    facial_no_count, saves_count, rejected_count, notes, started_at, ended_at
+                    facial_no_count, facial_borderline_count, saves_count, rejected_count, notes, started_at, ended_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     run_id,
@@ -522,6 +906,7 @@ class RuntimeStateStore:
                     int(counters.get("candidates_insufficient", 0)),
                     int(counters.get("facial_yes_count", 0)),
                     int(counters.get("facial_no_count", 0)),
+                    int(counters.get("facial_borderline_count", 0)),
                     int(counters.get("saves_count", 0)),
                     int(counters.get("rejected_count", 0)),
                     notes,
@@ -619,6 +1004,15 @@ class RuntimeStateStore:
         initial_state: str = "discovered",
     ) -> int:
         now = _utc_now()
+        # Phase C-bis 0.4: defense-in-depth URL normalization for LinkedIn.
+        # The acquisition layer already cleans tracking parameters, but
+        # any future code path that bypasses acquisition (e.g. a manual
+        # backfill, a different module) gets cleaned here as a safety
+        # net. The normalizer is idempotent and safe on empty strings.
+        if source == "linkedin" and profile_url:
+            from shared.identity_resolution import normalize_public_linkedin_url
+
+            profile_url = normalize_public_linkedin_url(profile_url)
         with self.connect() as conn:
             row = conn.execute(
                 """
@@ -678,6 +1072,15 @@ class RuntimeStateStore:
         profile_url: str = "",
         payload: dict | None = None,
     ) -> int:
+        # Phase C-bis 0.4: defense-in-depth URL normalization for LinkedIn.
+        # ensure_candidate normalizes on insert, but the UPDATE below would
+        # otherwise overwrite the clean value with whatever the caller
+        # passed in. Normalize once here so both branches converge on the
+        # cleaned URL. Idempotent + scoped to LinkedIn.
+        if source == "linkedin" and profile_url:
+            from shared.identity_resolution import normalize_public_linkedin_url
+
+            profile_url = normalize_public_linkedin_url(profile_url)
         candidate_id = self.ensure_candidate(
             source=source,
             brief_id=brief_id,
@@ -949,6 +1352,7 @@ class RuntimeStateStore:
                 event_type="attempt_succeeded",
                 payload={"stage": row["stage"], "new_state": new_state, "terminal_decision": terminal_decision},
             )
+        self._bump_heartbeat()
 
     def finish_attempt_failure(
         self,
@@ -1016,6 +1420,7 @@ class RuntimeStateStore:
                     "failure_reason": failure_reason,
                 },
             )
+        self._bump_heartbeat()
 
     def list_orphaned_attempts(self, *, source: str, brief_id: str) -> list[dict]:
         with self.connect() as conn:
@@ -1674,6 +2079,96 @@ class RuntimeStateStore:
                 _utc_now(),
             ),
         )
+
+
+def _add_column_if_missing(conn: sqlite3.Connection, ddl: str) -> None:
+    """Execute ``ddl`` (an ALTER TABLE ADD COLUMN), tolerating "duplicate
+    column name" errors so concurrent migrations from two RuntimeStateStore
+    constructions don't crash one another.
+
+    Per critique A2 (preserve-and-migrate plan, Phase 1.5): SQLite's WAL
+    serializes the writes but two concurrent ALTERs can produce
+    ``OperationalError: duplicate column name``. Treating that as success
+    is correct — the column is now there, which is what we wanted.
+    """
+
+    try:
+        conn.execute(ddl)
+    except sqlite3.OperationalError as exc:
+        if "duplicate column name" not in str(exc).lower():
+            raise
+
+
+def _read_schema_version(conn: sqlite3.Connection) -> str | None:
+    """Return the meta.schema_version value, or ``None`` if absent."""
+
+    row = conn.execute(
+        "SELECT value FROM meta WHERE key = 'schema_version'"
+    ).fetchone()
+    return None if row is None else str(row["value"])
+
+
+def _version_lt(prior: str | None, target: str) -> bool:
+    """Return True iff ``prior`` represents a schema version earlier than
+    ``target`` (lexicographic compare on simple integer-like version strings).
+
+    A missing prior is treated as the earliest version: a fresh DB will
+    take the same normalization path so on-disk shape is consistent
+    regardless of how the DB was created (initialize from scratch vs
+    migrated from a prior version).
+    """
+
+    if prior is None:
+        return True
+    try:
+        return int(prior) < int(target)
+    except ValueError:
+        # Unknown version format — be conservative and treat as "needs
+        # migration." The migration is idempotent so re-running is safe.
+        return True
+
+
+def _normalize_legacy_stop_reasons(conn: sqlite3.Connection) -> None:
+    """Walk runs once, normalize any stop_reason value that isn't in the
+    canonical enum, and stash the original in stop_reason_detail.
+
+    Idempotent against already-normalized rows: a row whose stop_reason is
+    already canonical and whose stop_reason_detail is NULL is left
+    unchanged.
+    """
+
+    known, normalize = _stop_reason_helpers()
+    rows = conn.execute("SELECT id, stop_reason FROM runs").fetchall()
+    for row in rows:
+        original = row["stop_reason"]
+        if original in known:
+            continue
+        canonical = normalize(original)
+        # Preserve the unrecognized original so future tooling can still
+        # see what the orchestrator actually wrote.
+        conn.execute(
+            "UPDATE runs SET stop_reason = ?, "
+            "stop_reason_detail = COALESCE(stop_reason_detail, ?) "
+            "WHERE id = ?",
+            (canonical, original, int(row["id"])),
+        )
+
+
+def _split_stop_reason(stop_reason: str | None) -> tuple[str, str | None]:
+    """Return ``(canonical, detail)`` where canonical is the enum value
+    and detail is the original string (only when it differs).
+
+    The canonical value goes to ``runs.stop_reason``; the detail goes to
+    ``runs.stop_reason_detail``. When the caller already passed a
+    canonical value, detail is ``None`` so we don't pollute the column
+    with redundant copies.
+    """
+
+    _, normalize = _stop_reason_helpers()
+    canonical = normalize(stop_reason)
+    if stop_reason is None or stop_reason == canonical:
+        return canonical, None
+    return canonical, stop_reason
 
 
 def _guard_transition(current_state: str, new_state: str) -> None:

@@ -6,7 +6,10 @@ import asyncio
 import random
 from typing import TYPE_CHECKING
 
-from shared.identity_resolution import classify_recruiter_activity_pressure
+from shared.identity_resolution import (
+    classify_recruiter_activity_pressure,
+    normalize_public_linkedin_url,
+)
 from shared.execution import AcquisitionResult
 from shared.extractors import extract_profile_from_dom, extract_snippet_from_card_innertext
 from shared.governor import GovernorLimitReached
@@ -95,7 +98,14 @@ class LinkedInAcquisitionService:
         if snapshot.get("name"):
             snippet.name = snapshot["name"]
         if snapshot.get("url"):
-            snippet.profile_url = snapshot["url"]
+            # Phase C-bis 0.4: strip LinkedIn search-result tracking
+            # parameters (miniProfileUrn / trackingId / searchEntityType /
+            # position / searchId) before persisting. The browser DOM
+            # returns the full URL with these embedded; storing them
+            # bloats the candidate-detail UI rendering and pollutes the
+            # diagnostic Reference Slip. Normalization is idempotent —
+            # already-clean URLs pass through unchanged.
+            snippet.profile_url = normalize_public_linkedin_url(snapshot["url"])
         snippet.card_index = card_index
         snippet.already_saved = bool(snapshot.get("already_saved", False))
         snippet.recruiter_activity = RecruiterActivitySnapshot.from_dict(

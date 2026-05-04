@@ -483,7 +483,7 @@ def test_restart_string_clears_only_targeted_runtime_state(tmp_path):
             identity_key=url,
             stage="full",
             work_unit_id=store.get_work_unit_id(run_id, kind="linkedin_string", source_unit_id=str(string_id)),
-            payload={"source_string_id": string_id, "final_decision": {"decision": "SAVE"}},
+            payload={"source_string_id": string_id, "full_decision": {"decision": "SAVE"}},
             source_cursor={"source_string_id": string_id},
             display_name=name,
             profile_url=url,
@@ -492,7 +492,7 @@ def test_restart_string_clears_only_targeted_runtime_state(tmp_path):
             attempt_id=attempt_id,
             new_state="full_terminal",
             terminal_decision="SAVE",
-            payload={"source_string_id": string_id, "final_decision": {"decision": "SAVE"}},
+            payload={"source_string_id": string_id, "full_decision": {"decision": "SAVE"}},
             run_id=run_id,
         )
 

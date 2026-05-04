@@ -147,7 +147,15 @@ class SharedExecutionRuntime:
             profile_summary=profile_summary,
         )
         terminal_decision = getattr(decision, "decision", None)
-        if stage == "facial" and terminal_decision == "FACIAL_YES":
+        # C1: FACIAL_BORDERLINE is structurally peer to FACIAL_YES — both open
+        # the profile and run full evaluation, and full evaluation is where
+        # the lifecycle terminates. Clearing terminal_decision keeps the
+        # candidate non-terminal at the facial layer for both classes. The
+        # canonical row may still carry "FACIAL_BORDERLINE" if a future code
+        # path produces it (Step C2+); at the lifecycle level it behaves as
+        # "open", not "terminal". DEDUP_BLOCKING_LINKEDIN_DECISIONS continues
+        # to omit both decisions for the same reason.
+        if stage == "facial" and terminal_decision in ("FACIAL_YES", "FACIAL_BORDERLINE"):
             terminal_decision = None
         new_state = "facial_terminal" if stage == "facial" else "full_terminal"
         self.store.finish_attempt_success(

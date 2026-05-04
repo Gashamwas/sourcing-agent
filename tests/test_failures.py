@@ -3,11 +3,13 @@ from __future__ import annotations
 from unittest.mock import patch
 
 from shared.failures import (
+    ApiBudgetExhaustedError,
     JUDGMENT_FAILURE,
     PARSE_FAILURE,
     RECOVERABLE_ERROR,
     TERMINAL_ERROR,
     classify_runtime_failure,
+    is_api_budget_exhausted_error,
     judgment_failure_decision,
     parse_failure_decision,
 )
@@ -37,6 +39,23 @@ def test_classify_terminal_truncated_response():
     assert classification.domain == "provider"
     assert classification.reason == "truncated_response"
     assert classification.retryable is False
+
+
+def test_classify_api_budget_exhausted_before_generic_http_400():
+    exc = _StatusError(
+        "Your credit balance is too low to access the Anthropic API. "
+        "Please go to Plans & Billing to upgrade or purchase credits.",
+        400,
+    )
+
+    classification = classify_runtime_failure(exc, source="llm")
+
+    assert classification.kind == TERMINAL_ERROR
+    assert classification.domain == "provider"
+    assert classification.reason == "api_budget_exhausted"
+    assert classification.retryable is False
+    assert is_api_budget_exhausted_error(exc) is True
+    assert is_api_budget_exhausted_error(ApiBudgetExhaustedError("credits exhausted")) is True
 
 
 def test_classify_retryable_browser_disconnect():

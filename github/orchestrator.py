@@ -18,7 +18,7 @@ import time
 from pathlib import Path
 from typing import Optional
 
-from github.client import GitHubClient
+from github.client import GitHubAuthError, GitHubClient
 from github.acquisition import GitHubAcquisitionService
 from github.enricher import GitHubEnricher
 from github.schemas import (
@@ -143,6 +143,7 @@ class GitHubPipeline:
             output_dir=self.output_dir,
             brief_id=self.brief_obj.id,
             brief_name=self.brief_obj.id,
+            brief_path=self.brief_path,
         )
         self._execution_engine = CandidateExecutionEngine(
             store=self._runtime_state,
@@ -210,11 +211,13 @@ class GitHubPipeline:
             # Install Ctrl+C handler
             self._install_signal_handler()
 
-            log_event(self.log_path, "pipeline_start", mode="autonomous")
-            self._governor.start_session()
-
             async with GitHubClient() as client:
                 self._client = client
+                await client.validate_credentials()
+
+                log_event(self.log_path, "pipeline_start", mode="autonomous")
+                self._governor.start_session()
+
                 enricher = GitHubEnricher(
                     client,
                     brief=self.brief_obj,
@@ -263,6 +266,12 @@ class GitHubPipeline:
                     self._governor.end_session()
                     self._save_progress()
                     log_event(self.log_path, "pipeline_end", stats=self.stats)
+        except GitHubAuthError as e:
+            run_status = "error"
+            stop_reason = RunStopReason.FATAL_RUNTIME_ERROR
+            self._observer.on_error("github_auth", e)
+            log_event(self.log_path, "github_auth_failed", error=str(e))
+            raise
         finally:
             self._client = None
             if getattr(self, "_runtime_run_id", None):
@@ -361,6 +370,8 @@ class GitHubPipeline:
                     post_dedup=query.result_count,
                 )
             except GitHubGovernorLimitReached:
+                raise
+            except GitHubAuthError:
                 raise
             except Exception as e:
                 self._observer.on_error("query", e, query)
@@ -1445,6 +1456,7 @@ class GitHubPipeline:
                 output_dir=output_dir,
                 brief_id=self.brief_obj.id,
                 brief_name=self.brief_obj.id,
+                brief_path=self.brief_path,
             )
         if not hasattr(self, "_execution_engine") or self._execution_engine is None:
             self._execution_engine = CandidateExecutionEngine(
