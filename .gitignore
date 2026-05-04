@@ -17,3 +17,19 @@ run-log--*.md
 greenhouse-mcp/
 .claude/
 *.bak-*.json
+
+# Build artifacts (regenerated on every build)
+cloris/frontend/dist/
+
+# Tooling caches
+.playwright-cli/
+.coverage
+.mypy_cache/
+.ruff_cache/
+
+# Dated design-probe snapshots (one per audit run)
+.cloris-design-probe-snapshot-*/
+
+# Derived asset exports/previews (regenerated from SVG sources)
+assets/**/exports/
+assets/**/previews/
