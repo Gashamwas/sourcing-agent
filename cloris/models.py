@@ -628,6 +628,58 @@ class WorkspaceResponse(BaseModel):
     candidates: list[CandidateCardSummary] = Field(default_factory=list)
 
 
+# Executive Search Slice 7 (saves-shape alarm threshold). The
+# recruiter-facing banner threshold per the spec's Risks section
+# ("This run produced more than 25 saves — that's a high-volume
+# pattern, not an exec search"). Distinct from Slice 5's cost cap
+# (fires on cost) and Slice 5's eval-count alarm (fires on
+# evaluations); this fires on saves. Centralized so the shortlist
+# API and the frontend agree on the same number.
+EXEC_SEARCH_SAVES_SHAPE_THRESHOLD: int = 25
+
+
+class ShortlistResponse(BaseModel):
+    """Executive Search Slice 7: shortlist surface read shape.
+
+    Wire shape for ``GET /api/shortlist/{brief_id}``. Slice 7 ships a
+    read-side projection on top of the existing per-source candidates
+    tables (the Cloris-native `shortlist_entries` table + the
+    AbstractSaveDestination it would write through depend on
+    multi-module-foundation Slices 6-7, which are NOT shipped — so
+    Slice 7's scope is downgraded to a read view per the spec's
+    "downgrade or absorb" rule).
+
+    Recruiter signals surfaced beyond the workspace shape:
+
+    - ``saves_shape_alarm`` — true when ``len(candidates) >
+      EXEC_SEARCH_SAVES_SHAPE_THRESHOLD``. The frontend renders an
+      editorial banner ("This run produced more than 25 saves —
+      that's a high-volume pattern, not an exec search. The brief
+      calibration may be too broad. [Review brief criteria]").
+    - ``saves_shape_alarm_threshold`` — the threshold value, surfaced
+      so the banner copy reads "more than N saves" without the
+      frontend hard-coding the number.
+
+    Slice 7b (the actual save destination + write path) waits for
+    multi-module-foundation Slices 6-7 to ship.
+    """
+
+    slice: Literal["v0-shell-slice-c5"] = Field(default="v0-shell-slice-c5")
+    brief_id: str
+    sources: list[
+        Literal["linkedin", "github", "designer", "exec_search", "researcher"]
+    ] = Field(default_factory=list)
+    brief_role_title: str | None = None
+    brief_linkedin_project: str | None = None
+    latest_run: LatestRunRef | None = None
+    total_saves: int = 0
+    saves_this_week: int = 0
+    last_save_at: str | None = None
+    candidates: list[CandidateCardSummary] = Field(default_factory=list)
+    saves_shape_alarm: bool = False
+    saves_shape_alarm_threshold: int = EXEC_SEARCH_SAVES_SHAPE_THRESHOLD
+
+
 class CandidateNoteEntry(BaseModel):
     """Phase C, slice C3: one recruiter-authored note on a candidate."""
 
@@ -949,6 +1001,15 @@ class BriefInfo(BaseModel):
     last_run_source: Literal["linkedin", "github", "designer", "exec_search", "researcher"] | None = None
     total_runs: int = 0
     total_saves: int = 0
+
+    # Executive Search Slice 6: brief confidentiality posture, propagated
+    # from the V2 brief (or "open" default). The aggregator
+    # (:func:`cloris.control_plane.aggregate_briefs`) routes this through
+    # :mod:`shared.confidentiality` to mask titles + redact save counts
+    # for ``"blind"`` briefs in cross-brief surfaces. The frontend reads
+    # this verbatim so it can render the confidentiality pill on the
+    # brief library row without re-parsing.
+    confidentiality_class: Literal["open", "referenceable", "blind"] = "open"
 
     # Phase F Slice F5: which discovery modules this brief targets.
     # Legacy briefs without this key default to ["linkedin"] at the

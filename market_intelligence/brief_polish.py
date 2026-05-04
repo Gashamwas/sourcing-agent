@@ -241,6 +241,38 @@ class HeuristicBriefPolishBackend:
                 linkedin["project_name"] = li_project_name
             v2_draft["source_config"] = {"linkedin": linkedin}
 
+        # Researcher Slice 7: seed `source_config.researcher` from the
+        # where_to_look chapter captures (mirrors the Path 3 LinkedIn
+        # promotion above). Heuristic does NOT seed explicit floor
+        # overrides — those resolve at evaluation time via
+        # `researcher.discipline_defaults.resolve_floors`. We only
+        # propagate the recruiter's free-text inputs.
+        researcher_topics = _as_str_list(where_to_look.get("research_topics"))
+        researcher_venues = _as_str_list(where_to_look.get("conference_allowlist"))
+        researcher_discipline = _as_str(where_to_look.get("discipline"))
+        if researcher_topics or researcher_venues or researcher_discipline:
+            researcher_block: dict[str, Any] = {}
+            if researcher_topics:
+                researcher_block["research_topics"] = researcher_topics
+            if researcher_venues:
+                researcher_block["conference_allowlist"] = researcher_venues
+            if researcher_discipline:
+                researcher_block["discipline"] = researcher_discipline
+            v2_draft.setdefault("source_config", {})
+            v2_draft["source_config"]["researcher"] = researcher_block
+
+        # Designer Slice 4 — hydrate `design_rubric` from chapter
+        # captures pass-through. The recruiter authors the rubric in
+        # the intake wizard's `design_rubric` chapter; the heuristic
+        # backend forwards it onto the v2_draft so a brief that
+        # never invokes the LLM polish still carries the rubric
+        # the recruiter wrote. Empty / missing → no key (the
+        # `_design_rubric_drift` cascade entry treats absence as
+        # "nothing to preserve," not "drift").
+        design_rubric_capture = _as_dict(chapter_captures.get("design_rubric"))
+        if design_rubric_capture:
+            v2_draft["design_rubric"] = design_rubric_capture
+
         confidence = _heuristic_confidence(
             role=role,
             good_looks=good_looks,
@@ -512,9 +544,81 @@ class BriefPolishBackend:
             )
             return self._cascade_done(seeded, t0)
 
+        # Designer Slice 4: design_rubric preservation. Cascade entry
+        # is named (`_design_rubric_drift`), not numbered, so parallel
+        # sibling-module preservation helpers (researcher, oss
+        # maintainers, exec search) can append at the next available
+        # position without renumbering.
+        rubric_drift = _design_rubric_drift(seeded=seeded.v2_draft, polished=raw)
+        if rubric_drift:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            _emit_stage(
+                f"brief.polish:fallback reason=design_rubric_drift "
+                f"detail={rubric_drift} elapsed_ms={elapsed_ms}"
+            )
+            return self._cascade_done(seeded, t0)
+
+        # OSS Maintainers Slice 2: target_projects preservation.
+        # Cascade entry is named (`_target_projects_drift`), not
+        # numbered. Per the OSS Maintainers Module Spec §10 and the
+        # source spec's named-not-numbered discipline, sibling
+        # preservation helpers (researcher: `_research_topics_drift`,
+        # exec search: `_confidentiality_class_drift`) append at the
+        # next available position without renumbering each other.
+        target_projects_drift = _target_projects_drift(
+            seeded=seeded.v2_draft, polished=raw
+        )
+        if target_projects_drift:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            _emit_stage(
+                f"brief.polish:fallback reason=target_projects_drift "
+                f"detail={target_projects_drift} elapsed_ms={elapsed_ms}"
+            )
+            return self._cascade_done(seeded, t0)
+
+        # Executive Search Slice 8: confidentiality_class preservation.
+        # Cascade entry is named (`_confidentiality_class_drift`), not
+        # numbered, so parallel-thread sibling routes append at the next
+        # available position without renumbering. Per the spec's
+        # confidentiality contract, the polish step MUST NOT silently
+        # downgrade a brief's posture (e.g., `blind` → `open`); the
+        # recruiter has to re-author confidentiality explicitly.
+        confidentiality_class_drift = _confidentiality_class_drift(
+            seeded=seeded.v2_draft, polished=raw
+        )
+        if confidentiality_class_drift:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            _emit_stage(
+                f"brief.polish:fallback reason=confidentiality_class_drift "
+                f"detail={confidentiality_class_drift} elapsed_ms={elapsed_ms}"
+            )
+            return self._cascade_done(seeded, t0)
+
+        # Researcher Slice 7: source_config.researcher preservation.
+        # Cascade entry is named (`_research_topics_drift`), not
+        # numbered, per the cross-thread "name by what it does"
+        # discipline — the route preserves research_topics,
+        # conference_allowlist, discipline, and any explicit floor
+        # overrides character-for-character. The discipline default
+        # resolves at evaluation time via
+        # `researcher.discipline_defaults.resolve_floors`; the LLM is
+        # not authorized to "improve" recruiter-authoritative inputs.
+        research_topics_drift = _research_topics_drift(
+            seeded=seeded.v2_draft, polished=raw
+        )
+        if research_topics_drift:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            _emit_stage(
+                f"brief.polish:fallback reason=research_topics_drift "
+                f"detail={research_topics_drift} elapsed_ms={elapsed_ms}"
+            )
+            return self._cascade_done(seeded, t0)
+
         # Success: LLM produced a polished, schema-valid, in-voice,
-        # path-3-preserving, non-hallucinated, role-title-preserving
-        # v2_draft. Confidence is flat 1.0 for trial — see plan's
+        # path-3-preserving, non-hallucinated, role-title-preserving,
+        # design-rubric-preserving, target-projects-preserving,
+        # confidentiality-class-preserving, researcher-source-config-
+        # preserving v2_draft. Confidence is flat 1.0 for trial — see plan's
         # "Confidence formulas" subsection for the post-trial
         # calibration target.
         elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -640,6 +744,287 @@ def _role_title_drift(
     return None
 
 
+def _design_rubric_drift(seeded: dict, polished: dict) -> str | None:
+    """Return drift descriptor when ``design_rubric`` drifts.
+
+    Designer Slice 4 — preservation contract for the
+    :class:`shared.brief_v2_schema.BriefDesignRubric` payload. If the
+    seeded draft carried a non-empty ``design_rubric`` dict (i.e., the
+    recruiter authored one in the intake wizard's ``design_rubric``
+    chapter), the polished output MUST carry the same rubric byte-for-
+    byte. The LLM is not authorized to "improve" principles, anchors,
+    weights, or exemplars — taste is the recruiter's, not the model's.
+
+    Cascade-entry naming follows the named-route discipline (mirrors
+    :func:`_path3_drift` and :func:`_role_title_drift`); siblings like
+    ``_research_topics_drift`` (Researcher), ``_target_projects_drift``
+    (OSS Maintainers), and ``_confidentiality_class_drift`` (Executive
+    Search) append at the next available cascade position without
+    renumbering each other.
+
+    Returns ``None`` when:
+    - The seeded draft had no rubric (nothing to preserve).
+    - The seeded rubric is empty dict (recruiter cleared it).
+    - Seeded and polished rubrics are deep-equal.
+
+    Returns a short diagnostic string otherwise. Whole-rubric byte
+    equality is sufficient — any mutation across principles, anchors,
+    weights, exemplars, or hard-reject patterns is a contract
+    violation and the cascade falls through to the heuristic.
+    """
+
+    seed = seeded.get("design_rubric")
+    if not isinstance(seed, dict) or not seed:
+        return None
+    polish = polished.get("design_rubric")
+    if not isinstance(polish, dict) or not polish:
+        return "dropped"
+    if polish != seed:
+        return _describe_rubric_drift(seed=seed, polish=polish)
+    return None
+
+
+def _target_projects_drift(seeded: dict, polished: dict) -> str | None:
+    """Return drift descriptor when ``target_projects`` drifts.
+
+    OSS Maintainers Slice 2 — preservation contract for the
+    recruiter-named GitHub repos that anchor maintainership-level
+    classification. If the seeded draft carried a non-empty
+    ``target_projects`` list, the polished output MUST carry the
+    same set of projects. Order is not contract-bearing (recruiters
+    name projects, not project order) so set-equality is the test;
+    duplicates are normalized away.
+
+    Cascade-entry naming follows the named-route discipline (mirrors
+    :func:`_path3_drift`, :func:`_role_title_drift`,
+    :func:`_design_rubric_drift`); siblings like
+    ``_research_topics_drift`` (Researcher) and
+    ``_confidentiality_class_drift`` (Executive Search) append at
+    the next available cascade position without renumbering.
+
+    Returns ``None`` when:
+    - The seeded draft had no ``target_projects`` (nothing to
+      preserve — this is the classic-github case per spec §11).
+    - The seeded list is empty (recruiter cleared it).
+    - Seeded and polished sets are equal modulo order + duplicates.
+
+    Returns a short diagnostic string otherwise. ``target_stacks``
+    and ``maintainership_level`` get a softer treatment (passthrough
+    without drift gating) per spec §8: they are evaluation hints,
+    not recruiter-authoritative anchors. Only ``target_projects``
+    rises to a hard preservation contract.
+    """
+
+    seed_projects = _normalize_target_projects(seeded.get("target_projects"))
+    if not seed_projects:
+        return None
+    polish_projects = _normalize_target_projects(polished.get("target_projects"))
+    if not polish_projects:
+        return f"dropped seed={sorted(seed_projects)!r}"
+    if seed_projects != polish_projects:
+        added = polish_projects - seed_projects
+        dropped = seed_projects - polish_projects
+        parts: list[str] = []
+        if dropped:
+            parts.append(f"dropped={sorted(dropped)!r}")
+        if added:
+            parts.append(f"added={sorted(added)!r}")
+        return ",".join(parts) if parts else "set_inequality"
+    return None
+
+
+def _normalize_target_projects(value: Any) -> set[str]:
+    """Coerce a raw ``target_projects`` value to a normalized set.
+
+    Empty / non-list / non-string entries drop out. Trims whitespace
+    so ``"kubernetes/kubernetes"`` and ``"kubernetes/kubernetes "``
+    are not treated as different. Lowercases ``owner/repo`` because
+    GitHub treats those case-insensitively for resolution; this
+    keeps the drift contract aligned with how the strategy seeder
+    will dedup queries in Slice 7.
+    """
+
+    if not isinstance(value, list):
+        return set()
+    out: set[str] = set()
+    for item in value:
+        if not isinstance(item, str):
+            continue
+        cleaned = item.strip().lower()
+        if cleaned:
+            out.add(cleaned)
+    return out
+
+
+def _confidentiality_class_drift(
+    *, seeded: dict, polished: dict
+) -> str | None:
+    """Return drift descriptor when ``confidentiality_class`` drifts.
+
+    Executive Search Slice 8 — preservation contract for the
+    recruiter's confidentiality posture. The brief polish step MUST
+    NOT silently downgrade a brief's posture (e.g., ``"blind"`` →
+    ``"open"``); the recruiter has to re-author confidentiality
+    explicitly. Polish is editorial, not policy.
+
+    Returns ``None`` (no drift) when:
+    - The seeded draft had no ``confidentiality_class`` (no
+      preservation contract — defaults to ``"open"`` downstream).
+    - The seeded value is an empty string or ``"open"`` (the
+      recruiter didn't make a confidentiality declaration; polish is
+      free to leave it absent).
+    - Seeded and polished values are equal (case-insensitive).
+
+    Returns a short drift diagnostic otherwise. The descriptor lands
+    in telemetry as ``brief.polish:fallback
+    reason=confidentiality_class_drift detail=<descriptor>``.
+    """
+
+    seed_value = seeded.get("confidentiality_class")
+    if not isinstance(seed_value, str):
+        return None
+    seed_normalized = seed_value.strip().lower()
+    # Only `"referenceable"` and `"blind"` are recruiter-load-bearing;
+    # `"open"` is the default and not subject to a hard preservation
+    # contract (an LLM that drops it just falls back to default
+    # behavior, which is fine).
+    if seed_normalized in ("", "open"):
+        return None
+
+    polish_value = polished.get("confidentiality_class")
+    if not isinstance(polish_value, str):
+        return f"dropped seed={seed_normalized!r}"
+    polish_normalized = polish_value.strip().lower()
+    if polish_normalized != seed_normalized:
+        return f"changed seed={seed_normalized!r} polish={polish_normalized!r}"
+    return None
+
+
+def _research_topics_drift(*, seeded: dict, polished: dict) -> str | None:
+    """Return drift descriptor when ``source_config.researcher`` drifts.
+
+    Researcher Slice 7 — preservation contract for the recruiter-
+    authored evaluation inputs at ``source_config.researcher``: the
+    free-text ``research_topics``, the ``conference_allowlist``, the
+    ``discipline`` (load-bearing for layered floor resolution per
+    Spec Opinion 7), and any explicit floor overrides
+    (``h_index_floor``, ``papers_in_window_floor``,
+    ``papers_in_window_months``). The polish step MUST preserve these
+    character-for-character — discipline + explicit floors are
+    recruiter-authoritative; the LLM is not allowed to "improve" them.
+
+    Cascade-entry naming follows the named-route discipline (mirrors
+    :func:`_path3_drift`, :func:`_role_title_drift`,
+    :func:`_design_rubric_drift`, :func:`_target_projects_drift`,
+    :func:`_confidentiality_class_drift`); future sibling routes
+    append at the next available position without renumbering.
+
+    Returns ``None`` when:
+    - The seeded draft had no ``source_config.researcher`` (nothing
+      to preserve).
+    - The seeded researcher sub-dict is empty (recruiter cleared it).
+    - Each preserved key matches between seed and polish.
+
+    Returns a short diagnostic string otherwise. ``research_topics``
+    and ``conference_allowlist`` use set-equality (order is not
+    contract-bearing for recruiter-named inputs); ``discipline`` and
+    the floor fields use equality.
+    """
+
+    seed_researcher = _as_dict(_as_dict(seeded.get("source_config")).get("researcher"))
+    if not seed_researcher:
+        return None
+
+    polish_researcher = _as_dict(
+        _as_dict(polished.get("source_config")).get("researcher")
+    )
+
+    drift_parts: list[str] = []
+
+    # Set-equality preservation for list fields.
+    for list_key in ("research_topics", "conference_allowlist"):
+        seed_value = seed_researcher.get(list_key)
+        if not isinstance(seed_value, list) or not seed_value:
+            continue
+        seed_set = {str(v).strip() for v in seed_value if isinstance(v, str)}
+        polish_value = polish_researcher.get(list_key)
+        if not isinstance(polish_value, list):
+            drift_parts.append(f"{list_key}=dropped")
+            continue
+        polish_set = {str(v).strip() for v in polish_value if isinstance(v, str)}
+        if seed_set != polish_set:
+            dropped = sorted(seed_set - polish_set)
+            added = sorted(polish_set - seed_set)
+            detail: list[str] = []
+            if dropped:
+                detail.append(f"-{dropped!r}")
+            if added:
+                detail.append(f"+{added!r}")
+            drift_parts.append(f"{list_key}={'/'.join(detail)}")
+
+    # Scalar equality preservation for discipline + floor overrides.
+    for scalar_key in (
+        "discipline",
+        "h_index_floor",
+        "papers_in_window_floor",
+        "papers_in_window_months",
+    ):
+        if scalar_key not in seed_researcher:
+            continue
+        seed_value = seed_researcher[scalar_key]
+        if scalar_key not in polish_researcher:
+            drift_parts.append(f"{scalar_key}=dropped")
+            continue
+        polish_value = polish_researcher[scalar_key]
+        if seed_value != polish_value:
+            drift_parts.append(
+                f"{scalar_key} seed={seed_value!r} polish={polish_value!r}"
+            )
+
+    if drift_parts:
+        return "; ".join(drift_parts)
+    return None
+
+
+def _describe_rubric_drift(*, seed: dict, polish: dict) -> str:
+    """Produce a short, recruiter-readable drift descriptor.
+
+    The descriptor lands in telemetry (``brief.polish:fallback
+    reason=design_rubric_drift detail=<descriptor>``) so post-trial
+    analysis can tell whether drift came from principle-level
+    rewrites, weight tweaks, or exemplar additions. Trimmed to keep
+    the log line bounded.
+    """
+
+    reasons: list[str] = []
+    seed_principles = seed.get("principles") or []
+    polish_principles = polish.get("principles") or []
+    if isinstance(seed_principles, list) and isinstance(polish_principles, list):
+        if len(seed_principles) != len(polish_principles):
+            reasons.append(
+                f"principle_count_changed seed={len(seed_principles)} "
+                f"polished={len(polish_principles)}"
+            )
+        else:
+            for idx, (seed_p, polish_p) in enumerate(
+                zip(seed_principles, polish_principles)
+            ):
+                if seed_p != polish_p:
+                    reasons.append(f"principle[{idx}]_mutated")
+                    break  # one is enough for the log line
+    if seed.get("discipline_weight_overrides") != polish.get(
+        "discipline_weight_overrides"
+    ):
+        reasons.append("discipline_weight_overrides_mutated")
+    if seed.get("calibration_exemplars") != polish.get("calibration_exemplars"):
+        reasons.append("calibration_exemplars_mutated")
+    if seed.get("hard_reject_patterns") != polish.get("hard_reject_patterns"):
+        reasons.append("hard_reject_patterns_mutated")
+    if not reasons:
+        reasons.append("rubric_dict_inequality")
+    return ",".join(reasons)
+
+
 def _capability_area_overlap(
     *, v2_draft: dict, good_looks_prose: str
 ) -> tuple[float, list[float]]:
@@ -752,12 +1137,19 @@ SCHEMA — return JSON ONLY with this exact shape:
     {"label": "<short editorial label>", "why_not": "<1-2 sentences grounded in lookalikes.non_fit_prose>"}
   ],
   "target_modules": ["linkedin", ...],
-  "source_config": {"linkedin": {"project_id": "<from input — preserve exactly>", "project_name": "<from input — preserve exactly>"}}
+  "source_config": {"linkedin": {"project_id": "<from input — preserve exactly>", "project_name": "<from input — preserve exactly>"}, "researcher": {"research_topics": ["<from input — preserve set>"], "conference_allowlist": ["<from input — preserve set>"], "discipline": "<from input — preserve verbatim if present>"}},
+  "design_rubric": "<from input — preserve byte-for-byte if present; omit the key entirely if not present>",
+  "target_projects": ["<owner/repo from input — preserve set; order doesn't matter>", ...],
+  "target_stacks": ["<from input — preserve set>", ...],
+  "maintainership_level": "<from input — preserve verbatim if present>"
 }
 
 PRESERVATION RULES (HARD CONTRACTS — output is rejected and the recruiter's scaffolded draft is shown instead if you violate these):
 - If the input contains `seeded_v2_draft.role_title` (non-empty), the output `role_title` MUST equal it character-for-character. Do not "improve" the title.
 - If the input contains `seeded_v2_draft.source_config.linkedin.project_id`, the output `source_config.linkedin.project_id` MUST equal it. Do not invent, drop, or modify it. The same applies to `project_name` if present.
+- If the input contains `seeded_v2_draft.design_rubric` (non-empty), the output `design_rubric` MUST equal it byte-for-byte. Do not modify principles, anchors, weights, calibration_exemplars, hard_reject_patterns, or discipline_weight_overrides. The rubric encodes the recruiter's taste; the model is not authorized to "improve" it.
+- If the input contains `seeded_v2_draft.target_projects` (non-empty), the output `target_projects` MUST contain the same set of "owner/repo" entries (case-insensitive; ordering and duplicates don't matter, but no add or drop). The recruiter named those projects; "kubernetes maintainer" is not the same query as "container orchestration maintainer".
+- If the input contains `seeded_v2_draft.source_config.researcher` (non-empty), the output MUST preserve `research_topics` (set-equality), `conference_allowlist` (set-equality), `discipline` (verbatim — one of `nlp | ml_general | vision | rl | systems | theory | biomedical | other`), and any explicit floor overrides (`h_index_floor`, `papers_in_window_floor`, `papers_in_window_months`) byte-for-byte. The discipline is the load-bearing field for layered floor resolution; the model is not authorized to "improve" recruiter-authoritative inputs.
 - The output `target_modules` SHOULD equal `seeded_v2_draft.target_modules` unless the recruiter explicitly mentioned other surfaces in `chapter_captures.where_to_look.anything_else`.
 
 HALLUCINATION GUARD:
@@ -795,31 +1187,40 @@ def build_brief_polish_user_prompt(
     good_looks = _as_dict(chapter_captures.get("good_looks"))
     lookalikes = _as_dict(chapter_captures.get("lookalikes"))
     where_to_look = _as_dict(chapter_captures.get("where_to_look"))
+    design_rubric_capture = _as_dict(chapter_captures.get("design_rubric"))
+
+    captures_payload: dict[str, Any] = {
+        "role": {
+            "title": _as_str(role.get("title")) or _as_str(role_title),
+            "framing": _as_str(role.get("framing")),
+        },
+        "good_looks": {
+            "prose": _as_str(good_looks.get("prose")),
+        },
+        "lookalikes": {
+            "exemplars_prose": _as_str(lookalikes.get("exemplars_prose")),
+            "non_fit_prose": _as_str(lookalikes.get("non_fit_prose")),
+        },
+        "where_to_look": {
+            "target_modules": _as_str_list(where_to_look.get("target_modules")),
+            "linkedin_project_id": _as_str(
+                where_to_look.get("linkedin_project_id")
+            ),
+            "linkedin_project_name": _as_str(
+                where_to_look.get("linkedin_project_name")
+            ),
+            "anything_else": _as_str(where_to_look.get("anything_else")),
+        },
+    }
+    if design_rubric_capture:
+        # Designer Slice 4: pass the rubric through to the LLM so it
+        # has the byte-equality target in front of it. The LLM is
+        # told (per system prompt) to preserve verbatim; this mirrors
+        # the seeded_v2_draft pass-through.
+        captures_payload["design_rubric"] = design_rubric_capture
 
     payload = {
-        "chapter_captures": {
-            "role": {
-                "title": _as_str(role.get("title")) or _as_str(role_title),
-                "framing": _as_str(role.get("framing")),
-            },
-            "good_looks": {
-                "prose": _as_str(good_looks.get("prose")),
-            },
-            "lookalikes": {
-                "exemplars_prose": _as_str(lookalikes.get("exemplars_prose")),
-                "non_fit_prose": _as_str(lookalikes.get("non_fit_prose")),
-            },
-            "where_to_look": {
-                "target_modules": _as_str_list(where_to_look.get("target_modules")),
-                "linkedin_project_id": _as_str(
-                    where_to_look.get("linkedin_project_id")
-                ),
-                "linkedin_project_name": _as_str(
-                    where_to_look.get("linkedin_project_name")
-                ),
-                "anything_else": _as_str(where_to_look.get("anything_else")),
-            },
-        },
+        "chapter_captures": captures_payload,
         "seeded_v2_draft": seeded_v2_draft,
     }
 
@@ -830,6 +1231,63 @@ def build_brief_polish_user_prompt(
         f"{json.dumps(payload, indent=2)}\n\n"
         "Return JSON only matching the schema in the system prompt."
     )
+
+
+# Executive Search Slice 8: exec-register addendum to the brief polish
+# system prompt. Appended (not replacing) so the schema, voice rules,
+# preservation contracts, and hallucination guards from the base prompt
+# are kept intact. The addendum tightens the editorial register for
+# executive-search briefs and adds preservation contracts for
+# `confidentiality_class`, `prior_search`, and the executive-calibration
+# vocabulary (sector, stage, P&L scale).
+_EXEC_REGISTER_ADDENDUM = """
+
+EXECUTIVE-REGISTER ADDENDUM (executive-search briefs only — recruiter targets exec hires; brief carries `target_modules` containing `"exec_search"`).
+
+Voice tightening:
+- Replace recruiter-readable but consumer-soft phrasing ("we're looking for someone who's owned scaling") with operator-grade phrasing ("VP-or-above scope; org of 50+; P&L responsibility"). Don't dilute the candidate-fit signal in the depth_distinction with adjective stacks.
+- Capability area descriptions must lean on scope verbs (owned, led, ran, exited, acquired, restructured) rather than activity verbs (built, used, leveraged). Recruiters at this level care about the verbs that imply ownership and outcome, not the ones that imply contribution.
+- The depth_distinction is the load-bearing field for an exec brief. Spend the editorial budget there: the builder vs. user definitions should clearly distinguish the operator level the role demands.
+
+Schema preservation rules (HARD CONTRACTS — output is rejected and the recruiter's scaffolded draft is shown instead if you violate these):
+- If the input contains `seeded_v2_draft.confidentiality_class` and its value is `"referenceable"` or `"blind"`, the output `confidentiality_class` MUST equal it character-for-character. Do NOT downgrade a confidential brief to `"open"` — confidentiality is the recruiter's policy decision, not yours to "improve."
+- If the input contains `seeded_v2_draft.prior_search.ruled_out_urls` (non-empty), the output `prior_search` MUST carry the same list (order not contract-bearing; set-equality is the test).
+- If the input contains `seeded_v2_draft.executive_calibration` (sector / stage / pnl_scale_usd / register_notes), the output `executive_calibration` MUST carry the same fields verbatim. The recruiter encoded these intentionally; they're not editorial.
+
+Vocabulary:
+- Use sector / stage / P&L scale vocabulary in capability area descriptions when the brief carries it. "Series-D-to-acquisition operator" reads better than "growth-stage leader."
+- "Operator" and "builder" are valid words at this register. "Manager" is recruiter-readable but doesn't carry exec weight; prefer "leader" or the role-specific noun (CFO, VP Engineering, COO).
+
+Honesty:
+- If the recruiter's `executive_calibration` is partially populated (only sector, not stage), preserve what's there; don't invent the missing fields.
+- An empty `prior_search` is FINE for fresh searches — preserve as empty rather than fabricating "no candidates ruled out yet."
+"""
+
+
+def build_brief_polish_exec_system_prompt() -> str:
+    """Slice 8: exec-register variant of the brief polish system prompt.
+
+    Returns the base prompt + the executive-register addendum. The
+    addendum tightens voice, adds confidentiality / prior-search /
+    executive-calibration preservation contracts, and shifts the
+    capability-description vocabulary toward operator-grade verbs.
+
+    Called by :class:`BriefPolishBackend.polish` when the seeded V2
+    draft's ``target_modules`` contains ``"exec_search"``. Non-exec
+    briefs continue to use :func:`build_brief_polish_system_prompt`
+    unchanged (characterization regression).
+    """
+
+    return build_brief_polish_system_prompt() + _EXEC_REGISTER_ADDENDUM
+
+
+def _is_exec_search_brief(seeded_v2_draft: dict) -> bool:
+    """Detect whether the seeded V2 draft targets the exec_search module."""
+
+    target_modules = seeded_v2_draft.get("target_modules") if isinstance(seeded_v2_draft, dict) else None
+    if not isinstance(target_modules, list):
+        return False
+    return "exec_search" in target_modules
 
 
 # Re-export `_normalize_text` so tests of this module can use it without
@@ -844,6 +1302,7 @@ __all__ = (
     "MIN_SUBSTANTIVE_CHARS",
     "POLISH_MAX_TOKENS",
     "SNAKE_CASE_IDENTIFIER_RE",
+    "build_brief_polish_exec_system_prompt",
     "build_brief_polish_system_prompt",
     "build_brief_polish_user_prompt",
 )

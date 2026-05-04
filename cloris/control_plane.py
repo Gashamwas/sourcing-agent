@@ -1054,20 +1054,67 @@ def aggregate_briefs(
                 conn.close()
 
         decorated.append(
-            brief.model_copy(
-                update={
-                    "brief_id": brief_id,
-                    "last_run_id": latest_run_id,
-                    "last_run_at": latest_run_at,
-                    "last_run_status": latest_run_status,
-                    "last_run_source": latest_run_source,
-                    "total_runs": total_runs,
-                    "total_saves": total_saves,
-                }
+            _apply_confidentiality_to_brief_aggregate(
+                brief.model_copy(
+                    update={
+                        "brief_id": brief_id,
+                        "last_run_id": latest_run_id,
+                        "last_run_at": latest_run_at,
+                        "last_run_status": latest_run_status,
+                        "last_run_source": latest_run_source,
+                        "total_runs": total_runs,
+                        "total_saves": total_saves,
+                    }
+                )
             )
         )
 
     return decorated
+
+
+def _apply_confidentiality_to_brief_aggregate(brief: BriefInfo) -> BriefInfo:
+    """Apply confidentiality redaction at the cross-brief aggregator boundary.
+
+    Executive Search Slice 6 wiring. Routes through
+    :func:`shared.confidentiality.aggregator_visibility` so any future
+    surface that aggregates across briefs (``aggregate_status``,
+    market intel narratives, run reports) gets consistent redaction
+    semantics from one helper.
+
+    Behavior per class:
+
+    - ``open`` — unchanged (passthrough).
+    - ``referenceable`` — title + role visible; save count visible.
+      Cross-brief surfaces don't currently emit candidate names or
+      save reasons through this aggregator, so no further filtering
+      is needed at this seam (the dossier surface and reflection
+      surface have their own gates).
+    - ``blind`` — mask ``role_title`` to
+      :data:`shared.confidentiality.BLIND_TITLE_MASK`; zero out
+      ``total_saves`` (the wire shape is ``int``, so the frontend
+      renders the saves-count cell as the blind mask token when it
+      sees ``confidentiality_class == "blind"``).
+    """
+
+    from shared.confidentiality import (
+        BLIND_TITLE_MASK,
+        SurfaceKind,
+        aggregator_visibility,
+    )
+
+    visibility = aggregator_visibility(brief, SurfaceKind.BRIEF_AGGREGATOR)
+    if visibility == "full":
+        return brief
+    if visibility == "masked":
+        return brief.model_copy(
+            update={
+                "role_title": BLIND_TITLE_MASK,
+                "total_saves": 0,
+            }
+        )
+    # "redacted" — title + count stay; this aggregator doesn't emit
+    # candidate-bearing detail so no further filtering at this seam.
+    return brief
 
 
 def state_dirs_for_brief_id(

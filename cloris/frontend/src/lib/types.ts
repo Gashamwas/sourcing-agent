@@ -584,6 +584,57 @@ export interface CandidateDetailResponse {
   // Phase F Slice F6: cross-source links for the Cross-source evidence
   // section. Empty when the person was observed on one source only.
   cross_source_links?: CrossSourceLink[];
+  // Designer Slice 6: surface_type discriminates rendering branches in
+  // CandidateDetail.svelte. Today recognized values: "hitl_visual_review"
+  // (Designer module saves carry visual_judgment). Other modules add
+  // their own surface_types as the multimodal pattern generalizes.
+  // Legacy candidates omit this field; the renderer falls back to the
+  // text-only save_reason rendering.
+  surface_type?: string | null;
+  // Designer Slice 6: structured visual-judgment payload, present
+  // when surface_type === "hitl_visual_review". Shape mirrors
+  // designer/vision_evaluation.py:VisualJudgment.to_dict() —
+  // model + per-principle scoring + overall verdict + assets.
+  visual_judgment?: VisualJudgmentPayload | null;
+}
+
+export interface VisualJudgmentPayload {
+  model: string;
+  principles: VisualJudgmentPrinciplePayload[];
+  overall_verdict: "yes" | "no" | "borderline";
+  overall_confidence: number;
+  fallback_reason?: string;
+  cost_estimate_usd?: number;
+  // Slice 8 populates this on top-decile candidates.
+  cross_check?: VisualJudgmentCrossCheckPayload | null;
+  // Asset-reference table the prompt grounded itself in. Indexed by
+  // image_id so VisualReviewBeforeAfter can resolve cited image_ids
+  // to thumbnails + URLs.
+  assets: VisualJudgmentAssetPayload[];
+}
+
+export interface VisualJudgmentPrinciplePayload {
+  name: string;
+  score: number;
+  anchor: "bad" | "okay" | "good" | "excellent";
+  reasoning: string;
+  image_ids: number[];
+  anchor_consistency_pass?: boolean;
+}
+
+export interface VisualJudgmentAssetPayload {
+  id: number;
+  url: string;
+  thumbnail_url?: string;
+  source: string;
+  project_title: string;
+}
+
+export interface VisualJudgmentCrossCheckPayload {
+  model: string;
+  principles: VisualJudgmentPrinciplePayload[];
+  overall_verdict: "yes" | "no" | "borderline";
+  overall_confidence: number;
 }
 
 export interface LegacyResolveResponse {
@@ -599,6 +650,12 @@ export type IntakeStep =
   | "good_looks_like"
   | "lookalikes"
   | "exemplars"
+  // Designer Slice 4: rubric-authoring chapter for design briefs.
+  // Sits between exemplars and search_stance so the rubric is the
+  // last thing the recruiter touches before declaring search posture.
+  // Non-design briefs skip this chapter via the chapter renderer's
+  // applicability check (target_modules contains "designer").
+  | "design_rubric"
   | "search_stance"
   | "anything_else"
   | "synthesis"

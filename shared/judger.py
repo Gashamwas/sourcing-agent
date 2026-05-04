@@ -467,7 +467,27 @@ def full_judge(summary: CandidateProfileSummary, brief: Brief | None = None) -> 
     # --- V2 path: structural templates with prompt caching ---
     if b.has_v2_schema:
         system = assemble_full_evaluation_system(b._new_brief)
-        profile_text = _profile_to_text(summary)
+        # Executive Search Slice 3 wiring: dossier-mode briefs get an
+        # assembled dossier evidence body (LinkedIn profile + per-source
+        # off-LinkedIn signal sections) in place of the bare profile
+        # text. The dossier prompt's DOSSIER_RATIONALE: instruction (set
+        # in Slice 2) operates on this richer body to produce the
+        # 2-paragraph rationale. Non-dossier briefs use the unchanged
+        # profile-text path — characterization regression at Slice 2.
+        if getattr(b._new_brief, "dossier_mode", False):
+            from exec_search.evidence_assembly import assemble_dossier_evidence
+            from exec_search.signals import SignalRequestContext
+            dossier = assemble_dossier_evidence(
+                candidate=summary,
+                brief=b._new_brief,
+                context=SignalRequestContext(
+                    brief_id=str(getattr(b, "id", "") or b._new_brief.role_title),
+                    trigger_reason="dossier_full_eval",
+                ),
+            )
+            profile_text = dossier.prompt_body
+        else:
+            profile_text = _profile_to_text(summary)
         try:
             raw = opus_llm_cached(system, profile_text, expect_json=False)
         except Exception as e:
@@ -1016,3 +1036,229 @@ def github_facial_judge_batch(
             decisions[idx] = decision
 
     return [decision for decision in decisions if decision is not None]
+
+
+# ---------------------------------------------------------------------------
+# Researcher evaluators — Slice 5
+# ---------------------------------------------------------------------------
+#
+# Per Researcher Module Spec Opinion 6, the full evaluator MUST populate
+# `rationale` + `confidence` exactly so the source-agnostic read-model
+# `extract_save_reason_and_confidence` finds them at
+# `terminal_payload["full_decision"]`. Both judges produce OpusDecision
+# directly; the orchestrator wraps with envelope and writes through the
+# shared SharedExecutionRuntime path.
+#
+# Pre-LLM deterministic gates apply at the facial layer ONLY: the
+# resolver in `researcher.discipline_defaults` returns the layered
+# floor; if the candidate's h_index or papers_in_window is below the
+# floor, fast-exit FACIAL_NO with a recruiter-readable rationale (no
+# engineer-vocab leak). The full evaluator never sees a fast-exit
+# candidate; the orchestrator only escalates FACIAL_YES /
+# FACIAL_BORDERLINE to full eval.
+
+
+def researcher_facial_judge_batch(
+    snippets: list,
+    brief: Brief | None = None,
+    *,
+    source_config: dict | None = None,
+    llm_caller=None,
+) -> list[OpusDecision]:
+    """Researcher batch facial triage.
+
+    Pre-LLM deterministic gates: resolve the floor via
+    `researcher.discipline_defaults.resolve_floors` and fast-exit any
+    snippet whose h_index or papers_in_window is below the floor with
+    a recruiter-readable FACIAL_NO rationale.
+
+    Surviving snippets get a single batched LLM call. The
+    `llm_caller` parameter is injectable for tests; defaults to the
+    real `facial_llm` from `shared.llm_clients`.
+    """
+
+    from researcher.discipline_defaults import resolve_floors
+    from researcher.judgment_templates import (
+        assemble_facial_system,
+        fast_exit_rationale_for_h_index,
+        fast_exit_rationale_for_papers,
+        render_facial_user_prompt,
+    )
+
+    b = brief or _brief
+    if b is None:
+        raise RuntimeError(
+            "Researcher judger requires a Brief — pass `brief=` or call init_judger first."
+        )
+
+    floors = resolve_floors(source_config or {})
+    discipline = ""
+    if isinstance(source_config, dict):
+        discipline = str(source_config.get("discipline") or "").strip().lower()
+
+    decisions: list[OpusDecision] = []
+    survivors: list[tuple[int, Any]] = []  # (output_index, snippet)
+    output_template: list[OpusDecision | None] = [None] * len(snippets)
+
+    for idx, snippet in enumerate(snippets):
+        # Fast-exit gates per Spec Slice 5.
+        if snippet.papers_in_window < floors["papers_in_window_floor"]:
+            output_template[idx] = OpusDecision(
+                stage="facial",
+                decision="FACIAL_NO",
+                path="fast_exit:papers_in_window",
+                confidence=1.0,
+                rationale=fast_exit_rationale_for_papers(
+                    papers_in_window=snippet.papers_in_window,
+                    papers_in_window_floor=floors["papers_in_window_floor"],
+                    papers_in_window_months=floors["papers_in_window_months"],
+                    discipline=discipline,
+                ),
+                candidate_name=snippet.name,
+                profile_url=snippet.profile_url,
+            )
+            continue
+        if snippet.h_index < floors["h_index_floor"]:
+            output_template[idx] = OpusDecision(
+                stage="facial",
+                decision="FACIAL_NO",
+                path="fast_exit:h_index",
+                confidence=1.0,
+                rationale=fast_exit_rationale_for_h_index(
+                    h_index=snippet.h_index,
+                    h_index_floor=floors["h_index_floor"],
+                    discipline=discipline,
+                ),
+                candidate_name=snippet.name,
+                profile_url=snippet.profile_url,
+            )
+            continue
+        survivors.append((idx, snippet))
+
+    if survivors:
+        if llm_caller is None:
+            def _default_caller(system: str, user: str) -> str:
+                return facial_llm(system, user, expect_json=True, max_tokens=4096)
+            llm_caller = _default_caller
+
+        system = assemble_facial_system(b)
+        for idx, snippet in survivors:
+            user_prompt = render_facial_user_prompt(snippet)
+            try:
+                raw = llm_caller(system, user_prompt)
+            except Exception as exc:  # noqa: BLE001 - LLM client errors surface as failure decisions
+                logger.warning("Researcher facial judge failed for %s: %s", snippet.name, exc)
+                output_template[idx] = judgment_failure_decision(
+                    stage="facial",
+                    candidate_name=snippet.name,
+                    profile_url=snippet.profile_url,
+                    error=exc,
+                    source="judgment",
+                )
+                continue
+            output_template[idx] = _parse_researcher_decision(
+                raw,
+                stage="facial",
+                snippet=snippet,
+            )
+
+    return [d for d in output_template if d is not None]
+
+
+def researcher_full_judge(
+    candidate,
+    brief: Brief | None = None,
+    *,
+    llm_caller=None,
+) -> OpusDecision:
+    """Researcher full evaluation — single LLM call per candidate.
+
+    Returns an OpusDecision whose `rationale` + `confidence` MUST
+    populate exactly per Spec Opinion 6 (the wire contract for every
+    module). The orchestrator writes the decision dict at
+    `terminal_payload["full_decision"]` via SharedExecutionRuntime.
+    """
+
+    from researcher.judgment_templates import (
+        assemble_full_evaluation_system,
+        render_full_user_prompt,
+    )
+
+    b = brief or _brief
+    if b is None:
+        raise RuntimeError(
+            "Researcher judger requires a Brief — pass `brief=` or call init_judger first."
+        )
+
+    if llm_caller is None:
+        def _default_caller(system: str, user: str) -> str:
+            return opus_llm(system, user, expect_json=True, max_tokens=4096)
+        llm_caller = _default_caller
+
+    system = assemble_full_evaluation_system(b)
+    user_prompt = render_full_user_prompt(candidate)
+    try:
+        raw = llm_caller(system, user_prompt)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Researcher full judge failed for %s: %s", candidate.name, exc)
+        return judgment_failure_decision(
+            stage="full",
+            candidate_name=candidate.name,
+            profile_url=candidate.profile_url,
+            error=exc,
+            source="judgment",
+        )
+
+    return _parse_researcher_decision(
+        raw,
+        stage="full",
+        snippet=candidate,
+    )
+
+
+def _parse_researcher_decision(raw, *, stage: str, snippet) -> OpusDecision:
+    """Parse the LLM's JSON output into an OpusDecision.
+
+    Handles both the dict-already case (when llm_caller returns dict)
+    and the json-string case. Defensive against missing keys.
+    """
+
+    if isinstance(raw, dict):
+        payload = raw
+    elif isinstance(raw, str):
+        try:
+            payload = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return judgment_failure_decision(
+                stage=stage,
+                candidate_name=getattr(snippet, "name", ""),
+                profile_url=getattr(snippet, "profile_url", ""),
+                error=ValueError(f"non-JSON response: {raw!r}"),
+                source="parse",
+            )
+    else:
+        payload = {}
+
+    decision = str(payload.get("decision") or "").strip().upper()
+    if not decision:
+        return judgment_failure_decision(
+            stage=stage,
+            candidate_name=getattr(snippet, "name", ""),
+            profile_url=getattr(snippet, "profile_url", ""),
+            error=ValueError("missing `decision` in LLM output"),
+            source="parse",
+        )
+
+    rationale = str(payload.get("rationale") or "").strip() or "[no rationale]"
+    confidence = _safe_confidence(payload.get("confidence"), default=0.5)
+    path = str(payload.get("path") or "").strip() or "none"
+
+    return OpusDecision(
+        stage=stage,
+        decision=decision,
+        path=path,
+        confidence=confidence,
+        rationale=rationale,
+        candidate_name=getattr(snippet, "name", ""),
+        profile_url=getattr(snippet, "profile_url", ""),
+    )

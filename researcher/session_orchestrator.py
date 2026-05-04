@@ -1,31 +1,35 @@
-"""Researcher session orchestrator — Slice 1 stub.
+"""Researcher session orchestrator — Slice 6.
 
-Accepts the argv shape produced by
-`cloris.launchers._researcher_orchestrator_argv` so the launch path
-is exercisable end-to-end (worker spawns, orchestrator parses argv,
-exits 0). Slice 6 wires the real `ResearcherPipeline.run` here.
+CLI entry point used by `cloris.launchers._researcher_orchestrator_argv`
+and the frozen-app dispatch in `cloris/worker.py:295-304`. Wires the
+`ResearcherPipeline` (Slice 6) against the runtime-state store and the
+real OpenAlex / Opus clients.
 
-The stub deliberately does NOT touch runtime state, the brief, or the
-state directory beyond verifying the path exists. Slice 1 is foundation
-only; running a researcher target_modules brief should be a clean no-op
-that demonstrates the launch chain works.
+Argv shape (per Slice 1):
+  --brief PATH         Path to the brief JSON.
+  --state-dir PATH     Per-source state directory.
+  --resume             Continue an interrupted run.
 """
 
 from __future__ import annotations
 
 import argparse
+import logging
+import os
 import sys
 from pathlib import Path
 from typing import Sequence
+
+from researcher.orchestrator import ResearcherPipeline, build_pipeline
+
+
+logger = logging.getLogger(__name__)
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="researcher.session_orchestrator",
-        description=(
-            "Researcher session orchestrator (Slice 1 stub). "
-            "The real pipeline ships in Slice 6."
-        ),
+        description="Researcher session orchestrator (Slice 6).",
     )
     parser.add_argument(
         "--brief",
@@ -40,16 +44,19 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="Continue an interrupted run (no-op in Slice 1 stub).",
+        help="Continue an interrupted run.",
     )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Slice 1 stub entrypoint.
+    """Slice 6 entrypoint.
 
-    Validates argv shape and that the brief path exists, then exits 0.
-    Slice 6 replaces the body with the real pipeline run.
+    Builds the pipeline + runs to completion, returning the process
+    exit code. Failures during HTTP / LLM calls are caught at the
+    pipeline boundary so a transient error doesn't kill the whole run;
+    the runtime-state store retains everything written before the
+    failure for clean resume.
     """
 
     parser = _build_arg_parser()
@@ -65,10 +72,45 @@ def main(argv: Sequence[str] | None = None) -> int:
     state_dir = Path(args.state_dir)
     state_dir.mkdir(parents=True, exist_ok=True)
 
+    polite_pool_email = os.environ.get("OPENALEX_POLITE_POOL_EMAIL", "")
+
     sys.stdout.write(
-        f"researcher.session_orchestrator: Slice 1 stub — brief={brief_path} "
-        f"state_dir={state_dir} resume={args.resume}. "
-        f"Pipeline arrives in Slice 6.\n"
+        f"researcher.session_orchestrator: starting "
+        f"brief={brief_path} state_dir={state_dir} resume={args.resume}\n"
+    )
+
+    try:
+        pipeline, run_id = build_pipeline(
+            brief_path=brief_path,
+            state_dir=state_dir,
+            openalex_polite_pool_email=polite_pool_email,
+        )
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(
+            f"researcher.session_orchestrator: failed to build pipeline: {exc}\n"
+        )
+        logger.exception("Pipeline construction failed")
+        return 2
+
+    sys.stdout.write(
+        f"researcher.session_orchestrator: run_id={run_id}; entering main loop.\n"
+    )
+
+    try:
+        stats = pipeline.run(run_id=run_id)
+    except Exception as exc:  # noqa: BLE001
+        sys.stderr.write(
+            f"researcher.session_orchestrator: pipeline.run raised: {exc}\n"
+        )
+        logger.exception("Pipeline run failed")
+        return 1
+
+    sys.stdout.write(
+        f"researcher.session_orchestrator: done. "
+        f"queries={stats.queries_completed}/{stats.queries_total} "
+        f"discovered={stats.candidates_discovered} "
+        f"facial_yes={stats.facial_yes} facial_no={stats.facial_no} "
+        f"saves={stats.saves} rejects={stats.rejects}\n"
     )
     return 0
 

@@ -801,6 +801,83 @@
                   placeholder="Patterns Cloris should not chase."
                 ></textarea>
               </label>
+            {:else if ch.chapter_id === "design_rubric"}
+              <!-- Designer Slice 4 — rubric-authoring chapter. Slice-4
+                   MVP: discipline picker + calibration exemplars (1-3
+                   portfolio URLs with yes/no/borderline verdict) +
+                   hard-reject patterns. Per-principle anchor editor
+                   (6 principles × 4 anchors) is deferred to a
+                   follow-up — that surface needs design iteration
+                   before shipping. The default rubric at
+                   `config/design-rubrics/default.json` is what the
+                   vision-evaluation pipeline uses when the recruiter
+                   doesn't customize per-principle anchors. -->
+              <label class="onboarding-field">
+                <span class="onboarding-field-prompt">
+                  <em>Which design discipline is closest to this role?</em>
+                </span>
+                <select
+                  class="onboarding-select"
+                  value={(chapterField("design_rubric", "discipline") as string) || ""}
+                  onchange={(e) =>
+                    writeChapterField(
+                      "design_rubric",
+                      "discipline",
+                      (e.currentTarget as HTMLSelectElement).value
+                    )}
+                >
+                  <option value="">— pick a discipline —</option>
+                  <option value="product">Product</option>
+                  <option value="brand">Brand / Visual identity</option>
+                  <option value="motion">Motion</option>
+                  <option value="illustration">Illustration</option>
+                  <option value="ux">UX</option>
+                  <option value="other">Other / mixed</option>
+                </select>
+              </label>
+              <label class="onboarding-field">
+                <span class="onboarding-field-prompt">
+                  <em
+                    >Up to 5 portfolio URLs, one per line, marked yes / no /
+                    borderline.</em
+                  >
+                </span>
+                <textarea
+                  class="onboarding-textarea"
+                  use:autoExpand
+                  value={(chapterField(
+                    "design_rubric",
+                    "calibration_exemplars_text"
+                  ) as string) || ""}
+                  oninput={(e) =>
+                    writeChapterField(
+                      "design_rubric",
+                      "calibration_exemplars_text",
+                      (e.currentTarget as HTMLTextAreaElement).value
+                    )}
+                  placeholder={`https://example.com/portfolio | yes | strong product surface design\nhttps://other.com | no | mostly layout work, no shipped product`}
+                ></textarea>
+              </label>
+              <label class="onboarding-field">
+                <span class="onboarding-field-prompt">
+                  <em>Hard reject patterns — one per line.</em>
+                </span>
+                <textarea
+                  class="onboarding-textarea"
+                  use:autoExpand
+                  value={(chapterField(
+                    "design_rubric",
+                    "hard_reject_patterns_text"
+                  ) as string) || ""}
+                  oninput={(e) =>
+                    writeChapterField(
+                      "design_rubric",
+                      "hard_reject_patterns_text",
+                      (e.currentTarget as HTMLTextAreaElement).value
+                    )}
+                  placeholder={`portfolios that are exclusively layout work with no shipped product evidence\nillustrators who only show personal projects, no client work`}
+                ></textarea>
+              </label>
             {:else if ch.chapter_id === "where_to_look"}
               <fieldset class="onboarding-fieldset">
                 <legend class="onboarding-field-prompt">
@@ -817,6 +894,18 @@
                       )}
                   />
                   <span>LinkedIn</span>
+                </label>
+                <label class="onboarding-checkbox">
+                  <input
+                    type="checkbox"
+                    checked={whereToLookHasModule("researcher")}
+                    onchange={(e) =>
+                      toggleWhereToLookModule(
+                        "researcher",
+                        (e.currentTarget as HTMLInputElement).checked
+                      )}
+                  />
+                  <span>Academic researchers (OpenAlex)</span>
                 </label>
               </fieldset>
               {#if whereToLookHasModule("linkedin")}
@@ -859,6 +948,110 @@
                     }}
                   />
                 </div>
+              {/if}
+              {#if whereToLookHasModule("researcher")}
+                <!-- Researcher Slice 7: surface the recruiter-authoritative
+                     evaluation inputs at intake. NO raw `h_index_floor`
+                     numeric input in v1 — Spec Opinion 7 deliberately keeps
+                     floors off the wizard. Discipline is the load-bearing
+                     field; the resolver in
+                     `researcher.discipline_defaults.resolve_floors` derives
+                     the floor at evaluation time. Free-text overrides for
+                     power users live in direct brief JSON edit only. -->
+                <label class="onboarding-field">
+                  <span class="onboarding-field-prompt">
+                    <em>What research areas matter? One per line.</em>
+                  </span>
+                  <textarea
+                    class="onboarding-textarea"
+                    use:autoExpand
+                    value={(chapterField(
+                      "where_to_look",
+                      "research_topics_text"
+                    ) as string) || ""}
+                    oninput={async (e) => {
+                      const s = $activeSession;
+                      if (s === null) return;
+                      const text = (e.currentTarget as HTMLTextAreaElement)
+                        .value;
+                      const lines = text
+                        .split("\n")
+                        .map((line) => line.trim())
+                        .filter((line) => line.length > 0);
+                      const existing = s.state_json["where_to_look"];
+                      const merged: Record<string, unknown> = {
+                        ...((existing && typeof existing === "object"
+                          ? existing
+                          : {}) as Record<string, unknown>),
+                        research_topics_text: text,
+                        research_topics: lines,
+                      };
+                      await updateStateField("where_to_look", merged);
+                    }}
+                    placeholder={`RLHF\nagent infrastructure\ninference systems`}
+                  ></textarea>
+                </label>
+                <label class="onboarding-field">
+                  <span class="onboarding-field-prompt">
+                    <em>Conference allowlist — venues to weight. One per line.</em>
+                  </span>
+                  <textarea
+                    class="onboarding-textarea"
+                    use:autoExpand
+                    value={(chapterField(
+                      "where_to_look",
+                      "conference_allowlist_text"
+                    ) as string) || ""}
+                    oninput={async (e) => {
+                      const s = $activeSession;
+                      if (s === null) return;
+                      const text = (e.currentTarget as HTMLTextAreaElement)
+                        .value;
+                      const lines = text
+                        .split("\n")
+                        .map((line) => line.trim())
+                        .filter((line) => line.length > 0);
+                      const existing = s.state_json["where_to_look"];
+                      const merged: Record<string, unknown> = {
+                        ...((existing && typeof existing === "object"
+                          ? existing
+                          : {}) as Record<string, unknown>),
+                        conference_allowlist_text: text,
+                        conference_allowlist: lines,
+                      };
+                      await updateStateField("where_to_look", merged);
+                    }}
+                    placeholder={`NeurIPS\nICML\nICLR\nACL\nEMNLP\nCVPR\nCOLM\nTMLR`}
+                  ></textarea>
+                </label>
+                <label class="onboarding-field">
+                  <span class="onboarding-field-prompt">
+                    <em>What field?</em>
+                  </span>
+                  <select
+                    class="onboarding-select"
+                    value={(chapterField("where_to_look", "discipline") as string) || ""}
+                    onchange={(e) =>
+                      writeChapterField(
+                        "where_to_look",
+                        "discipline",
+                        (e.currentTarget as HTMLSelectElement).value
+                      )}
+                  >
+                    <option value="">— pick a field —</option>
+                    <option value="ml_general">General ML</option>
+                    <option value="nlp">NLP</option>
+                    <option value="vision">Vision</option>
+                    <option value="rl">RL</option>
+                    <option value="systems">ML systems</option>
+                    <option value="theory">Theory</option>
+                    <option value="biomedical">Biomedical</option>
+                    <option value="other">Other / mixed</option>
+                  </select>
+                  <span class="onboarding-field-hint">
+                    Cloris will pick a sensible bar based on field defaults — you can tighten later.
+                  </span>
+                </label>
               {/if}
               <label class="onboarding-field">
                 <span class="onboarding-field-prompt">

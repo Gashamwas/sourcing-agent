@@ -129,6 +129,12 @@ RECOGNIZED_V2_KEYS = frozenset(
         "prior_search",
         "board_signals",
         "executive_movement_window_days",
+        # Executive Search module (Slice 5). Per-search dossier-spend
+        # cap (recruiter-overridable; default $200) and an optional
+        # bag of company-stage signal hints used by the Crunchbase /
+        # PitchBook adapters as query refinements.
+        "dossier_spend_cap_usd",
+        "company_stage_signals",
         # Designer module (Slice 1). Top-level structured rubric for
         # vision-LLM evaluation against recruiter-encoded principles.
         # Top-level rather than nested under source_config.designer
@@ -140,6 +146,24 @@ RECOGNIZED_V2_KEYS = frozenset(
         # ``_design_rubric_drift`` cascade entry in
         # :mod:`market_intelligence.brief_polish`.
         "design_rubric",
+        # OSS Maintainers module (Slice 2). Top-level evaluation
+        # inputs for maintainership-level classification on the
+        # github source. Top-level rather than nested under
+        # `source_config.github` (which stays empty per OSS
+        # Maintainers Module Spec §8) because these are EVALUATION
+        # inputs (consumed by the maintainership classifier + full-
+        # eval prompt + strategy seeding), not save-destination
+        # config. Brief polish preserves `target_projects` via the
+        # `_target_projects_drift` cascade entry in
+        # :mod:`market_intelligence.brief_polish`. Recruiter-readable
+        # values: `target_projects` is a list of "owner/repo" strings
+        # (e.g. ["kubernetes/kubernetes", "rust-lang/rust"]);
+        # `target_stacks` is a list of language/framework/domain
+        # tags; `maintainership_level` is one of
+        # `RECOGNIZED_MAINTAINERSHIP_LEVELS`.
+        "target_projects",
+        "target_stacks",
+        "maintainership_level",
     }
 )
 
@@ -279,6 +303,22 @@ RECOGNIZED_RUBRIC_ANCHORS: tuple[str, ...] = ("bad", "okay", "good", "excellent"
 # are a follow-up). `other` falls through to the default rubric.
 RECOGNIZED_DESIGN_DISCIPLINES: frozenset[str] = frozenset(
     {"product", "brand", "motion", "illustration", "ux", "other"}
+)
+
+
+# OSS Maintainers module (Slice 2): the values the brief's
+# top-level `maintainership_level` is allowed to carry. Ordered
+# (low to high) so callers can compare ordinals when a slice's
+# logic needs "at least maintainer." Stored as a tuple-of-tuples
+# at module scope; the `frozenset` mirror is what
+# :func:`validate_v2_brief` checks against.
+MAINTAINERSHIP_LEVEL_ORDER: tuple[str, ...] = (
+    "contributor",
+    "maintainer",
+    "project_lead",
+)
+RECOGNIZED_MAINTAINERSHIP_LEVELS: frozenset[str] = frozenset(
+    MAINTAINERSHIP_LEVEL_ORDER
 )
 
 
@@ -435,6 +475,27 @@ def validate_v2_brief(data: dict[str, Any]) -> None:
     # itself in this shape; an invalid rubric would silently produce
     # malformed prompts at run time, so we fail at brief-edit time.
     invalid.extend(_validate_design_rubric(data.get("design_rubric")))
+
+    # OSS Maintainers Slice 2: target_projects / target_stacks are
+    # optional lists of strings; maintainership_level is optional
+    # but, when present, must be one of
+    # `RECOGNIZED_MAINTAINERSHIP_LEVELS`. Invalid shapes here would
+    # silently produce empty maintainership classification at run
+    # time (the source-spec §11 contract: behavior-preserving when
+    # `target_projects` is empty), so we fail at brief-edit time
+    # rather than degrading silently.
+    tp = data.get("target_projects")
+    if tp is not None:
+        if not isinstance(tp, list) or not all(isinstance(p, str) for p in tp):
+            invalid.append("target_projects")
+    ts = data.get("target_stacks")
+    if ts is not None:
+        if not isinstance(ts, list) or not all(isinstance(p, str) for p in ts):
+            invalid.append("target_stacks")
+    ml = data.get("maintainership_level")
+    if ml is not None and ml != "":
+        if not isinstance(ml, str) or ml not in RECOGNIZED_MAINTAINERSHIP_LEVELS:
+            invalid.append("maintainership_level")
 
     if invalid:
         raise BriefSchemaError(
