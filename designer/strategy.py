@@ -99,7 +99,16 @@ def form_designer_strategy(
                 seen.add(key)
                 queries.append(query)
 
-        # Slice 3 will append google_cse queries here.
+        if "google_cse" in sources:
+            for query in _google_cse_queries_for_capability_area(
+                capability_area=capability_area,
+                discipline=discipline,
+            ):
+                key = (query.source, query.query_text.lower())
+                if key in seen:
+                    continue
+                seen.add(key)
+                queries.append(query)
 
     return queries
 
@@ -166,6 +175,70 @@ def _behance_queries_for_capability_area(
             )
 
     return queries[:MAX_QUERIES_PER_CAPABILITY_AREA]
+
+
+# Maximum CSE queries per capability area. CSE is more expensive
+# (paid above 100/day) AND each query also fans out across the
+# portfolio-host set in :mod:`designer.acquisition`, so the per-
+# capability cap is tighter than Behance's.
+MAX_CSE_QUERIES_PER_CAPABILITY_AREA = 3
+
+
+def _google_cse_queries_for_capability_area(
+    *,
+    capability_area: dict[str, Any],
+    discipline: str,
+) -> list[DesignerSearchQuery]:
+    """Form CSE queries for one capability area.
+
+    CSE queries DON'T site-restrict at strategy-formation time —
+    :mod:`designer.acquisition` fans each query out across the
+    portfolio-host set so the per-host quota burn is explicit at the
+    acquisition layer rather than baked into the work-unit shape.
+
+    Recipe:
+    1. Capability-area name as bare query.
+    2. Top 1 specialization signal as query.
+    3. Top 1 specialization × top 1 tool as combined query.
+    Capped at ``MAX_CSE_QUERIES_PER_CAPABILITY_AREA``.
+    """
+
+    name = str(capability_area.get("name") or "").strip()
+    queries: list[DesignerSearchQuery] = [
+        DesignerSearchQuery(
+            source="google_cse",
+            query_text=name,
+            sort="relevance",
+            capability_area_name=name,
+            discipline=discipline,
+        )
+    ]
+    spec_signals = _as_str_list(capability_area.get("behance_specialization_signals"))
+    tool_signals = _as_str_list(capability_area.get("tool_stack_signals"))
+
+    if spec_signals:
+        queries.append(
+            DesignerSearchQuery(
+                source="google_cse",
+                query_text=spec_signals[0],
+                sort="relevance",
+                capability_area_name=name,
+                discipline=discipline,
+            )
+        )
+
+    if spec_signals and tool_signals:
+        queries.append(
+            DesignerSearchQuery(
+                source="google_cse",
+                query_text=f"{spec_signals[0]} {tool_signals[0]} portfolio",
+                sort="relevance",
+                capability_area_name=name,
+                discipline=discipline,
+            )
+        )
+
+    return queries[:MAX_CSE_QUERIES_PER_CAPABILITY_AREA]
 
 
 def _dominant_discipline(brief: dict[str, Any]) -> str:

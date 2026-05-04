@@ -27,6 +27,7 @@ export type UIChapterId =
   | "role"
   | "good_looks"
   | "lookalikes"
+  | "design_rubric"
   | "where_to_look"
   | "review"
   | "completed";
@@ -88,6 +89,18 @@ export const INTAKE_CHAPTER_MAP: readonly UIChapter[] = [
     eyebrow: "intake — exemplars",
     heading: "People who'd thrive here.",
     deck: "Names of folks you'd hire today — or hire tomorrow if they came up. Their LinkedIn URLs if you have them.",
+    forwardLabel: "Continue with Cloris",
+  },
+  {
+    // Designer Slice 4: rubric authoring chapter. Active only for
+    // briefs whose target_modules includes "designer"; non-designer
+    // briefs skip the chapter via the renderer's applicability check
+    // (`shouldRenderChapter(chapter, brief)` in OnboardingFlow).
+    chapter_id: "design_rubric",
+    phases: ["design_rubric"],
+    eyebrow: "intake — design rubric",
+    heading: "What good visual judgment looks like.",
+    deck: "Cloris evaluates portfolios against a rubric you can shape. Pick the discipline closest to the role; tweak the principles and anchors so they read true to your taste.",
     forwardLabel: "Continue with Cloris",
   },
   {
@@ -169,6 +182,7 @@ export function assertAllPhasesCovered(): readonly IntakeStep[] {
     "good_looks_like",
     "lookalikes",
     "exemplars",
+    "design_rubric",
     "search_stance",
     "anything_else",
     "synthesis",

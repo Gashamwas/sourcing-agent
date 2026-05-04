@@ -18,7 +18,10 @@ import type { IntakeStep } from "../../types";
 describe("INTAKE_CHAPTER_MAP — coverage", () => {
   it("every backend phase is covered by exactly one chapter", () => {
     const allPhases = assertAllPhasesCovered(); // throws on gap
-    expect(allPhases.length).toBe(11);
+    // 11 baseline phases + 1 design_rubric phase added in Designer
+    // Slice 4 = 12. Adding a phase requires both this test bump and
+    // an entry in `assertAllPhasesCovered.ALL_PHASES`.
+    expect(allPhases.length).toBe(12);
     // No phase appears in more than one chapter.
     for (const phase of allPhases) {
       const matches = INTAKE_CHAPTER_MAP.filter((c) =>

@@ -1,0 +1,140 @@
+{
+  "id": "senior_product_designer_series_b",
+  "role_title": "Senior Product Designer",
+  "role_summary": "Owns design surface end-to-end for a Series-B B2B SaaS in product analytics. Ships shipped product across web app + onboarding + dashboards. Works with PMs and engineering on weekly cadence; drives a small design system library used across the team.",
+  "geography": "United States",
+  "target_modules": ["designer"],
+  "capability_areas": [
+    {
+      "name": "Information density",
+      "description": "Designs dense data surfaces well — charts, tables, query builders, dashboards — without losing scannability or hierarchy.",
+      "behance_specialization_signals": [
+        "data visualization",
+        "dashboard design",
+        "analytics product"
+      ],
+      "tool_stack_signals": ["Figma", "Storybook"]
+    },
+    {
+      "name": "Design systems",
+      "description": "Builds and maintains a small-but-well-loved design system. Tokens, components, governance. Comfortable shipping it as the only designer in a 5-engineer pod.",
+      "behance_specialization_signals": [
+        "design system",
+        "component library",
+        "design tokens"
+      ],
+      "tool_stack_signals": ["Figma", "Storybook"]
+    },
+    {
+      "name": "Onboarding flow craft",
+      "description": "Has shipped onboarding flows for technical products. Knows the difference between 'we explained the feature' and 'the user reached aha-moment in <5 minutes'.",
+      "behance_specialization_signals": [
+        "SaaS onboarding",
+        "first-run experience",
+        "activation flow"
+      ],
+      "tool_stack_signals": ["Figma"]
+    }
+  ],
+  "depth_distinction": {
+    "builder_definition": "Owns the surface end-to-end including governance. Ships shipped product. Maintains a small design system library used across the team. Comfortable being the only designer in a 5-engineer pod.",
+    "user_definition": "Consumes existing design systems without authoring. Ships polish on top of patterns someone else built. Workmanlike rather than load-bearing.",
+    "edge_case_guidance": "Borderline = consumed-then-extended a design system. Senior IC who can occasionally do governance work but isn't the system's primary owner."
+  },
+  "non_fit_patterns": [
+    {
+      "label": "marketing-only portfolio",
+      "why_not": "no shipped product evidence; the work is brand and editorial, not B2B SaaS interface design"
+    },
+    {
+      "label": "agency-only portfolio",
+      "why_not": "all client deliverables, no in-house product ownership; lacks the design-system + onboarding-flow craft we need at this stage"
+    },
+    {
+      "label": "consumer-only portfolio",
+      "why_not": "consumer aesthetics + flows don't carry into dense B2B information surfaces; the visual language is differently tuned"
+    }
+  ],
+  "design_rubric": {
+    "principles": [
+      {
+        "name": "Visual hierarchy",
+        "description": "How clearly the work guides attention across dense data surfaces. Primary actions distinct from secondary; data legible at scan distance.",
+        "anchors": {
+          "bad": "No discernible hierarchy. Every element competes equally for attention.",
+          "okay": "Hierarchy present but weak. Distinctions between primary and secondary elements require effort to read.",
+          "good": "Clear hierarchy. Primary, secondary, and tertiary elements visually distinct; the eye lands on the intended focal point.",
+          "excellent": "Hierarchy is purposeful and confident. Each layer serves a deliberate communication purpose."
+        },
+        "weight": 1.3
+      },
+      {
+        "name": "Typographic refinement",
+        "description": "Typography as a first-class material. Number formatting, table type, label sizing — the small things that distinguish a polished SaaS surface from a workmanlike one.",
+        "anchors": {
+          "bad": "Type undifferentiated or default. No evidence of intentional typeface selection, sizing, or rhythm.",
+          "okay": "Type consistent without precision. Choices workable but not load-bearing for the work's identity.",
+          "good": "Type intentional and well-set. Kerning, leading, and pairing reflect craft; typography carries voice without effort.",
+          "excellent": "Typography is a primary expressive material. Decisive type choices, micro-typography precision, and editorial restraint."
+        },
+        "weight": 1.0
+      },
+      {
+        "name": "Compositional balance",
+        "description": "Spatial relationships across the canvas. Negative space as a positive material; consistent rhythm across screens.",
+        "anchors": {
+          "bad": "Composition cluttered or arbitrary. Elements feel placed rather than arranged.",
+          "okay": "Composition workable but predictable. Default grid behavior; no compositional ambition.",
+          "good": "Composition considered. Rhythm and balance intentional; negative space used as a positive material.",
+          "excellent": "Composition is the design itself. Tension, asymmetry, and pacing deployed with intent."
+        },
+        "weight": 1.2
+      },
+      {
+        "name": "Color system coherence",
+        "description": "How color choices relate as a system. Palette discipline, chromatic relationships, and the emotional / functional purpose of color in dense data contexts.",
+        "anchors": {
+          "bad": "Color incidental or chaotic. No discernible palette discipline.",
+          "okay": "Color works but isn't a system. Choices workable; coherence approximate.",
+          "good": "Color systematic. Palette clearly defined; relationships between colors intentional.",
+          "excellent": "Color is a structural material. Palette has perspective and decisiveness."
+        },
+        "weight": 1.0
+      },
+      {
+        "name": "Conceptual strength",
+        "description": "Whether the work expresses an idea beyond its surface. Sharp underlying concept the visual choices serve.",
+        "anchors": {
+          "bad": "No discernible concept beneath the surface.",
+          "okay": "Concept present but generic. The frame is recognizable; not particularly its own.",
+          "good": "Concept sharp and the visual choices serve it consistently.",
+          "excellent": "Concept original and the execution makes the concept inevitable."
+        },
+        "weight": 0.8
+      },
+      {
+        "name": "Craft execution",
+        "description": "Fit, finish, and the absence of avoidable errors. Spacing precision, edge treatment, alignment discipline.",
+        "anchors": {
+          "bad": "Visible craft errors. Misaligned elements, low-resolution assets, or mistreated edges signal indifference.",
+          "okay": "Craft acceptable. Few errors but not particularly precise.",
+          "good": "Craft clean. Spacing, alignment, and finish precise; the work reads as intentional throughout.",
+          "excellent": "Craft is at the limit of what the medium allows."
+        },
+        "weight": 1.2
+      }
+    ],
+    "discipline_weight_overrides": {
+      "product": {
+        "Visual hierarchy": 1.3,
+        "Compositional balance": 1.2,
+        "Conceptual strength": 0.8
+      }
+    },
+    "calibration_exemplars": [],
+    "hard_reject_patterns": [
+      "layout-only portfolio with no shipped product",
+      "all client work no in-house product ownership"
+    ]
+  }
+}

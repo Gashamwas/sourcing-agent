@@ -141,6 +141,44 @@ def behance_user_to_snippet(
     )
 
 
+def cse_item_to_snippet(item: dict[str, Any]) -> DesignerSnippet | None:
+    """Map a Google CSE result item to :class:`DesignerSnippet`, or
+    return None if the item lacks the minimum identity fields.
+
+    CSE results don't carry the structured taxonomy Behance does, so
+    most :class:`DesignerSnippet` fields end up empty. The vision-
+    evaluation pipeline (Slice 5) is the layer that recovers signal
+    from CSE-discovered candidates — the thumbnail + the host domain
+    are sufficient input to anchor the visual pass.
+    """
+
+    from designer.sources.google_cse import (
+        cse_result_thumbnail_url,
+        cse_result_to_display_name,
+        cse_result_to_identity_key,
+    )
+
+    link = item.get("link")
+    if not isinstance(link, str) or not link:
+        return None
+
+    identity_key = cse_result_to_identity_key(link)
+    display_name = cse_result_to_display_name(item)
+
+    return DesignerSnippet(
+        source="google_cse",
+        identity_key=identity_key,
+        display_name=display_name or identity_key.split(":", 1)[-1],
+        profile_url=link,
+        location="",
+        headline="",
+        fields=(),
+        tools=(),
+        top_project_titles=(),
+        appreciation_count_total=0,
+    )
+
+
 def behance_project_to_summary(project: dict[str, Any]) -> DesignerProjectSummary:
     """Map a Behance ``/v2/users/{u}/projects`` response item to a summary."""
 

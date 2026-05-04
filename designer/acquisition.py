@@ -1,6 +1,6 @@
 """Designer module — candidate acquisition from per-source clients.
 
-Designer Slice 2. Executes :class:`designer.schemas.DesignerSearchQuery`
+Designer Slices 2-3. Executes :class:`designer.schemas.DesignerSearchQuery`
 objects against the per-source clients (Behance in Slice 2; Google CSE
 in Slice 3) and produces a deduped stream of
 :class:`designer.schemas.DesignerSnippet` instances ready for the
@@ -8,9 +8,11 @@ text-based facial-stage judge.
 
 Cross-source dedup happens by ``identity_key``. Behance candidates
 carry ``behance:<username>``; Google CSE candidates carry
-``cse:<portfolio_url>``. Slice 8's identity-resolution layer joins
-across sources at the workspace surface; this module only dedups
-within the current acquisition stream.
+``cse:<host>/<first-path-segment>``. Slice 8's identity-resolution
+layer joins across sources at the workspace surface (e.g., a Behance
+profile + that designer's personal site discovered via CSE land as
+the same canonical person); this module only dedups within the
+current acquisition stream.
 """
 
 from __future__ import annotations
@@ -21,8 +23,13 @@ from designer.schemas import (
     DesignerSearchQuery,
     DesignerSnippet,
     behance_user_to_snippet,
+    cse_item_to_snippet,
 )
 from designer.sources.behance import BehanceClient
+from designer.sources.google_cse import (
+    PORTFOLIO_HOST_DOMAINS,
+    GoogleCSEClient,
+)
 
 
 # Cap on candidates per query so a single broad query (e.g.,
@@ -92,6 +99,109 @@ async def acquire_behance_candidates(
             if snippet.identity_key in seen_identity_keys:
                 continue
             seen_identity_keys.add(snippet.identity_key)
+            yield snippet
+
+
+# Per CSE query, how many results to surface. CSE returns 10/page;
+# Slice-3 takes the first page only.
+DEFAULT_MAX_RESULTS_PER_CSE_QUERY = 10
+
+
+async def acquire_google_cse_candidates(
+    queries: list[DesignerSearchQuery],
+    *,
+    client: GoogleCSEClient,
+    portfolio_hosts: tuple[str, ...] = PORTFOLIO_HOST_DOMAINS,
+    max_results_per_query: int = DEFAULT_MAX_RESULTS_PER_CSE_QUERY,
+) -> AsyncIterator[DesignerSnippet]:
+    """Run each CSE query against each portfolio host, yield deduped snippets.
+
+    Each strategy-formed CSE query fans out across the portfolio-host
+    set (cargo.site, squarespace.com, …) — the strategy doesn't
+    site-restrict at query-formation time so the host fanout stays
+    explicit at the acquisition layer.
+
+    Per-query failure: same as Behance — log and continue rather
+    than aborting the run.
+    """
+
+    seen_identity_keys: set[str] = set()
+
+    for query in queries:
+        if query.source != "google_cse":
+            continue
+
+        for host in portfolio_hosts:
+            try:
+                status, body = await client.search(
+                    query=query.query_text,
+                    site_filter=host,
+                    start=1,
+                )
+            except Exception:
+                # Per-(query, host) failure is recoverable; continue
+                # with remaining hosts and queries.
+                continue
+
+            if status != 200 or not isinstance(body, dict):
+                continue
+
+            items = body.get("items") or []
+            if not isinstance(items, list):
+                continue
+
+            for item in items[:max_results_per_query]:
+                if not isinstance(item, dict):
+                    continue
+                snippet = cse_item_to_snippet(item)
+                if snippet is None:
+                    continue
+                if snippet.identity_key in seen_identity_keys:
+                    continue
+                seen_identity_keys.add(snippet.identity_key)
+                yield snippet
+
+
+async def acquire_designer_candidates(
+    queries: list[DesignerSearchQuery],
+    *,
+    behance_client: BehanceClient | None = None,
+    google_cse_client: GoogleCSEClient | None = None,
+) -> AsyncIterator[DesignerSnippet]:
+    """Cross-source acquisition: Behance + Google CSE merged stream.
+
+    Iterates Behance first (structured taxonomy → higher-precision
+    matches generally), then Google CSE (broader portfolio-host
+    coverage). Cross-source dedup via ``identity_key`` — Slice 8's
+    cross-source identity layer eventually joins ``behance:joe`` with
+    ``cse:joe.cargo.site/portfolio`` at the workspace surface; for
+    the acquisition-stream layer, they remain distinct rows here.
+
+    Either client may be ``None`` (a brief that doesn't have a
+    Behance key configured runs CSE-only, and vice versa). Passing
+    both ``None`` yields an empty stream.
+    """
+
+    seen: set[str] = set()
+    behance_queries = [q for q in queries if q.source == "behance"]
+    cse_queries = [q for q in queries if q.source == "google_cse"]
+
+    if behance_client is not None and behance_queries:
+        async for snippet in acquire_behance_candidates(
+            behance_queries, client=behance_client
+        ):
+            if snippet.identity_key in seen:
+                continue
+            seen.add(snippet.identity_key)
+            yield snippet
+
+    if google_cse_client is not None and cse_queries:
+        async for snippet in acquire_google_cse_candidates(
+            cse_queries, client=google_cse_client
+        ):
+            if snippet.identity_key in seen:
+                continue
+            seen.add(snippet.identity_key)
             yield snippet
 
 

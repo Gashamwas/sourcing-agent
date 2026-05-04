@@ -60,6 +60,12 @@
   import BriefCriteriaDrawer from "./BriefCriteriaDrawer.svelte";
   import EvidenceRenderer from "./EvidenceRenderer.svelte";
   import type { Evidence } from "./EvidenceRenderer.svelte";
+  // Designer Slice 6: surface_type-discriminated rendering for the
+  // HITL visual review surface. The default text-rendering branch
+  // remains intact for non-Designer candidates; Designer candidates
+  // (surface_type === "hitl_visual_review") gain an inline visual-
+  // judgment block above the existing save_reason rendering.
+  import VisualHunkCard from "./VisualHunkCard.svelte";
   import { loaderFadeOut, surfaceFadeIn } from "../lib/transitions";
 
   let {
@@ -347,7 +353,52 @@
             disabledReason={d.is_failed_state ? candidateDetailFailedStateNote : null}
           />
 
-          {#if d.save_reason !== null}
+          {#if d.surface_type === "hitl_visual_review" && d.visual_judgment}
+            {@const vj = d.visual_judgment}
+            {@const assetById = new Map(vj.assets.map((a) => [a.id, a]))}
+            <section
+              class="candidate-detail-visual-judgment"
+              aria-label="Visual judgment"
+            >
+              <p class="surface-eyebrow">
+                Visual judgment ·
+                <span class="visual-judgment-verdict">{vj.overall_verdict}</span>
+                {#if vj.overall_confidence > 0}
+                  · {Math.round(vj.overall_confidence * 100)}% confident
+                {/if}
+                {#if vj.fallback_reason}
+                  · <em>fallback: {vj.fallback_reason}</em>
+                {/if}
+              </p>
+              {#each vj.principles as principle (principle.name)}
+                {@const cited = principle.image_ids
+                  .map((id) => assetById.get(id))
+                  .filter((a) => a !== undefined)
+                  .map((a) => ({
+                    id: a!.id,
+                    url: a!.url,
+                    thumbnailUrl: a!.thumbnail_url,
+                    source: a!.source,
+                    projectTitle: a!.project_title,
+                  }))}
+                <VisualHunkCard
+                  principleName={principle.name}
+                  score={principle.score}
+                  anchor={principle.anchor}
+                  reasoning={principle.reasoning}
+                  images={cited}
+                  anchorConsistencyPass={principle.anchor_consistency_pass ?? true}
+                  crossCheck={null}
+                  approved={true}
+                  onToggle={() => {
+                    /* Slice 7 wires per-principle accept/reject feedback
+                       capture; today the toggle is a no-op so the card
+                       still reads correctly. */
+                  }}
+                />
+              {/each}
+            </section>
+          {:else if d.save_reason !== null}
             <section class="candidate-detail-save-reason">
               <p class="field-label">{candidateDetailFieldSaveReason}</p>
               <p class="candidate-detail-save-reason-body">{d.save_reason}</p>

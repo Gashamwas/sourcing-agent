@@ -79,19 +79,30 @@ def test_strategy_emits_baseline_query_for_capability_area_name() -> None:
 
 
 def test_strategy_emits_one_query_per_specialization_signal() -> None:
+    """Each specialization signal becomes a distinct query — except
+    when it duplicates the capability-area name under case-insensitive
+    dedup (Behance search is case-insensitive, so the dedup at the
+    strategy layer matches that behavior)."""
+
     queries = form_designer_strategy(_brief_with_one_capability_area())
-    query_texts = {q.query_text for q in queries}
-    assert "design systems" in query_texts  # specialization signal (lowercased input)
-    assert "component library" in query_texts
+    query_texts_lower = {q.query_text.lower() for q in queries}
+    assert "design systems" in query_texts_lower  # baseline OR signal — dedupes
+    assert "component library" in query_texts_lower
 
 
 def test_strategy_emits_signal_x_tool_combinations() -> None:
+    """Each top-2 specialization × top-2 tool produces a combined query,
+    bounded by the per-capability cap. With 1 baseline + 2 signals +
+    up to 4 combos, the cap of 6 trims the last combo."""
+
     queries = form_designer_strategy(_brief_with_one_capability_area())
     query_texts = {q.query_text for q in queries}
+    # At least these three combos land within the cap.
     assert "design systems Figma" in query_texts
     assert "design systems Storybook" in query_texts
     assert "component library Figma" in query_texts
-    assert "component library Storybook" in query_texts
+    # Total query count respects the per-capability cap.
+    assert len(queries) <= MAX_QUERIES_PER_CAPABILITY_AREA
 
 
 def test_strategy_caps_queries_per_capability_area() -> None:
@@ -215,12 +226,19 @@ def test_strategy_handles_empty_signals_lists_gracefully() -> None:
     assert queries[0].query_text == "Bare area"
 
 
-def test_strategy_skips_unsupported_sources() -> None:
-    """`form_designer_strategy(..., sources=("google_cse",))` is a no-op
-    in Slice 2 — Slice 3 wires the CSE branch."""
+def test_strategy_emits_only_requested_source_set() -> None:
+    """`form_designer_strategy(..., sources=("google_cse",))` emits
+    only CSE queries (Slice 3 wires the CSE branch); Slice 10 will
+    add Dribbble. Sources outside the requested set are filtered."""
 
-    queries = form_designer_strategy(
+    cse_only = form_designer_strategy(
         _brief_with_one_capability_area(),
         sources=("google_cse",),
     )
-    assert queries == []
+    assert cse_only and all(q.source == "google_cse" for q in cse_only)
+
+    behance_only = form_designer_strategy(
+        _brief_with_one_capability_area(),
+        sources=("behance",),
+    )
+    assert behance_only and all(q.source == "behance" for q in behance_only)
