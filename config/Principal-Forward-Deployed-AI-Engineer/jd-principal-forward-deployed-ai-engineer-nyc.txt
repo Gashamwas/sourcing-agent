@@ -1,0 +1,22 @@
+Principal Forward Deployed AI Engineer
+Location: New York, New York, United States
+Source snapshot date: 2026-04-21
+Source: Turing Greenhouse posting 5594226004
+
+Paraphrased JD snapshot:
+
+- Senior hands-on GenAI delivery engineer for Fortune 500 customer work inside Turing's GenAI delivery organization.
+- Expected to own the technical roadmap for a customer problem, lead a small engineering pod, and still write and review production code directly.
+- Core stack emphasis: Python, LangChain / LangGraph, SQL, and cloud deployment on AWS, GCP, or Azure.
+- Primary work includes production RAG, agentic workflows, fine-tuning or model adaptation, cloud deployment, CI/CD, and performance / scalability improvements.
+- Day-to-day scope blends delivery engineering, architecture, and customer translation: ambiguous business requirements become technical roadmaps, implemented systems, and measurable delivery outcomes.
+- Strong communication with business SMEs is required, but this is not a pre-sales or strategy-only role.
+- Expected experience band: roughly 10-12+ years total engineering experience, including several years building and deploying AI / ML systems plus recent LLM application work.
+- Education signal in the posting is a technical bachelor's, master's, or PhD.
+
+Key posted themes worth preserving in the brief:
+
+- Recent hands-on coding remains mandatory.
+- Technical roadmap ownership is part of the job, not a differentiator.
+- Mentoring and leading engineers matters, but this is still a principal IC / pod-lead role rather than a head-of-function role.
+- Production-grade GenAI delivery matters more than title purity.

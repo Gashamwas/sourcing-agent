@@ -1,85 +1,30 @@
 #!/bin/bash
-# Launch Chrome with CDP debugging enabled.
-# Uses a dedicated profile at ~/.chrome-cdp (log into LinkedIn Recruiter once, persists forever).
+# Launch Chrome with CDP debugging enabled — dev compatibility shim.
+#
+# As of Phase 0 ``chrome-launcher`` slice, the source-of-truth logic
+# lives in cloris/chrome_launcher.py so the trial-day .app can spawn
+# Chrome itself (the recipient cannot reasonably open a Terminal).
+#
+# This shell script remains for dev muscle memory. It delegates to the
+# Python module, which:
+#
+#   - Uses the Cloris-namespaced profile under
+#     ~/Library/Application Support/Cloris/chrome-profile (frozen .app)
+#     OR the historical ~/.chrome-cdp (dev) so existing dev sessions
+#     keep working without re-login.
+#   - NEVER pkill -9's "Google Chrome" globally — it only terminates
+#     processes whose --user-data-dir matches the dedicated Cloris
+#     profile. The recipient's personal Chrome is untouched.
+#
+# Flags:
+#   --force    Recycle Chrome even if CDP is already healthy.
+#   --status   Emit the current ChromeStatus as JSON and exit.
+set -euo pipefail
 cd "$(dirname "$0")"
 
-PORT=9222
-PROFILE="$HOME/.chrome-cdp"
-FORCE_RELAUNCH=0
-CHROME_APP="Google Chrome"
-
-if [ "$1" = "--force" ]; then
-    FORCE_RELAUNCH=1
+PYTHON_BIN="${PYTHON:-python3}"
+if [ -x ".venv/bin/python" ]; then
+    PYTHON_BIN=".venv/bin/python"
 fi
 
-cdp_healthy() {
-    local version_ok=1
-    local list_ok=1
-
-    curl -sf "http://127.0.0.1:$PORT/json/version" >/dev/null 2>&1 || version_ok=0
-    curl -sf "http://127.0.0.1:$PORT/json/list" | python3 - <<'PY' >/dev/null 2>&1 || list_ok=0
-import json
-import sys
-
-targets = json.load(sys.stdin)
-if not isinstance(targets, list):
-    raise SystemExit(1)
-PY
-
-    [ "$version_ok" -eq 1 ] && [ "$list_ok" -eq 1 ]
-}
-
-clear_singleton_state() {
-    rm -f "$PROFILE/SingletonLock" 2>/dev/null
-    rm -f "$PROFILE/SingletonCookie" 2>/dev/null
-    rm -f "$PROFILE/SingletonSocket" 2>/dev/null
-    rm -f "$HOME/Library/Application Support/Google/Chrome/SingletonLock" 2>/dev/null
-}
-
-clear_session_restore_state() {
-    find "$PROFILE" -type f \
-        \( -path '*/Sessions/*' -o -name 'Current Session' -o -name 'Current Tabs' -o -name 'Last Session' -o -name 'Last Tabs' \) \
-        -delete 2>/dev/null
-}
-
-# Check if already running and healthy
-if [ "$FORCE_RELAUNCH" -eq 0 ] && cdp_healthy; then
-    echo "Chrome already running on CDP port $PORT."
-    exit 0
-fi
-
-if [ "$FORCE_RELAUNCH" -eq 1 ]; then
-    echo "Force relaunch requested — restarting Chrome on CDP port $PORT."
-elif curl -sf "http://127.0.0.1:$PORT/json/version" >/dev/null 2>&1; then
-    echo "Chrome CDP endpoint is up but unhealthy — restarting Chrome."
-fi
-
-pkill -9 -f "Google Chrome" 2>/dev/null
-sleep 2
-mkdir -p "$PROFILE"
-clear_singleton_state
-if [ "$FORCE_RELAUNCH" -eq 1 ]; then
-    clear_session_restore_state
-fi
-
-# Launch via macOS `open` instead of invoking the app binary directly.
-# This has proven more reliable after force-killing a prior CDP session.
-open -na "$CHROME_APP" --args \
-    --remote-debugging-port="$PORT" \
-    --user-data-dir="$PROFILE" \
-    --disable-session-crashed-bubble \
-    --no-first-run \
-    about:blank \
-    >/dev/null 2>&1
-
-for i in $(seq 1 20); do
-    if curl -s "http://127.0.0.1:$PORT/json/version" >/dev/null 2>&1; then
-        echo "Chrome ready on CDP port $PORT."
-        echo "Open linkedin.com/talent in Chrome, then run ./run-search.sh"
-        exit 0
-    fi
-    sleep 1
-done
-
-echo "ERROR: Chrome launched but CDP port $PORT never responded."
-exit 1
+exec "$PYTHON_BIN" -m cloris.chrome_launcher "$@"

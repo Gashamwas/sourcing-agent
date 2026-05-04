@@ -180,3 +180,58 @@ Stuck-in-MANUAL_REVIEW and Tool-failure categories from the Phase 0 table were n
 - Revisit `PLAUSIBLE_MIN_MATCH_CONFIDENCE = 0.45` after Phase 2 data.
 - Consider a "recruiter save persistence verifier" that re-opens the saved profile on a random subset post-run and confirms the pipeline save is still there. Out of scope here; belongs in a Recruiter-observability plan.
 - Add run-manifest-style metadata to the reconciliation output directory (tool version, config hash, brief hash) so future full-run artifacts are self-describing without relying on the sibling GitHub run manifest.
+
+## 2026-04-27 readiness check
+
+### Current verdict
+
+**No-go for a full live 179-lead (conversational "~210") Recruiter reconciliation run today.**
+
+The engine is materially more ready than it was on 2026-04-17:
+
+- the P0 single-token lookup-name fallback is present in `shared/identity_resolution.py`
+- the per-run observability summary fields are present in `github/recruiter_identity_report.py`
+- the reconciliation-focused test band is green:
+  - `pytest tests/test_recruiter_identity_resolver.py tests/test_recruiter_reconciliation_decision.py tests/test_github_reconciliation_report.py tests/test_recruiter_ambiguity_resolution.py tests/test_recruiter_brief_resolution.py tests/test_recruiter_identity_report.py tests/test_github_reconciliation_input.py tests/test_identity_resolution.py -q`
+- the canonical cohort is still 179 saved leads in `saves.jsonl`; `final_judgments.jsonl` is still empty; the only end-to-end Recruiter artifact is still the 5-lead dry run in `recruiter-reconciliation-live-dryrun-nyc/`
+
+That means the code is not the primary blocker anymore. The blocker is operational proof and crash-safety for a long live run.
+
+### Remaining blockers before full live run
+
+1. **Slice 4 is still missing.** There is still no staged 20-lead Recruiter dry run artifact appended to this plan. The only real end-to-end evidence remains the 5-lead sample, which is too small and too REJECT-saturated to justify a full live run.
+2. **No live-save validation exists yet.** Every observed reconciliation artifact still comes from `--dry-run-save`. We have not yet proven that the current resolver can click save, persist it in Recruiter, and keep the artifact/audit trail coherent on a non-trivial cohort.
+3. **The CLI still cannot address ordered cohort slices beyond the prefix.** `tools/run_recruiter_identity_resolver.py` supports `--max-leads` but still lacks `--lead-offset` or another deterministic slice-selection contract. That makes "20-39", "40-59", or hand-picked stratified cohorts awkward without changing inputs or code.
+4. **There is no per-lead checkpointing or resume path.** `tools/run_recruiter_identity_resolver.py` accumulates rows in memory and only writes artifacts after the loop completes. For a live run, a crash after actual Recruiter saves would lose the run record; a rerun would then see those already-saved candidates as fresh engagement blockers (`already_saved_elsewhere`), which changes the resulting audit trail.
+
+### Readiness consequence
+
+As of 2026-04-27, the right interpretation is:
+
+- **Engine implementation:** mostly ready
+- **Operational readiness for a full live cohort:** not yet ready
+- **Safest next move:** staged dry run first, then a very small live save sample, then the full cohort only after both are clean
+
+### Remaining steps, in order
+
+1. Add a narrow crash-safety slice for reconciliation output.
+   - Minimum acceptable version: flush/append one row at a time plus summary regeneration at the end.
+   - Better version: explicit checkpoint/resume metadata so a restarted live run can distinguish "saved earlier in this same run" from "already saved elsewhere".
+2. Add deterministic staged-cohort selection.
+   - Preferred: `--lead-offset` paired with existing `--max-leads`.
+   - Acceptable fallback: explicit input list / sample file support.
+3. Run the missing **20-lead dry run** against the canonical 179-lead cohort with a dedicated output directory.
+   - Keep `--dry-run-save`.
+   - Record the summary and classification write-up back into this plan.
+4. Evaluate the 20-lead run against the existing stop conditions.
+   - Pause if tool failures cluster.
+   - Pause if MANUAL_REVIEW appears in a pattern the current workflow cannot resolve.
+   - Pause if borderline plausibility-floor misses (`0.30-0.45`) show up often enough to justify reopening the threshold question.
+5. Run a **small live-save sample** (<= 10 leads) in its own output directory.
+   - Manually verify that saved candidates actually persisted in the intended Recruiter project.
+   - Confirm the artifact/audit trail stays coherent under real saves.
+6. Only after steps 1-5 are clean, run the full 179-lead cohort.
+
+### Operational note
+
+If we need signal immediately, the least risky next execution is **not** the full live run; it is the missing 20-lead staged dry run. If we skip straight to a full live run now, the unresolved risk is no longer "does the identity engine basically work?" but "can we survive a long real-save run without losing or distorting the audit trail if the session breaks?"

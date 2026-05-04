@@ -1,0 +1,391 @@
+{
+  "role_title": "Principal Forward Deployed AI Engineer",
+  "role_level": "IC6",
+  "role_summary": "Very senior hands-on GenAI delivery engineer who still codes most days, owns the technical roadmap for a customer problem, and leads a small pod of roughly 3-6 engineers by doing. This is a principal IC, not a head-of-function role. The person should be able to translate ambiguous enterprise requirements into production RAG or agentic systems, write and review critical Python code, make architecture tradeoffs, and act as the senior technical face with customers without drifting into pure pre-sales or pure management. Strong GenAI delivery depth, recent implementation ownership, and client-facing technical maturity are mandatory. People-management-only, strategy-only, notebook-only, or prompt-only profiles are out.",
+  "geography": "New York, New York, United States",
+  "linkedin_project": "Principal Engineer - NYC",
+  "linkedin_project_id": "2009570906",
+  "jd_path": "config/Principal-Forward-Deployed-AI-Engineer/jd-principal-forward-deployed-ai-engineer-nyc.txt",
+  "employer_blacklist": [
+    "Turing"
+  ],
+  "instructions": [
+    "This market has already been worked heavily. The opening strategy must optimize for genuinely net-new candidates, not recycled exact-title FDE pools or obvious frontier-company cleanup passes.",
+    "The FIRST 10 strings should be dominated by hidden adjacent-builder populations: principal or staff ICs with customer-near delivery work, pod tech leads, internal GenAI platform builders, search or relevance engineers who moved into RAG, and consulting engineers who clearly still build.",
+    "Carry forward the mid-level FDE market-intel families that already proved they surface net-new builders: knowledge-product language, LLM observability or prompt-logging language, and workflow-engine or Temporal-style orchestration language.",
+    "Do not open with company-first searches, canonical forward-deployed-title searches, generic 'LLM engineer' strings, or framework-name-only searches like LangChain or LangGraph. Those pools are already saturated and should be treated as later confirmation passes only.",
+    "Do not over-index on specific company-by-title sniper strings early. Prior FDE runs showed that exact-company field-solutions-architect style searches collapsed into tiny pools, while the broader behavioral pattern of customer-facing technical builders produced the real saves.",
+    "Do not use marquee employers as retrieval proxies. If the work-pattern retrieval is correct, candidates from those companies should surface naturally without employer keywords.",
+    "Employer-specific searches are a last resort only: use them as narrow gap probes or late confirmation passes after behavior-first retrieval has already failed to surface a target pool.",
+    "Title is a weak proxy. Search for the underlying work: production GenAI delivery, technical roadmap ownership, small-team or pod leadership, enterprise integrations, architecture judgment, and recent hands-on coding.",
+    "Capability Area 1 plus Capability Area 2 is the real bar. Capability Areas 3 and 4 should increase confidence on already-credible builders, not rescue candidates with thin build evidence.",
+    "Search both SWE-shaped and DS/ML-shaped paths, but only save DS/ML profiles when they clearly shipped production systems instead of notebook experiments.",
+    "Use product-language and workflow-language populations aggressively: document intelligence, knowledge workflows, developer productivity, support automation, compliance operations, search and retrieval, workflow automation, and enterprise copilots are valid entry lanes.",
+    "Do not use 'delivery accelerator' as a primary anchor. Mid-level FDE market intel showed it attracts too many consulting and pre-sales profiles when used without stronger builder filters.",
+    "Greenfield or 0-to-1 language only works when anchored to engineering and shipping evidence. Prior FDE runs showed that unanchored greenfield language leaked into product and GTM profiles.",
+    "Customer-facing or solutions-oriented titles qualify only when the profile shows personal authorship of the system: named deployments, integrations, architecture ownership, reusable delivery assets, or code-level implementation scope.",
+    "Keep boolean construction disciplined. The prior FDE runs wasted pages on over-specified strings, so compound booleans should stay narrow enough to avoid zero-result false negatives.",
+    "This role is more senior than the existing FDE brief but materially below Head of FDE. Treat 10-12+ years as normal; 15+ years with VP, founder, practice-lead, or manager drift should be borderline unless recent IC-style delivery is explicit.",
+    "Keep the hard gates: New York, recent hands-on coding, production RAG or agentic delivery, technical roadmap ownership, and enough communication strength to handle demanding enterprise stakeholders."
+  ],
+  "search_priorities": [
+    "Principal, staff, or architect-level engineers who built production GenAI systems for enterprise customers but use platform, product, architecture, or solutions language instead of FDE titles",
+    "Tech leads or pod leads who still write code and have direct responsibility for translating ambiguous customer or business requirements into delivered AI systems",
+    "Internal enterprise GenAI platform builders with reusable delivery patterns, named integrations, and evidence they personally shipped RAG or agentic systems",
+    "Search, relevance, IR, NLP, or semantic-search engineers who moved into production RAG or agentic application delivery",
+    "LLM observability, prompt-logging, tracing, or workflow-engine builders whose profiles encode production depth in non-obvious language",
+    "Consulting, field-delivery, and customer-implementation engineers whose profiles show personal implementation of custom GenAI systems rather than advisory or pre-sales work",
+    "Founding or principal engineers at AI startups who are still clearly hands-on, customer-near, and within the intended IC scope",
+    "Solutions, implementation, customer, or consulting engineers at AI-native companies only when explicit build evidence is visible",
+    "Canonical FDE title holders and obvious company-first pools only after hidden adjacent populations have been tested"
+  ],
+  "additional_search_terms": [
+    "agentic workflow",
+    "workflow automation",
+    "RAG",
+    "retrieval pipeline",
+    "reranking",
+    "semantic search",
+    "document intelligence",
+    "knowledge assistant",
+    "intelligent search",
+    "developer productivity",
+    "support automation",
+    "compliance workflow",
+    "LLM observability",
+    "prompt logging",
+    "LLM tracing",
+    "evaluation harness",
+    "guardrails",
+    "workflow engine",
+    "state machine",
+    "vector database",
+    "multi-agent",
+    "human in the loop",
+    "customer workflow"
+  ],
+  "intake_notes": "The intake plus the current New York posting confirm that this role is basically a very senior FDE-style search rather than a Head-of-FDE search. The work is still heavily hands-on, explicitly roadmap-plus-coding, and closer to principal IC / pod leadership than to org leadership. The clearest positive signals are: recent production GenAI delivery, strong architectural judgment, the ability to own delivery from ambiguous customer requirement to production deployment, and evidence the candidate still writes and reviews meaningful code. The market has already been worked aggressively, so novelty matters. The search should bias toward hidden adjacent-builder populations, not obvious title or employer cleanup. Mid-level FDE market intel is reusable here at the search-family level: knowledge-product-language builders, LLM observability builders, and workflow-orchestration builders produced net-new saves, while 'delivery accelerator' language skewed noisy and over-specified booleans created false negatives. The runtime artifacts add two important search-shape lessons: exact company-by-title sniper searches underperformed compared with broader behavioral-pattern searches, and greenfield or 0-to-1 language only became productive after product and GTM leakage was removed. Recent hands-on coding is a hard gate. Client-facing maturity matters, but it cannot substitute for build evidence. The strongest adjacent backgrounds are SWE, ML, NLP, search / relevance, and consulting engineering when the production system ownership is real. Employer reputation should not drive retrieval or confidence by itself; marquee-company candidates should surface through the work they did, not because we explicitly chased their logos.",
+  "capability_areas": [
+    {
+      "name": "1. Production GenAI Delivery (HARD GATE)",
+      "description": "Has personally designed and shipped production GenAI systems, not demos or thin wrappers. The signal is recent ownership of a RAG, copilot, or agentic workflow that went live in a real enterprise or customer environment and solved an actual workflow problem.",
+      "builder_signals": [
+        "Architected and implemented a production RAG, agent, copilot, or workflow-automation system used by real customers or internal enterprise users",
+        "Owned end-to-end delivery from problem definition through implementation, deployment, and iteration",
+        "Integrated the LLM system into real workflows, enterprise systems, or business processes rather than leaving it as a prototype",
+        "Can point to concrete launch or operating evidence: latency, reliability, user adoption, measurable business impact, or production hardening",
+        "Recent work includes post-2022 agentic, RAG, retrieval, eval, or orchestration language with real delivery context"
+      ],
+      "user_signals": [
+        "Built only demos, hackathon agents, or internal prototypes with no production evidence",
+        "Rolled out vendor AI tools without building custom systems",
+        "Mentions GenAI at a high level but avoids implementation detail, system ownership, or deployment context",
+        "Led the team that built it but does not appear to have built key parts personally"
+      ],
+      "key_terms": [
+        "RAG",
+        "agentic workflow",
+        "copilot",
+        "tool calling",
+        "orchestration",
+        "retrieval",
+        "evals",
+        "guardrails",
+        "workflow automation",
+        "multi-agent"
+      ],
+      "github_code_signals": [
+        "langgraph",
+        "pydantic_ai",
+        "dspy",
+        "openai",
+        "anthropic",
+        "litellm",
+        "llama_index",
+        "haystack"
+      ]
+    },
+    {
+      "name": "2. Technical Roadmap Ownership + Hands-On Code Ownership (HARD GATE)",
+      "description": "Can take an ambiguous customer or business problem, turn it into a credible technical roadmap, and still personally own the hard engineering work. This is what separates a principal delivery IC from a senior manager or a generalist FDE lookalike.",
+      "builder_signals": [
+        "Owned the technical roadmap for a customer problem, workstream, or delivery pod and still wrote or deeply reviewed meaningful code",
+        "Made architecture tradeoffs across latency, cost, security, reliability, data access, and rollout strategy",
+        "Designed APIs, services, data flows, or application boundaries around the GenAI system",
+        "Maintained code quality, technical standards, and architectural coherence across a small team",
+        "Can explain how an unclear requirement became a concrete implementation plan and shipped system"
+      ],
+      "user_signals": [
+        "Only scoped the work or acted as stakeholder, reviewer, or delivery manager",
+        "Only coded isolated components with no ownership of architecture or delivery plan",
+        "Product, strategy, or program leadership over the builders without direct implementation ownership",
+        "Current role reads as roadmap owner only, with no evidence of recent coding"
+      ],
+      "key_terms": [
+        "technical roadmap",
+        "architecture",
+        "system design",
+        "API",
+        "integration",
+        "code review",
+        "technical standards",
+        "delivery plan",
+        "scalability",
+        "performance"
+      ],
+      "github_code_signals": [
+        "fastapi",
+        "docker",
+        "terraform",
+        "pulumi",
+        "kubernetes",
+        "opentelemetry",
+        "celery",
+        "temporal"
+      ]
+    },
+    {
+      "name": "3. Client-Facing Technical Leadership",
+      "description": "Acts as the senior technical point of contact in messy enterprise delivery settings. The real signal is the ability to clarify ambiguous requirements, push back when needed, and translate technical constraints into business terms without losing engineering rigor.",
+      "builder_signals": [
+        "Led technical discovery, solution design, or architecture discussions with customers or business SMEs",
+        "Converted ambiguous requirements into technical specs, solution plans, or delivery milestones",
+        "Served as trusted technical advisor while still owning implementation details",
+        "Handled stakeholder complexity or demanding customer environments without drifting into pure pre-sales",
+        "Shows evidence of balancing business needs with technical tradeoffs"
+      ],
+      "user_signals": [
+        "Customer-facing but only in demo, enablement, or account-management settings",
+        "Strong stakeholder language with no evidence of engineering ownership",
+        "Pre-sales or solution-consulting profile without named deployments or build evidence"
+      ],
+      "key_terms": [
+        "technical discovery",
+        "trusted advisor",
+        "stakeholder management",
+        "solution design",
+        "requirements gathering",
+        "customer delivery",
+        "technical workshop",
+        "business SME"
+      ]
+    },
+    {
+      "name": "4. Small-Pod Leadership + Reusable Delivery Patterns",
+      "description": "Leads by doing inside a small engineering pod and raises the bar for future deliveries. The role is not an org leader, but it should show evidence of mentoring, task allocation, technical quality ownership, and reusable delivery assets.",
+      "builder_signals": [
+        "Mentored engineers inside a small delivery pod while remaining hands-on",
+        "Allocated work, reviewed code, and maintained quality without becoming a full people manager",
+        "Built reusable modules, playbooks, templates, or delivery accelerators used beyond one project",
+        "Created evaluation, monitoring, or operational tooling that improved repeatability across deliveries",
+        "Helped set engineering standards or implementation patterns through example"
+      ],
+      "user_signals": [
+        "Only managed delivery timelines or staffed the pod without technical ownership",
+        "Pure people-management profile with no meaningful coding signal",
+        "One-off bespoke implementer with no evidence of mentoring or repeatability"
+      ],
+      "key_terms": [
+        "mentoring",
+        "pod lead",
+        "delivery accelerator",
+        "reference implementation",
+        "template",
+        "evaluation harness",
+        "playbook",
+        "quality bar"
+      ]
+    }
+  ],
+  "post_save_modifiers": [
+    {
+      "name": "Retrieval / Evaluation Depth",
+      "trigger": "Candidate already qualifies as SAVE, SIGNAL_SAVE, TRANSFERABLE_SAVE, or INFERENTIAL_SAVE based on the core capability areas",
+      "if_present": "Boost confidence by 0.05-0.10. Note that the candidate goes beyond basic application wiring and appears able to improve quality through retrieval design, evaluation, or model-behavior tuning.",
+      "if_absent": "No adjustment. Do not reject solely for limited visible eval or retrieval detail if the production delivery bar is already met.",
+      "signals": [
+        "Owned chunking, embeddings, reranking, retrieval design, evals, or guardrails",
+        "Built or improved evaluation harnesses, monitoring loops, or prompt optimization workflows",
+        "Can discuss latency / quality / cost tradeoffs in LLM system behavior"
+      ]
+    },
+    {
+      "name": "Public Code / Pedigree",
+      "trigger": "Candidate already qualifies as SAVE, SIGNAL_SAVE, TRANSFERABLE_SAVE, or INFERENTIAL_SAVE based on the core capability areas",
+      "if_present": "Boost confidence by 0.03-0.08. Note that public technical artifacts, strong employer trajectory, or standout pedigree increase confidence in screen-worthiness.",
+      "if_absent": "No adjustment. Good pedigree is helpful but never sufficient on its own.",
+      "signals": [
+        "Public GitHub, technical writing, conference talks, or architecture artifacts",
+        "Strong employer trajectory across respected AI or engineering organizations",
+        "High-slope progression into principal or staff-level delivery ownership"
+      ]
+    }
+  ],
+  "depth_distinction": {
+    "builder_definition": "A builder for this role still codes. They can personally walk from vague customer problem to architecture, implementation plan, enterprise integration, deployment, and iteration, and they still own meaningful portions of the code or the deepest technical reviews. At this level they may lead a 3-6 person pod, but the work remains hands-on and implementation-proximate.",
+    "user_definition": "A user or adjacent profile talks about AI, manages delivery, sells solutions, or owns roadmap and stakeholders without personally building the production system. This includes pre-sales-heavy solution architects, delivery managers, engineering managers who no longer code, and AI strategy leads.",
+    "edge_case_guidance": "SWE BACKGROUNDS: Strong backend or platform engineers can fit if they clearly moved into production GenAI delivery and still own the application layer, not just infrastructure. DS / ML BACKGROUNDS: Applied scientists and ML engineers can fit if they visibly productized systems, owned retrieval or evaluation, and handled real deployment and integration constraints. CONSULTING / SOLUTIONS TITLES: Treat these as promising only when the bullets show named systems, architecture ownership, enterprise integrations, and real implementation scope. TOO-SENIOR TRAJECTORIES: 15+ year founders, VPs, heads, or practice leads should be treated as borderline unless recent IC-style coding and delivery ownership are explicit. PRINCIPAL CALIBRATION: The right candidate is more senior than a normal FDE and may lead a small pod, but should still read like someone who could open the IDE and ship the hard parts this week."
+  },
+  "inferential_save_rules": {
+    "description": "Because the obvious market has already been mined, use INFERENTIAL_SAVE for sparse but genuinely promising hidden-pool profiles instead of silently rejecting them for imperfect title matches or compressed LinkedIn bullets.",
+    "conditions": [
+      "Principal, staff, or architect-level engineer with recent GenAI, RAG, agent, retrieval, or copilot language plus enterprise delivery or integration context, even if the bullets are thin",
+      "Consulting engineer, solutions engineer, customer engineer, or implementation engineer at an AI-native company with visible build or deployment language in the headline or summary",
+      "Search, relevance, NLP, or semantic-search engineer whose recent work clearly shifted into production RAG or GenAI application delivery",
+      "Founding or principal engineer at a small AI startup with hands-on product and customer-delivery language plus plausible seniority for the role",
+      "Strong backend or platform engineer with recent GenAI delivery signals, technical-lead language, and visible customer or business translation responsibilities"
+    ],
+    "save_tag": "INFERENTIAL_SAVE",
+    "confidence_range": [
+      0.35,
+      0.5
+    ],
+    "note": "The recruiter would rather inspect a small set of high-signal hidden-pool maybes than miss the right principal delivery engineer because the profile did not use explicit FDE vocabulary."
+  },
+  "non_fit_patterns": [
+    {
+      "label": "Pure Data Scientist / research-first notebook profile",
+      "description": "Strong modeling or experimentation background, but little evidence of owning production systems, APIs, cloud deployment, or end-to-end GenAI delivery.",
+      "why_not": "The role needs a production builder who can own the software system, not only the model or notebook work.",
+      "examples": [
+        "NLP or DS profile dominated by experiments and notebooks",
+        "Research scientist with no clear productization signal",
+        "Analytics-heavy AI profile with little system ownership"
+      ]
+    },
+    {
+      "label": "Engineering manager or delivery manager with little current coding",
+      "description": "Senior people leaders who have transitioned out of hands-on implementation and now operate mainly through teams.",
+      "why_not": "The role is explicitly hands-on and implementation-proximate. Leading builders is not enough if recent coding ownership is gone.",
+      "examples": [
+        "Engineering manager who no longer ships code",
+        "Delivery manager with roadmap and staffing language only",
+        "Tech lead manager whose recent work is mostly org management"
+      ]
+    },
+    {
+      "label": "Prompt engineer, demo builder, or thin-wrapper GenAI profile",
+      "description": "Profiles that use GenAI vocabulary but the actual work appears to be prompt tuning, demo apps, or thin wrappers around hosted APIs.",
+      "why_not": "The surface terms match, but the production engineering depth does not.",
+      "examples": [
+        "Prompt engineer for internal tools",
+        "Hackathon agent builder",
+        "Chatbot demo owner with no deployment evidence"
+      ]
+    },
+    {
+      "label": "Pre-sales or solutions profile without build authorship",
+      "description": "Customer-facing architects or solution consultants whose work centers on demos, workshops, enablement, or account support rather than building the system.",
+      "why_not": "Customer exposure is helpful, but not if the person never owned the implementation.",
+      "examples": [
+        "Field solutions architect with AI keywords only",
+        "Customer engineer with no named deployments",
+        "Technical account lead for AI products"
+      ]
+    },
+    {
+      "label": "Too-senior founder, head, VP, or practice lead",
+      "description": "Profiles whose recent trajectory is mainly organizational leadership, GTM, fundraising, or selling the practice rather than shipping systems.",
+      "why_not": "The leveling is wrong. This role wants a principal builder, not a head-of-function or large-practice executive.",
+      "examples": [
+        "AI practice partner",
+        "VP Engineering at a large org",
+        "Founder now mostly in leadership and GTM"
+      ]
+    },
+    {
+      "label": "Vendor-tool adoption mistaken for AI building",
+      "description": "AI experience is limited to rolling out vendor copilots, chat assistants, or packaged AI tools rather than building custom systems.",
+      "why_not": "Tool rollout is not the same as architecting and shipping production GenAI systems.",
+      "examples": [
+        "Rolled out GitHub Copilot across engineering",
+        "Implemented enterprise chat tool adoption",
+        "Led AI enablement with vendor products"
+      ]
+    }
+  ],
+  "non_fit_override_rule": "Non-fit patterns describe the default expectation for common noisy populations, not hard bans. If the profile shows specific evidence that the candidate personally built and shipped production GenAI systems with architecture ownership and recent hands-on involvement, that evidence overrides the pattern.",
+  "employer_signal_rules": [
+    {
+      "tier": "enterprise_ai_delivery",
+      "employer_patterns": [
+        "Writer",
+        "Glean",
+        "Moveworks",
+        "Hebbia",
+        "Invisible Technologies",
+        "Dataiku",
+        "C3 AI"
+      ],
+      "evidence_required": "Use these employers as lane classifiers or late confirmation passes only, never as opening search anchors. Save only when the profile shows explicit hands-on GenAI deployment, enterprise integrations, or reusable delivery assets. Employer alone is never sufficient.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "consulting_engineering",
+      "employer_patterns": [
+        "Accenture",
+        "Deloitte",
+        "BCG X",
+        "QuantumBlack",
+        "Slalom",
+        "Thoughtworks",
+        "EPAM",
+        "Globant"
+      ],
+      "evidence_required": "Treat these employers as hidden-pool classifiers, not retrieval proxies. Use employer-anchored search only as a late-stage gap probe. Only save when the profile clearly shows personal build-and-deploy work: named systems, architecture ownership, enterprise integrations, or direct implementation of production GenAI systems.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "internal_enterprise_builder",
+      "employer_patterns": [],
+      "evidence_required": "Large enterprises where the candidate built internal or external GenAI systems for real users and still owned implementation or architecture, not only management.",
+      "save_on_employer_alone": false
+    },
+    {
+      "tier": "neutral",
+      "employer_patterns": [],
+      "evidence_required": "Apply the same technical standard regardless of employer reputation. Lesser-known employers can absolutely produce strong fits.",
+      "save_on_employer_alone": false
+    }
+  ],
+  "minimum_bar_description": "Ten or more years of hands-on engineering is the rough floor, but the real bar is recent implementation ownership. The candidate should have a credible example of personally taking a GenAI or agentic system from ambiguous requirements to production with architecture responsibility. They should still code, still be comfortable owning critical parts of the codebase, and still be able to lead a small pod through technical execution. Current New York location is non-negotiable. This role is above a typical FDE in seniority, but it is not a people-manager or head-of-function search.",
+  "minimum_years_experience": 10,
+  "market_density": "sparse",
+  "facial_calibration": {
+    "expected_yes_rate_low": 0.08,
+    "expected_yes_rate_high": 0.22,
+    "fast_exit_patterns": [
+      "Entire trajectory is sales, customer success, account management, or pre-sales without engineering build ownership",
+      "Entire trajectory is program or delivery management with no clear coding or architecture ownership",
+      "Most recent trajectory is VP, Head, Partner, or founder drift with little evidence of recent hands-on work",
+      "No visible production AI, GenAI, backend, systems, or architecture signal anywhere in the trajectory",
+      "Profile is clearly below the intended seniority band or shows less than 10 years relevant experience"
+    ],
+    "trajectory_yes_patterns": [
+      "Principal, staff, or architect title plus recent GenAI, RAG, agent, retrieval, or copilot language and evidence of production or deployment",
+      "Tech lead or pod lead language plus customer delivery, architecture, or roadmap ownership",
+      "Solutions, consulting, implementation, or customer engineer title paired with named system-building or deployment evidence",
+      "Search, NLP, or relevance trajectory that clearly evolved into production GenAI delivery",
+      "Founding or principal engineer at a small AI company with hands-on product and customer-delivery scope"
+    ],
+    "trajectory_ambiguous_patterns": [
+      "Principal engineer with AI keywords but thin bullets and unclear current hands-on scope",
+      "Solutions architect, customer engineer, or consulting engineer where build-versus-demo cannot be resolved from the snippet",
+      "Manager or founder title at a small company where hands-on scope is plausible but not yet proven",
+      "Generic AI platform language with no concrete system detail, even when the surrounding context looks superficially strong"
+    ],
+    "trajectory_no_patterns": [
+      "Customer-facing language only, with no visible architecture, build, deployment, or code ownership signal",
+      "Prompt, demo, or innovation language without production system evidence",
+      "Executive or head-of-function trajectory clearly above the intended scope"
+    ]
+  },
+  "bias_controls": {
+    "max_consecutive_saves": 5,
+    "max_consecutive_rejects": 18,
+    "parse_failure_alarm_rate": 0.03
+  },
+  "author": "Codex",
+  "version": "1.0",
+  "notes": "Built from the New York intake template, the existing FDE brief, the mid-level FDE run artifacts, and the current Turing Greenhouse posting. Main adjustment versus the existing NYC FDE brief: calibrate upward for principal-level hands-on roadmap ownership and explicitly bias search strategy toward net-new hidden pools because the obvious market has already been worked. Additional run-artifact guidance incorporated here: behavioral-pattern searches outperformed exact company-by-title snipers, consulting only stayed productive when explicit build ownership was enforced, and greenfield language needed shipping verbs to avoid product-language leakage. Retrieval doctrine for this brief is behavior-first: surface strong candidates through work patterns, not employer logos; use employer anchors only as late-stage gap probes or lane classifiers."
+}

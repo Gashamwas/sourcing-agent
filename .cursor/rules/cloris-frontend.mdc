@@ -1,0 +1,118 @@
+---
+description: Cloris frontend and UX guardrails
+globs: cloris/frontend/**,cloris/**/*.svelte,cloris/**/*.css,cloris/**/*.js,cloris/**/*.ts,cloris/**/*.html
+alwaysApply: false
+---
+
+# Cloris Frontend Guard
+
+You are editing Cloris frontend files or frontend-adjacent assets.
+
+Cloris is not generic SaaS software. Do not let the UI drift back toward a
+default dashboard just because it is faster to assemble.
+
+Before substantive UI edits, reread:
+
+- `docs/cloris-ui-spec.md`
+- `docs/cloris-control-plane-spec.md`
+- `plans/cloris-shell-v0.md`
+- `plans/cloris-role-agnostic-sequencing.md`
+
+## Product scope
+
+- Cloris is the standalone sourcing product for this repo.
+- Do not design for TA Ops Agent, Rosie, Analytics Hub, or a broader recruiting
+  suite unless explicitly asked.
+- Shell v0 is operational first. Do not silently smuggle in rich semantic
+  surfaces that the sequencing plan intentionally deferred.
+
+## Frontend stack
+
+- Preferred frontend stack: **Svelte + hand-written CSS**.
+- Do **not** introduce React, Tailwind, shadcn, Material UI, Chakra, Mantine,
+  Bootstrap, or another component library unless the user explicitly overrides
+  the Cloris decision.
+- Do **not** hide design decisions inside utility-class soup. Cloris should be
+  legible in its own CSS.
+
+## Visual language
+
+- Build from editorial primitives, not dashboard primitives:
+  - numbered sections
+  - prose-width columns
+  - hairline rules
+  - pullquote-like emphasis
+  - mono metadata labels
+  - generous vertical rhythm
+- Prefer typography, spacing, and rules over shadow-card grids.
+- Avoid dense left-nav chrome, analytics-dashboard layouts, and generic
+  “workspace app” framing unless a screen truly requires it.
+
+## Tokens and typography
+
+- Use the Cloris token system from `docs/cloris-ui-spec.md`.
+- Bundle fonts locally. Do not depend on Google Fonts or other runtime font
+  CDNs in production.
+- Respect the three-typeface system:
+  - Fraunces for body / primary reading
+  - Instrument Serif for display accents and italic emphasis
+  - JetBrains Mono for metadata, labels, and numbering
+- Avoid falling back to Inter, system sans, or default UI font stacks as the
+  primary interface voice.
+
+## Voice and copy
+
+- Cloris is the subject; the copy should not become weirdly intimate with the
+  user.
+- Voice is sparse and appears at transitions, not everywhere.
+- In high-stakes or operationally sensitive states, drop character voice
+  entirely and be plain, direct, and actionable.
+- Do not use generic AI costume copy such as:
+  - “AI-native”
+  - “powered by”
+  - “copilot”
+  - hypey “assistant” framing
+
+## Control-plane honesty
+
+- Do not invent UI states the backend cannot truthfully support.
+- Canonical run truth comes from the Cloris-owned aggregation layer over
+  `runtime_state.sqlite3`, not from projection files under `output/`.
+- Do not build frontend flows that depend on hand-reading JSON/JSONL artifacts
+  as source-of-truth state.
+- Do not promise pause if only stop/resume exist.
+- Do not expose `away` mode in Cloris v0.
+- Do not overclaim LinkedIn readiness; if the backend can only perform
+  best-effort preflight, the UI should say that plainly.
+
+## Role-agnostic sequencing discipline
+
+- The shell/control plane can move now.
+- Rich semantic surfaces must respect `plans/cloris-role-agnostic-sequencing.md`.
+- Until the readiness gates in that plan are met, avoid building UI that claims
+  Cloris has a stable, authoritative role model for:
+  - full Authoring Loop semantics
+  - rich Brief Review semantics
+  - calibration-heavy Run Review explanation
+  - Next Run Learning synthesis
+
+## Implementation posture
+
+- Prefer small, deliberate primitives over one large app-shell abstraction.
+- Keep UI state models close to the real control-plane contracts.
+- If a screen needs a backend capability that does not exist yet, surface that
+  seam explicitly rather than faking the interaction in the UI.
+- When a design decision would make the control plane lie, the control plane
+  wins.
+
+## Review checklist
+
+Before finishing a Cloris frontend change, ask:
+
+1. Does this still look editorial rather than dashboard-native?
+2. Would a human designer recognize this as deliberate, or as framework
+   defaults with warm colors pasted on top?
+3. Is the UI honest about what the worker and runtime state actually know?
+4. Did we accidentally introduce a richer semantic claim than the current
+   backend can support?
+5. Is any Cloris personality showing up in a moment that should stay plain?

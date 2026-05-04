@@ -1,0 +1,14 @@
+{
+  "role_title": "Senior Forward Deployed Engineer — Customer Engineering, NYC, EU+US travel ~30%",
+  "capability_areas": [
+    {
+      "name": "Capability area 1",
+      "description": "Ships customer-facing systems end-to-end."
+    }
+  ],
+  "depth_distinction": {
+    "builder_definition": "Owns architecture and ships.",
+    "user_definition": "Maintains existing features.",
+    "edge_case_guidance": "Borderline = full eval."
+  }
+}

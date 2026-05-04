@@ -1,0 +1,20 @@
+{
+  "role_title": "Existing Role",
+  "id": "existing_role",
+  "linkedin_project_id": "existing_role",
+  "capability_areas": [
+    {
+      "name": "",
+      "description": "Ships customer-facing systems end-to-end."
+    }
+  ],
+  "depth_distinction": {
+    "builder_definition": "",
+    "user_definition": "Maintains existing features.",
+    "edge_case_guidance": "Borderline = full eval."
+  },
+  "non_fit_patterns": [],
+  "target_modules": [
+    "linkedin"
+  ]
+}

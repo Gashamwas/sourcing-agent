@@ -1,0 +1,22 @@
+Staff / Principal GenAI Engineer
+Location: India
+Preferred hubs from intake / postings: Gurugram, Bengaluru, Hyderabad, Mumbai
+Source snapshot date: 2026-04-21
+Sources: intake template plus Turing Greenhouse postings 5688729004 and 5809205004
+
+Paraphrased JD snapshot:
+
+- Senior GenAI delivery engineer for enterprise customer work in Turing's delivery organization.
+- Role sits close to the forward-deployed engineering model, but India intake language also frames the opening as Staff GenAI Engineer (IC5) or Principal GenAI Engineer (IC6).
+- Work centers on building production RAG systems, agentic workflows, and enterprise AI applications rather than notebook experimentation or prompt-only work.
+- Strong Python, SQL, cloud deployment, and software engineering discipline are mandatory.
+- Expected to own or drive a technical roadmap for a customer problem, collaborate with business SMEs and product owners, and mentor engineers while remaining hands-on.
+- Important technical topics from intake: chunking, embeddings, retrieval, reranking, evaluation, monitoring, guardrails, cost / latency optimization, CI/CD, and multi-cloud deployment.
+- Strong adjacent profiles may come from backend / platform engineering, search / IR, NLP, ML platform, or consulting engineering backgrounds if they have real production GenAI delivery evidence.
+- Practical working constraints from intake: India-based, preference for Gurugram / Bengaluru style hubs and some overlap with customers or US teams.
+
+Key posted / intake themes worth preserving in the brief:
+
+- This is a builder role, not a strategy, program, or people-management role.
+- The best hidden candidates may not use GenAI-delivery or forward-deployed titles.
+- The strongest signal is real production ownership of RAG / agents plus strong engineering maturity.

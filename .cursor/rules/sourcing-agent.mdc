@@ -1,0 +1,28 @@
+---
+description: Sourcing Agent identity and repo boundaries (always on)
+alwaysApply: true
+---
+
+# Sourcing Agent — Identity Guard
+
+This repo is the **Sourcing Agent** only: LinkedIn and GitHub sourcing,
+runtime-state-backed execution, immutable run snapshots, market intelligence,
+and brief iteration.
+
+Before substantive edits, read `@AGENTS.md`. When repo shape or operating model
+is unclear, read `@README.md` next.
+
+## Hard boundaries
+
+- Do not treat TA Ops Agent, Rosie, Analytics Hub, or the broader recruiting AI
+  stack as in-scope unless the user explicitly says so.
+- Do not add stack-level architecture docs, cross-repo integration plans, or
+  platform-wide roadmaps to this repo without explicit instruction.
+- `runtime_state.sqlite3` is canonical for this repo's live execution state.
+  JSON/JSONL state artifacts are compatibility projections, not source-of-truth
+  control state.
+- Do not hand-edit `output/` artifacts or draft briefs; scoped rules in this
+  folder cover those cases in more detail.
+
+Scoped rules in this folder handle runtime-state, high-risk files,
+briefs/output discipline, and commit hygiene. Let them handle the specifics.

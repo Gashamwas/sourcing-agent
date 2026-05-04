@@ -26,7 +26,9 @@ alwaysApply: false
 After runtime-state changes, run the narrowest relevant band first:
 
 ```bash
-PYTHONPATH=/Users/sam.vangelos/Projects/recruiting-tools/sourcing-agent pytest tests/test_linkedin_runtime_state.py -q
+pytest tests/test_linkedin_runtime_state.py -q
 ```
+
+(`pyproject.toml` sets `pythonpath = ["."]` — no manual `PYTHONPATH=` prefix needed.)
 
 Expand outward only if the change crosses boundaries. Prefer proving behavior with tests **before** "cleanup" refactors.
