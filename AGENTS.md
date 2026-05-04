@@ -98,7 +98,7 @@ Edit with elevated care. Scoped rules under `.cursor/rules/high-risk-files.mdc` 
 
 ## Workflow artifact: `plans/`
 
-Non-trivial work uses a shared plan file at `plans/<topic>.md`. Template and conventions: `plans/README.md`. This is how Codex and Cursor hand work back and forth without losing context.
+Non-trivial work uses a shared plan file at `plans/<topic>.md`. Template and conventions: `plans/README.md`. This is how the strategist (Codex or Claude Code) and Cursor hand work back and forth without losing context.
 
 ## How to work
 
@@ -137,7 +137,7 @@ Non-trivial work uses a shared plan file at `plans/<topic>.md`. Template and con
 - The `market-intel-provenance-auditor` subagent in `.cursor/agents/` is a
   read-only provenance check for internal run evidence vs external research in
   market intelligence artifacts.
-- Team playbook for pairing Cursor with Codex:
+- Team playbook for pairing Cursor with the strategist (Codex or Claude Code):
   `docs/cursor-codex-workflow.md`.
 
 ## Repo biases
@@ -150,7 +150,8 @@ Non-trivial work uses a shared plan file at `plans/<topic>.md`. Template and con
 ## Related docs
 
 - `CODEX.md` — Codex operating stance and Codex↔Cursor workflow contract (tool-level; this file is repo-level).
-- `docs/cursor-codex-workflow.md` — repo-specific playbook for pairing Codex planning/review with Cursor implementation.
+- `CLAUDE.md` — Claude Code operating stance; co-tenant of the strategist seat alongside Codex.
+- `docs/cursor-codex-workflow.md` — repo-specific playbook for pairing the strategist (Codex or Claude Code) planning/review with Cursor implementation.
 - `.cursor/rules/` — scoped rules that fire based on which files are open.
 - `.cursor/agents/sourcing-implementer.md` — spec-first implementer subagent for this repo.
 - `.cursor/agents/runtime-state-auditor.md` — read-only runtime-state diagnostic subagent.

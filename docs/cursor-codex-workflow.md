@@ -1,16 +1,34 @@
-# Cursor + Codex for the Sourcing Agent Repo
+# Cursor + Strategist Agent for the Sourcing Agent Repo
 
-This document is the practical playbook for using **Codex** and **Cursor**
-together in this repo.
+This document is the practical playbook for using a **strategist agent** —
+either **Codex** or **Claude Code** — together with **Cursor** in this repo.
 
 The goal is not to create more ceremony. The goal is to reduce context thrash:
-Codex shapes the problem and reviews the result, Cursor stays grounded in the
-repo and executes the local change, and the shared artifact between them is a
-plan file under `plans/`.
+the strategist shapes the problem and reviews the result, Cursor stays grounded
+in the repo and executes the local change, and the shared artifact between them
+is a plan file under `plans/`.
+
+## Who plays the strategist seat
+
+The strategist seat is dual-tenant: **Codex and Claude Code are
+interchangeable** in this role. Pick by fit, not by reflex:
+
+- **Codex** — strongest for cross-cutting product/architecture judgment with
+  no prior session dependency. Operating contract: `CODEX.md`.
+- **Claude Code** — strongest when the work leans on persistent state across
+  sessions: `~/.claude/projects/.../memory/` (saved feedback rules, project
+  context), `~/.claude/plans/` (long-arc roadmaps like the Cloris rehydration
+  master plan), the v0 zip integration loop, and the file-based recall that
+  survives `/clear`. Operating contract: `CLAUDE.md`.
+
+When in doubt: short-arc one-shot work → either; multi-week arc that builds on
+prior Claude Code sessions → Claude Code. Same role; pick whichever has the
+context that matters for *this* turn.
 
 ## What each tool is best at
 
-**Codex** is strongest when the work is judgment-heavy:
+**The strategist (Codex or Claude Code)** is strongest when the work is
+judgment-heavy:
 
 - clarifying the real engineering problem
 - comparing architecture options
@@ -29,13 +47,13 @@ plan file under `plans/`.
 
 **Rule of thumb:** if the task must land cleanly in git and survive the test
 band, bias toward **Cursor**. If the task is still "what exactly are we trying
-to do?" bias toward **Codex** first.
+to do?" bias toward the **strategist** first.
 
 ## The shared artifact: `plans/`
 
 For non-trivial work, the handoff artifact is `plans/<topic>.md`.
 
-That file is how the Codex ↔ Cursor loop avoids starting from zero each time.
+That file is how the strategist ↔ Cursor loop avoids starting from zero each time.
 Template and conventions live in `plans/README.md`.
 
 Use a plan when the work is any of:
@@ -75,10 +93,10 @@ The goal is to avoid two failure modes at once:
 
 ## A workflow that works well here
 
-1. **Codex — shape the problem**
+1. **Strategist — shape the problem**
 
-   Start with the messy idea, bug, refactor, or desired outcome. Codex should
-   help answer:
+   Start with the messy idea, bug, refactor, or desired outcome. The strategist
+   should help answer:
 
    - what the actual problem is
    - which layer is involved: canonical / projection / snapshot / in-memory
@@ -116,7 +134,7 @@ The goal is to avoid two failure modes at once:
    slice** against the real repo surface. Do not default to asking Cursor to
    invent a multi-commit roadmap from scratch when the plan file already exists.
 
-5. **Codex — review the result**
+5. **Strategist — review the result**
 
    Bring back the important output only:
 
@@ -198,7 +216,7 @@ Common anchors:
 - "Flag any high-risk file in the touch plan before editing."
 - "Run the matching tests and show the real output."
 
-## Useful prompts for Codex
+## Useful prompts for the strategist (Codex or Claude Code)
 
 - "What is the actual engineering problem here?"
 - "What is the smallest safe slice?"
@@ -234,7 +252,7 @@ diagnostic artifact, it is probably adding ceremony more than leverage.
 
 The setup is working when:
 
-- Codex reduces ambiguity before editing starts
+- the strategist (Codex or Claude Code) reduces ambiguity before editing starts
 - Cursor changes the right files instead of wandering
 - plan files preserve context between turns
 - subagents are narrow and output-driven rather than theatrical
