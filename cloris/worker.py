@@ -1,32 +1,52 @@
-"""Cloris detached LinkedIn worker.
+"""Cloris detached worker (multi-source per Phase F Slice F1).
 
 Exec-replace entrypoint that the API process spawns via
 ``subprocess.Popen([sys.executable, "-m", "cloris.worker", ...])``. The worker
-writes a ``worker.json`` sidecar into the LinkedIn state directory, then
-``os.execvp``s into ``python -m linkedin.session_orchestrator ...``. After the
-exec, the same PID belongs to the orchestrator process — so the sidecar's
+writes a ``worker.json`` sidecar into the source-specific state directory,
+then ``os.execvp``s into the per-source orchestrator argv. After the exec,
+the same PID belongs to the orchestrator process — so the sidecar's
 ``pid`` field stays truthful for any later stop/probe operation.
 
 This module is wrapper code only:
 
-- It does not import ``linkedin.session_orchestrator``; it spawns it.
+- It does not import the per-source orchestrator modules; it spawns them.
 - It does not write canonical SQLite state; the orchestrator does.
 - It owns ``worker.json`` as a Cloris-only sidecar (not a runtime-state record).
 
-Slice 4 surface (current):
+Phase F Slice F1 surface:
 
+- Accepts ``--source linkedin|github`` and dispatches to the per-source
+  orchestrator argv builder via :mod:`cloris.launchers`. Adding a new
+  source (e.g., ``researcher``) is a one-line append in the registry;
+  this wrapper does not change.
 - Sets ``heartbeat_at == started_at`` once and never updates it (no live
-  heartbeat updater yet).
-- Refuses ``--input-mode away`` at the wrapper boundary.
-- Exposes ``--mode {fresh, resume}``. ``--mode resume`` threads ``--resume``
-  into the spawned ``linkedin.session_orchestrator`` argv via
-  :func:`build_session_orchestrator_argv`; the sidecar's ``mode`` field
+  heartbeat updater yet — Slice 4 carry-over).
+- Exposes ``--mode {fresh, resume}``. ``--mode resume`` threads
+  ``--resume`` into the orchestrator argv; the sidecar's ``mode`` field
   reflects the truth (``"fresh"`` or ``"resume"``).
+- Sidecar ``input_mode`` is always ``"concurrent"`` for v0 — Cloris does
+  not run "away mode" workers.
 - ``LAUNCHER_VERSION`` advertises ``"cloris-v0-slice-4"`` so reconciliation
-  against older sidecars stays legible.
+  against older sidecars stays legible. Bumped only when the sidecar
+  shape changes; F1 keeps the shape stable so the version stays.
 
-Module-level seams (``_now`` and ``_exec``) exist so tests can monkeypatch
-them without ever spawning a real subprocess or replacing the test process.
+Phase 0 ``worker-binary`` slice (frozen-app context):
+
+- When ``getattr(sys, 'frozen', False)`` is true (PyInstaller/py2app .app),
+  the worker cannot ``os.execvp`` into ``[python, -m, MODULE, ...]``
+  because there is no python interpreter inside the bundle. Instead,
+  the worker dispatches in-process via :func:`_dispatch_in_process` —
+  the orchestrator runs in this same PID, the sidecar's ``pid`` field
+  stays truthful exactly as it does under ``execvp``.
+- The frozen .app ships ``cloris-worker`` as a sibling binary to
+  ``Cloris`` under ``Cloris.app/Contents/MacOS/``. The API process
+  spawns ``[<bundle>/Contents/MacOS/cloris-worker, ...]`` rather than
+  ``[python, -m, cloris.worker, ...]`` — see
+  ``cloris/api.py:_build_worker_argv``.
+
+Module-level seams (``_now``, ``_exec``, ``_dispatch_in_process``) exist
+so tests can monkeypatch them without ever spawning a real subprocess
+or replacing the test process.
 """
 
 from __future__ import annotations
@@ -186,8 +206,13 @@ def build_session_orchestrator_argv(
 
     Pure function: no I/O, no globals beyond ``sys.executable``. Kept
     independently testable so test cases can pin the exact command shape
-    without going through ``main``. ``resume`` is wired here for Slice 4
-    reuse but the worker CLI does not currently surface it.
+    without going through ``main``.
+
+    LinkedIn-specific. Phase F Slice F1 introduces the per-source
+    registry at :mod:`cloris.launchers`; this remains the LinkedIn
+    entry's argv builder so the existing Slice-3/Slice-4 contract is
+    preserved byte-for-byte. New sources (e.g., GitHub) build their own
+    argv via the registry and never call this function.
     """
 
     argv: list[str] = [
@@ -232,27 +257,108 @@ def _exec(argv: list[str]) -> NoReturn:
     )
 
 
+def _is_frozen() -> bool:
+    """Module-level seam mirroring ``shared.user_data_dir.is_frozen_app``.
+
+    Inlined here rather than imported so the worker module stays
+    importable under odd test layouts (e.g., a stub
+    ``shared.user_data_dir`` that raises). PyInstaller and py2app both
+    set ``sys.frozen``; we don't depend on ``sys._MEIPASS`` for the
+    same reason.
+    """
+
+    return bool(getattr(sys, "frozen", False))
+
+
+def _dispatch_in_process(source: str, orchestrator_argv: list[str]) -> int:
+    """Frozen-app fallback: run the orchestrator's ``main()`` in-process.
+
+    The .app bundle has no python interpreter, so we cannot
+    ``os.execvp`` into ``[python, -m, MODULE, ...]``. Instead we
+    import the per-source orchestrator and call its ``main()``
+    directly; PID stays this process's PID so the sidecar's ``pid``
+    field stays truthful for any later stop/probe operation.
+
+    ``orchestrator_argv`` is the same shape the registry's
+    ``orchestrator_argv_fn`` produces — ``[python_executable, "-m",
+    MODULE_DOTPATH, ...orchestrator-cli-args]`` — so we slice off the
+    python invocation prefix and hand the orchestrator-cli-args to
+    its ``main()`` via ``sys.argv`` (which is what the orchestrator's
+    ``argparse.parse_args()`` reads from).
+
+    Returns the orchestrator's exit code (defaults to 0 if main()
+    returns ``None``). Exposed at module scope as a test seam so a
+    frozen-context test can pass a recorder without invoking a real
+    orchestrator.
+    """
+
+    if source == "linkedin":
+        from linkedin import session_orchestrator as orch  # type: ignore[no-redef]
+    elif source == "github":
+        from github import session_orchestrator as orch  # type: ignore[no-redef]
+    elif source == "researcher":
+        from researcher import session_orchestrator as orch  # type: ignore[no-redef]
+    elif source == "designer":
+        from designer import session_orchestrator as orch  # type: ignore[no-redef]
+    else:
+        sys.stderr.write(
+            f"cloris.worker: no in-process dispatch for source={source!r} "
+            "(frozen .app supports linkedin, github, researcher, and designer only).\n"
+        )
+        return 2
+
+    if len(orchestrator_argv) < 3:
+        sys.stderr.write(
+            f"cloris.worker: malformed orchestrator argv for in-process "
+            f"dispatch (need [python, -m, MODULE, ...]): {orchestrator_argv!r}\n"
+        )
+        return 2
+
+    cli_args = orchestrator_argv[3:]
+    saved_argv = sys.argv
+    sys.argv = [orchestrator_argv[2], *cli_args]
+    try:
+        result = orch.main()
+    finally:
+        sys.argv = saved_argv
+    if isinstance(result, int):
+        return result
+    return 0
+
+
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="cloris.worker",
-        description="Cloris detached LinkedIn worker (writes worker.json then execvp)s into linkedin.session_orchestrator).",
+        description="Cloris detached worker (writes worker.json then execvps into the per-source orchestrator).",
+    )
+    parser.add_argument(
+        "--source",
+        default="linkedin",
+        help=(
+            "Source name registered in cloris.launchers (linkedin/github/...). "
+            "Defaults to 'linkedin' so legacy Slice-3 invocations without "
+            "--source keep working byte-for-byte."
+        ),
     )
     parser.add_argument(
         "--brief",
         required=True,
-        help="Path to the LinkedIn brief JSON (forwarded to the orchestrator).",
+        help="Path to the brief JSON (forwarded to the per-source orchestrator).",
     )
     parser.add_argument(
         "--brief-id",
         required=True,
-        help="Brief id recorded in worker.json (typically shared.output_paths.linkedin_state_key).",
+        help=(
+            "Brief id recorded in worker.json (typically the source's "
+            "state-key fn output: linkedin_state_key / github_state_key)."
+        ),
     )
     parser.add_argument(
         "--state-dir",
         default=None,
         help=(
-            "LinkedIn state directory. If absent, resolved via "
-            "shared.output_paths.resolve_linkedin_state_dir."
+            "Per-source state directory. If absent, resolved via the "
+            "registry's state_dir_fn for --source."
         ),
     )
     parser.add_argument(
@@ -273,25 +379,41 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 def main(argv: Sequence[str] | None = None) -> int:
     """Entrypoint for ``python -m cloris.worker``.
 
-    Steps: parse args → resolve state dir → write sidecar → execvp into
-    ``linkedin.session_orchestrator``. The ``return 0`` is only reached
-    when ``_exec`` is monkeypatched in tests; in production the process
-    image is replaced before this line.
+    Steps: parse args → resolve state dir via the registry → write
+    sidecar → execvp into the per-source orchestrator argv (also from
+    the registry). The ``return 0`` is only reached when ``_exec`` is
+    monkeypatched in tests; in production the process image is
+    replaced before this line.
+
+    Per Phase F Slice F1, this wrapper is source-generic: the only
+    LinkedIn-specific behavior left is the default value of ``--source``
+    so legacy callers (Slice 3 launch without ``--source``) keep working.
     """
 
     parser = _build_arg_parser()
     args = parser.parse_args(argv)
 
+    from cloris.launchers import LAUNCHERS
+
+    launcher = LAUNCHERS.get(args.source)
+    if launcher is None:
+        # Unknown source — exit non-zero so the spawn-side aggregator
+        # observes the failure rather than waiting forever for a
+        # sidecar that will never appear.
+        sys.stderr.write(
+            f"cloris.worker: unknown --source '{args.source}'. "
+            f"Registered: {sorted(LAUNCHERS.keys())}\n"
+        )
+        return 2
+
     if args.state_dir is not None:
         state_dir = Path(args.state_dir)
         state_dir.mkdir(parents=True, exist_ok=True)
     else:
-        from shared.output_paths import resolve_linkedin_state_dir
-
-        state_dir = resolve_linkedin_state_dir(brief_path=args.brief)
+        state_dir = launcher.state_dir_fn(args.brief)
 
     payload = build_sidecar(
-        source="linkedin",
+        source=args.source,
         brief_id=args.brief_id,
         brief_path=args.brief,
         output_dir=str(state_dir),
@@ -303,12 +425,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     write_sidecar(state_dir, payload)
 
-    argv_to_exec = build_session_orchestrator_argv(
-        brief_path=args.brief,
-        state_dir=str(state_dir),
-        input_mode=args.input_mode,
+    argv_to_exec = launcher.orchestrator_argv_fn(
+        args.brief,
+        str(state_dir),
         resume=(args.mode == "resume"),
     )
+    if _is_frozen():
+        # Frozen .app: dispatch in-process. Same PID, so the sidecar's
+        # ``pid`` field stays truthful for any later stop/probe.
+        return _dispatch_in_process(args.source, argv_to_exec)
     _exec(argv_to_exec)
     return 0
 

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cloris .app icon - full graphic.
+
+  Source for renders at 64x64 and above. Direct port of the
+  sewing-needles + yarn motion graphic in
+  cloris/frontend/src/components/Refining.svelte (the CREATING
+  loader), captured at one rest frame with concrete color values
+  from cloris/frontend/src/styles/tokens.css inlined (rsvg-convert
+  doesn't resolve CSS vars).
+
+  Background: cream (#f5efe1) - the canonical Cloris paper. Built
+  into the SVG via a full-viewport rect so the rendered PNG has the
+  cream background baked in (Apple's icon spec wants opaque pixels;
+  some recipients use Finder list views with non-cream backgrounds).
+
+  At sizes of 32 px or smaller, use icon-small.svg instead - at
+  small sizes the fabric stitch detail, two-needle composition,
+  and yarn-pull bezier collapse into pixel mush.
+-->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="1024"
+  height="1024"
+  viewBox="0 0 1024 1024"
+  shape-rendering="geometricPrecision"
+>
+  <rect width="1024" height="1024" fill="#f5efe1" />
+
+  <g transform="translate(80 240) scale(4.0)">
+
+    <g transform="translate(160, 95)">
+      <circle cx="0" cy="0" r="28" fill="#d4a53a" opacity="0.8" transform="translate(2, 2)" />
+      <circle cx="0" cy="0" r="28" fill="none" stroke="#6b4a2b" stroke-width="2" />
+      <path d="M -20,-10 C 0,-30 15,10 25,-5"
+            fill="none" stroke="#6b4a2b" stroke-width="1.5" opacity="0.5" />
+      <path d="M -25,5 C -10,15 5,-10 20,15"
+            fill="none" stroke="#6b4a2b" stroke-width="1.5" opacity="0.5" />
+    </g>
+
+    <path d="M 140,80 Q 120,110 80,60"
+          fill="none" stroke="#c67d5a" stroke-width="2.5" stroke-linecap="round" />
+
+    <g transform="translate(30, 60)">
+      <path d="M 0,0 Q 10,-5 20,0 Q 30,-5 40,0 L 40,50 L 0,50 Z"
+            fill="#c67d5a" transform="translate(2, 2)" opacity="0.7" />
+      <path d="M 0,0 Q 10,-5 20,0 Q 30,-5 40,0 L 40,50 L 0,50 Z"
+            fill="none" stroke="#6b4a2b" stroke-width="2" stroke-linejoin="round" />
+      <path d="M 5,10 L 15,10 M 25,10 L 35,10 M 5,20 L 15,20 M 25,20 L 35,20 M 5,30 L 15,30 M 25,30 L 35,30"
+            stroke="#6b4a2b" stroke-width="1.5" stroke-linecap="round" opacity="0.4" />
+    </g>
+
+    <g>
+      <line x1="45" y1="95" x2="90" y2="35"
+            stroke="#6b4a2b" stroke-width="4" stroke-linecap="round" />
+      <circle cx="45" cy="95" r="4" fill="#4a3220" />
+      <line x1="45" y1="95" x2="90" y2="35"
+            stroke="#f5efe1" stroke-width="1" stroke-linecap="round"
+            opacity="0.5" transform="translate(-1, 0)" />
+    </g>
+
+    <g>
+      <line x1="85" y1="95" x2="40" y2="35"
+            stroke="#6b4a2b" stroke-width="4" stroke-linecap="round" />
+      <circle cx="85" cy="95" r="4" fill="#4a3220" />
+      <line x1="85" y1="95" x2="40" y2="35"
+            stroke="#f5efe1" stroke-width="1" stroke-linecap="round"
+            opacity="0.5" transform="translate(-1, 0)" />
+    </g>
+  </g>
+</svg>

@@ -157,6 +157,49 @@ def _wait_until_ready(host: str, port: int, *, timeout: float = 5.0) -> None:
     )
 
 
+def _ensure_chrome_running_best_effort() -> None:
+    """Pre-boot Chrome on Cloris's dedicated CDP profile, best-effort.
+
+    Phase 0 ``chrome-launcher`` slice: the trial-day .app must not
+    require the recipient to open a Terminal and run
+    ``./launch-chrome.sh``. Auto-launching here means that by the
+    time the welcome surface polls ``/api/chrome-status``, Chrome is
+    either already up or currently spawning.
+
+    Best-effort because:
+
+    - On dev (running from the repo on a non-frozen Python),
+      ``shared/user_data_dir.should_use_user_data_dir()`` is false
+      and the launcher's profile path is the historical
+      ``~/.chrome-cdp``. Devs who already have a Chrome on that
+      profile pay no cost; the auto-launch no-ops via the
+      ``is_healthy`` short-circuit.
+    - On the recipient's machine, if Chrome.app isn't installed
+      ("they uninstalled it" / "they're on Chromium / Edge only"),
+      :func:`cloris.chrome_launcher.status` returns
+      ``missing_chrome`` and the welcome surface explains the
+      install path. The Cloris UI itself still loads — we never
+      block on Chrome here.
+
+    Logged but not raised. Errors don't gate the FastAPI boot.
+    """
+
+    try:
+        from cloris.chrome_launcher import ensure_running
+
+        result = ensure_running(force=False)
+        log.info(
+            "cloris.chrome_launcher: pre-boot status=%s message=%r",
+            result.state,
+            result.message,
+        )
+    except Exception as exc:
+        log.warning(
+            "cloris.chrome_launcher: pre-boot failed (best-effort): %r",
+            exc,
+        )
+
+
 def run_app(
     app: Any,
     *,
@@ -166,27 +209,38 @@ def run_app(
     server_factory: Optional[ServerFactory] = None,
     readiness_timeout: float = 5.0,
     shutdown_timeout: float = 5.0,
+    ensure_chrome: Optional[Callable[[], None]] = None,
 ) -> None:
     """Run the Cloris app process through one full lifecycle.
 
     Steps:
 
-    1. Build the server via ``server_factory`` (default uses uvicorn).
-    2. Start ``server.run()`` in a background daemon thread.
-    3. Poll ``/healthz`` until the server is reachable, or fail fast.
-    4. Hand off to ``launcher.open(url)`` (blocks until the window closes).
-    5. Set ``server.should_exit = True`` to ask uvicorn to wind down.
-    6. Join the server thread with a bounded timeout. On overrun, log one
+    1. Best-effort pre-boot Chrome on Cloris's dedicated CDP profile
+       (:func:`_ensure_chrome_running_best_effort`) so by the time
+       the recipient sees the welcome surface, Chrome is already up
+       or spawning. Pass a no-op via ``ensure_chrome`` to skip in
+       tests.
+    2. Build the server via ``server_factory`` (default uses uvicorn).
+    3. Start ``server.run()`` in a background daemon thread.
+    4. Poll ``/healthz`` until the server is reachable, or fail fast.
+    5. Hand off to ``launcher.open(url)`` (blocks until the window closes).
+    6. Set ``server.should_exit = True`` to ask uvicorn to wind down.
+    7. Join the server thread with a bounded timeout. On overrun, log one
        warning and return — daemon thread will be reaped at process exit.
 
-    The ``launcher`` and ``server_factory`` kwargs are the test seams. Both
-    default to production implementations when not provided.
+    The ``launcher``, ``server_factory``, and ``ensure_chrome`` kwargs
+    are the test seams. All default to production implementations when
+    not provided.
     """
 
     if launcher is None:
         launcher = PyWebviewLauncher()
     if server_factory is None:
         server_factory = _default_server_factory
+    if ensure_chrome is None:
+        ensure_chrome = _ensure_chrome_running_best_effort
+
+    ensure_chrome()
 
     resolved_port = _resolve_port(host, port)
     server = server_factory(app, host, resolved_port)

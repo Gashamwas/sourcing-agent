@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cloris .app icon - small-size variant.
+
+  Source for renders at 32x32 or smaller. The full graphic (icon-full.svg)
+  has fabric stitch lines, a two-needle counter-rotated
+  composition, yarn-pull bezier, and stitch detailing on the yarn
+  ball - all of which collapse into pixel mush at 16x16 and 32x32.
+
+  This variant is a deliberate visual reduction:
+    - one needle (not two)
+    - one yarn ball (no inner stitch detail)
+    - no fabric block
+    - no yarn pull bezier
+    - heavier strokes that survive aggressive pixel snapping
+
+  Same color palette as icon-full so the visual identity stays
+  consistent across icon sizes.
+
+  Background: cream (#f5efe1). Same baked-in opaque background
+  rationale as icon-full.svg.
+-->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  width="1024"
+  height="1024"
+  viewBox="0 0 1024 1024"
+  shape-rendering="geometricPrecision"
+>
+  <rect width="1024" height="1024" fill="#f5efe1" />
+
+  <g transform="translate(620 620)">
+    <circle cx="20" cy="20" r="220" fill="#d4a53a" opacity="0.55" />
+    <circle cx="0" cy="0" r="220" fill="#d4a53a" />
+    <circle cx="0" cy="0" r="220" fill="none" stroke="#6b4a2b" stroke-width="20" />
+    <path d="M -160,-80 C -80,-200 120,-180 180,-50"
+          fill="none" stroke="#6b4a2b" stroke-width="14" opacity="0.65" stroke-linecap="round" />
+  </g>
+
+  <g>
+    <line x1="180" y1="780" x2="700" y2="240"
+          stroke="#6b4a2b" stroke-width="42" stroke-linecap="round" />
+    <circle cx="180" cy="780" r="42" fill="#4a3220" />
+    <line x1="180" y1="780" x2="700" y2="240"
+          stroke="#f5efe1" stroke-width="8" stroke-linecap="round" opacity="0.55"
+          transform="translate(-10 -2)" />
+  </g>
+</svg>

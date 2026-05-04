@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Reference Info.plist for the Cloris .app bundle.
+
+  This file is NOT consumed by the build pipeline — PyInstaller
+  generates the actual Contents/Info.plist from the ``info_plist=...``
+  dict in cloris/packaging/cloris.spec at build time. This standalone
+  file mirrors the spec so an IT/security reviewer can audit the
+  full bundle metadata without reading Python.
+
+  When updating the .spec's ``info_plist`` dict, update this file
+  too. Drift is a notarization risk: ``codesign -dv --verbose=4
+  Cloris.app`` shows the actual embedded plist, which is what
+  matters; this file is just documentation.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Bundle identity -->
+    <key>CFBundleName</key>
+    <string>Cloris</string>
+    <key>CFBundleDisplayName</key>
+    <string>Cloris</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.cloris.app</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+
+    <!-- Version (keep both keys in sync) -->
+    <key>CFBundleShortVersionString</key>
+    <string>0.0.1</string>
+    <key>CFBundleVersion</key>
+    <string>0.0.1</string>
+
+    <!-- Executable + Icon (auto-set by PyInstaller from spec) -->
+    <key>CFBundleExecutable</key>
+    <string>Cloris</string>
+    <key>CFBundleIconFile</key>
+    <string>cloris.icns</string>
+
+    <!-- Minimum macOS: Monterey (2021). Universal 2 supported since
+         Big Sur (11), but 12 is python.org's universal2 floor. -->
+    <key>LSMinimumSystemVersion</key>
+    <string>12.0</string>
+
+    <!-- Display behavior -->
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSRequiresAquaSystemAppearance</key>
+    <false/>
+
+    <!-- Cloris is a regular UI app (Dock + menu bar), not a background
+         agent. -->
+    <key>LSUIElement</key>
+    <false/>
+
+    <!-- App Store category (informational; does not affect Gatekeeper) -->
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.business</string>
+
+    <!-- Network: Cloris talks to api.anthropic.com (HTTPS), LinkedIn
+         via the recipient's browser (not direct), and 127.0.0.1 for
+         its own UI + CDP. No arbitrary insecure loads; localhost
+         exception only. -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoads</key>
+        <false/>
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>127.0.0.1</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+            </dict>
+            <key>localhost</key>
+            <dict>
+                <key>NSExceptionAllowsInsecureHTTPLoads</key>
+                <true/>
+            </dict>
+        </dict>
+    </dict>
+
+    <!-- No NSCameraUsageDescription / NSMicrophoneUsageDescription /
+         NSLocationUsageDescription / NSContactsUsageDescription /
+         NSCalendarsUsageDescription / NSPhotoLibraryUsageDescription /
+         etc. — Cloris uses none of these. Adding any of these in the
+         spec WITHOUT also using the API would still trigger macOS
+         permission prompts. -->
+</dict>
+</plist>

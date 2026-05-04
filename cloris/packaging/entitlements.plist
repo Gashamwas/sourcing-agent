@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Cloris .app hardened-runtime entitlements.
+
+  Required for notarization (Apple notary service rejects apps
+  built after Jan 2020 without hardened runtime). Each entitlement
+  below has a specific reason — do not add others without a
+  documented justification, since each weakens the runtime sandbox.
+
+  Cited:
+  - https://developer.apple.com/documentation/security/hardened_runtime
+  - PyInstaller hardened-runtime gotchas:
+    https://github.com/pyinstaller/pyinstaller/issues/4629
+
+  Applied via codesign during the sign-app.sh pipeline:
+    codesign --options runtime --entitlements entitlements.plist ...
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!--
+      Required for Python in a frozen .app: CPython's bytecode
+      execution path triggers macOS's "unsigned executable memory"
+      detection under hardened runtime. Without this entitlement the
+      .app crashes with `MemoryError` during module loading on
+      first launch. PyInstaller-bundled apps universally need this.
+    -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+
+    <!--
+      Required for PyInstaller's _MEIPASS dylib loading. PyInstaller
+      extracts shared libraries to a temp directory at runtime;
+      hardened runtime's library validation rejects them because
+      they're not in the standard system paths. Disabling library
+      validation lets _MEIPASS work; the alternative (signing every
+      .dylib in _MEIPASS individually with the team identifier) is
+      what sign-app.sh does anyway, but library validation still
+      sees them as "non-system" and refuses.
+    -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+
+    <!--
+      Some Python C extensions JIT (notably anything using cffi or
+      cython with JIT codegen). Allowing JIT lets the runtime accept
+      the executable pages those extensions create.
+    -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!--
+      Cloris does NOT use the following entitlements (intentional).
+      The list is here as documentation so a future contributor knows
+      they were considered and rejected:
+
+      - com.apple.security.cs.disable-executable-page-protection
+        (broader than allow-jit; not needed)
+      - com.apple.security.cs.allow-dyld-environment-variables
+        (DYLD_* env vars; security risk, no Cloris path uses them)
+      - com.apple.security.device.audio-input
+      - com.apple.security.device.camera
+      - com.apple.security.personal-information.* (contacts, location, etc.)
+        (Cloris uses no privacy-protected APIs)
+      - com.apple.security.network.server
+        (Cloris's HTTP server is loopback-only on 127.0.0.1; macOS
+        does not require this entitlement for loopback)
+    -->
+</dict>
+</plist>
